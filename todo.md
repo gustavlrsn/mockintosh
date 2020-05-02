@@ -1,6 +1,6 @@
 # operating system
 
-- [x] displaying files
+- [x] display files
 - [ ] desktop icons
 - [ ] login system
 - [ ] chat
