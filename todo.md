@@ -15,4 +15,4 @@
 - [ ] music player
 - [ ] trello clone?
 - [ ] collaborative drawing
-- ... and whatever you can imagine
+- [ ] ...
