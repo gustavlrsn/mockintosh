@@ -1,7 +1,10 @@
-import '../styles/index.css'
+import "../styles/index.css";
+import logMessageForHackers from "../lib/logMessageForHackers";
 
 function MyApp({ Component, pageProps }) {
-  return <Component {...pageProps} />
+  logMessageForHackers();
+
+  return <Component {...pageProps} />;
 }
 
-export default MyApp
+export default MyApp;
