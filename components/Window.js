@@ -4,12 +4,12 @@ export default ({
   close,
   title,
   children,
-  defaultPosition = { x: 100, y: 75 },
+  defaultPosition = { x: 450, y: 50 },
 }) => {
   return (
-    <Draggable defaultPosition={defaultPosition}>
-      <div className=" text-sm border border-black  border-r-2 border-b-2 bg-white w-64 ">
-        <div className="border-b border-black h-5 flex items-center justify-center text-sm">
+    <Draggable handle=".handle" defaultPosition={defaultPosition}>
+      <div className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64 ">
+        <div className="handle border-b border-black h-5 flex items-center justify-center text-sm">
           <div
             className="bg-stripes"
             style={{ height: 11, width: 6, marginLeft: 1, marginRight: 1 }}
@@ -24,11 +24,10 @@ export default ({
             style={{ height: 11, marginLeft: 1, marginRight: 1 }}
           ></div>
           <span
-            className="chicago"
+            className="font-chicago"
             style={{
               marginLeft: 5,
               marginRight: 5,
-              fontFamily: "Chicago",
             }}
           >
             {title}
