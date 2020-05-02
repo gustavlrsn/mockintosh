@@ -4,8 +4,8 @@ import Window from "../components/window";
 import File from "../components/file";
 import { getFileContent } from "../lib/api";
 
-export default ({ openWindows }) => {
-  const [windows, setOpenWindows] = useState(openWindows);
+export default ({ initialWindows }) => {
+  const [windows, setOpenWindows] = useState(initialWindows);
 
   const closeWindow = (id) =>
     setOpenWindows([...windows.filter((window) => window.id !== id)]);
@@ -63,7 +63,7 @@ export default ({ openWindows }) => {
 };
 
 export async function getStaticProps() {
-  const openWindows = [
+  const initialWindows = [
     {
       id: "todo.md",
       type: "FILE",
@@ -79,6 +79,6 @@ export async function getStaticProps() {
   ];
 
   return {
-    props: { openWindows },
+    props: { initialWindows },
   };
 }
