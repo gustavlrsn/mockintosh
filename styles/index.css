@@ -1,23 +1,64 @@
-@import './button.css';
-
 @tailwind base;
 @tailwind components;
+
+@font-face {
+  font-family: "Chicago";
+  src: url("/pixChicago.woff");
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Arial";
+  src: url("/arial.woff");
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Arial";
+  src: url("/arial-bold.woff");
+  font-weight: bold;
+  font-style: normal;
+}
+
+/* In you css file where you want to use the font */
+.element {
+  font-family: "Chicago";
+  @apply tracking-widest;
+}
+
+body {
+  image-rendering: pixelated;
+  background-image: url("/corner-lb.png"), url("/corner-rb.png"), url("/bg.png");
+  background-position: left bottom, right bottom, left top;
+  background-repeat: no-repeat, no-repeat, repeat;
+  min-height: 100vh;
+}
+.corner {
+  background-image: url("/corner-lt.png"), url("/corner-rt.png");
+  background-position: left top, right top; /* this positions the second image */
+  background-repeat: no-repeat; /* this applies to both images */
+}
+
+* {
+  user-select: none;
+  image-rendering: pixelated;
+}
+
+.chicago {
+  font-family: "Chicago";
+  font-size: 8px;
+  @apply tracking-widest leading-none antialiased;
+}
+.arial {
+  font-family: "Arial";
+  font-size: 8px;
+}
+
+.bg-stripes {
+  image-rendering: pixelated;
+  background-image: url("/stripes.png");
+}
+
 @tailwind utilities;
-
-.hero {
-  width: 100%;
-  color: #333;
-}
-
-.title {
-  margin: 0;
-  width: 100%;
-  padding-top: 80px;
-  line-height: 1.15;
-  font-size: 48px;
-}
-
-.title,
-.description {
-  text-align: center;
-}
