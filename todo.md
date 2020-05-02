@@ -1,15 +1,15 @@
 # operating system
 
-- [x] display files
-- [x] window stack order
+- [x] windows and stack order
 - [ ] desktop icons
 - [ ] login system
-- [ ] chat
 - [ ] control panel
 - [ ] more easter eggs
 
-# app ideas
+# programs
 
-- games
-- collaborative drawing
-- whatever you/we can imagine..
+- [x] file viewer
+- [ ] chat
+- [ ] games
+- [ ] collaborative drawing
+- [ ] whatever you/we can imagine..
