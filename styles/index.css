@@ -22,12 +22,6 @@
   font-style: normal;
 }
 
-/* In you css file where you want to use the font */
-.element {
-  font-family: "Chicago";
-  @apply tracking-widest;
-}
-
 body {
   image-rendering: pixelated;
   background-image: url("/corner-lb.png"), url("/corner-rb.png"), url("/bg.png");
@@ -46,19 +40,54 @@ body {
   image-rendering: pixelated;
 }
 
-.chicago {
+.font-chicago {
   font-family: "Chicago";
   font-size: 8px;
-  @apply tracking-widest leading-none antialiased;
+
+  @apply tracking-widest leading-none;
+
+  /* filter: contrast(1);
+  font-smooth: never;
+  font-smoothing: none; */
 }
-.arial {
+
+.font-arial {
   font-family: "Arial";
   font-size: 8px;
+}
+
+.content a {
+  @apply border-b border-black;
+}
+
+.content h1,
+h2,
+h3,
+h4,
+h5 {
+  @apply mb-2 font-chicago;
+}
+
+.content ul {
+  @apply mb-3 list-square pl-4 leading-4;
+}
+.content .contains-task-list {
+  @apply list-none p-0;
+}
+
+.content p {
+  @apply mb-3 leading-4;
 }
 
 .bg-stripes {
   image-rendering: pixelated;
   background-image: url("/stripes.png");
+}
+.handle {
+  cursor: grab;
+}
+.react-draggable-dragging .handle {
+  cursor: grabbing !important;
 }
 
 @tailwind utilities;

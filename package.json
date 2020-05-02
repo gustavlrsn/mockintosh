@@ -7,11 +7,14 @@
     "start": "next start"
   },
   "dependencies": {
+    "gray-matter": "^4.0.2",
     "next": "^9.2.0",
     "next-fonts": "^1.1.0",
     "react": "^16.12.0",
     "react-dom": "^16.12.0",
-    "react-draggable": "^4.3.1"
+    "react-draggable": "^4.3.1",
+    "remark": "^12.0.0",
+    "remark-html": "^11.0.1"
   },
   "devDependencies": {
     "postcss-preset-env": "^6.7.0",
