@@ -1,6 +1,7 @@
 # operating system
 
 - [x] display files
+- [ ] window stack order
 - [ ] desktop icons
 - [ ] login system
 - [ ] chat
