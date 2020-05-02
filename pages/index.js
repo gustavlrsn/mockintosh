@@ -1,13 +1,25 @@
 import Head from "next/head";
 import { useState } from "react";
-import File from "../components/File";
+import Window from "../components/window";
+import File from "../components/file";
 import { getFileContent } from "../lib/api";
-import logMessageForHackers from "../lib/logMessageForHackers";
 
 export default ({ openWindows }) => {
   const [windows, setOpenWindows] = useState(openWindows);
+
   const closeWindow = (id) =>
     setOpenWindows([...windows.filter((window) => window.id !== id)]);
+
+  const setActiveWindow = (id) => {
+    if (windows[windows.length - 1].id !== id)
+      setOpenWindows([
+        ...windows.sort((a, b) => {
+          if (a.id === id) return 1;
+          if (b.id === id) return -1;
+          return 0;
+        }),
+      ]);
+  };
 
   return (
     <>
@@ -27,17 +39,20 @@ export default ({ openWindows }) => {
           <h1 className="font-chicago">Pluto</h1>
         </div>
         <div className="flex-grow">
-          {windows.map((window) => {
+          {windows.map((window, i) => {
             switch (window.type) {
               case "FILE":
                 return (
-                  <File
-                    key={window.id}
+                  <Window
                     title={window.id}
+                    key={window.id}
                     defaultPosition={window.defaultPosition}
-                    content={window.content}
                     close={() => closeWindow(window.id)}
-                  />
+                    onClick={() => setActiveWindow(window.id)}
+                    active={i === windows.length - 1}
+                  >
+                    <File content={window.content} />
+                  </Window>
                 );
             }
           })}

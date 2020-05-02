@@ -4,23 +4,30 @@ export default ({
   close,
   title,
   children,
+  active,
+  onClick,
   defaultPosition = { x: 450, y: 50 },
 }) => {
   return (
     <Draggable handle=".handle" defaultPosition={defaultPosition}>
-      <div className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64 ">
+      <div
+        className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64 "
+        onClick={onClick}
+      >
         <div className="handle border-b border-black h-5 flex items-center justify-center text-sm">
           <div
-            className="bg-stripes"
+            className={active ? "bg-stripes" : ""}
             style={{ height: 11, width: 6, marginLeft: 1, marginRight: 1 }}
           ></div>
           <button
-            className="border border-black focus:outline-none"
+            className={`border focus:outline-none ${
+              active ? "border-black" : "border-transparent"
+            }`}
             onClick={close}
             style={{ height: 11, width: 11 }}
           ></button>
           <div
-            className="bg-stripes flex-grow"
+            className={`flex-grow ${active && "bg-stripes"}`}
             style={{ height: 11, marginLeft: 1, marginRight: 1 }}
           ></div>
           <span
@@ -33,7 +40,7 @@ export default ({
             {title}
           </span>
           <div
-            className="bg-stripes flex-grow"
+            className={`flex-grow ${active && "bg-stripes"}`}
             style={{ height: 11, marginLeft: 1, marginRight: 1 }}
           ></div>
         </div>
