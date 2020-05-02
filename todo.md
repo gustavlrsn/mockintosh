@@ -11,6 +11,8 @@
 
 - [x] file viewer
 - [ ] chat
-- [ ] games
+- [ ] multiplayer minesweeper?
+- [ ] music player
+- [ ] trello clone?
 - [ ] collaborative drawing
-- [ ] whatever you/we can imagine..
+- ... and whatever you can imagine
