@@ -1,6 +1,7 @@
 # operating system
 
 - [x] windows and stack order
+- [ ] hard drive
 - [ ] desktop icons
 - [ ] login system
 - [ ] control panel
