@@ -16,7 +16,7 @@ export default ({ close }) => {
           , but here you are invited to help build the experience further on{" "}
           <a
             className="underline"
-            href="https://github.com/plutocomputerclub/plutocomputerclub"
+            href="https://github.com/gustavlrsn/plutocomputerclub"
             target="_blank"
           >
             GitHub
