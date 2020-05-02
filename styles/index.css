@@ -36,7 +36,7 @@ body {
 }
 
 * {
-  user-select: none;
+  @apply select-none;
   image-rendering: pixelated;
 }
 
@@ -54,6 +54,11 @@ body {
 .font-arial {
   font-family: "Arial";
   font-size: 8px;
+}
+
+::selection {
+  color: white;
+  background: rgba(0, 0, 0, 0.99);
 }
 
 .content a {
@@ -75,8 +80,22 @@ h5 {
   @apply list-none p-0;
 }
 
+.content pre {
+  @apply p-1 -mt-1 border border-dashed border-black overflow-hidden overflow-x-scroll cursor-text;
+  font-family: "Courier";
+  font-size: 9px;
+  user-select: text;
+}
+.content code {
+  user-select: text;
+}
+
 .content p {
   @apply mb-3 leading-4;
+}
+
+.content hr {
+  @apply my-4 border-black;
 }
 
 .bg-stripes {
