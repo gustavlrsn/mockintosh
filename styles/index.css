@@ -95,7 +95,7 @@ h5 {
 }
 
 .content hr {
-  @apply my-4 border-black;
+  @apply my-4 border-black border-dotted;
 }
 
 .bg-stripes {
