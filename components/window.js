@@ -5,15 +5,16 @@ export default ({
   title,
   children,
   active,
-  onClick,
+  setActive,
   defaultPosition = { x: 450, y: 50 },
 }) => {
   return (
-    <Draggable handle=".handle" defaultPosition={defaultPosition}>
-      <div
-        className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64 "
-        onClick={onClick}
-      >
+    <Draggable
+      handle=".handle"
+      defaultPosition={defaultPosition}
+      onMouseDown={setActive}
+    >
+      <div className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64 ">
         <div className="handle border-b border-black h-5 flex items-center justify-center text-sm">
           <div
             className={active ? "bg-stripes" : ""}

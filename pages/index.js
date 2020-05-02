@@ -48,7 +48,7 @@ export default ({ openWindows }) => {
                     key={window.id}
                     defaultPosition={window.defaultPosition}
                     close={() => closeWindow(window.id)}
-                    onClick={() => setActiveWindow(window.id)}
+                    setActive={() => setActiveWindow(window.id)}
                     active={i === windows.length - 1}
                   >
                     <File content={window.content} />
