@@ -1,4 +1,4 @@
-![dead mac symbol](/dead.png)
+![dead mac symbol](https://plutocomputer.club/dead.png)
 
 # Welcome
 
