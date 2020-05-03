@@ -44,7 +44,7 @@ body {
   font-family: "Chicago";
   font-size: 8px;
 
-  @apply tracking-widest leading-none;
+  @apply tracking-widest;
 
   /* filter: contrast(1);
   font-smooth: never;
@@ -88,6 +88,10 @@ h5 {
 }
 .content code {
   user-select: text;
+}
+
+.content img {
+  @apply mx-auto mb-4;
 }
 
 .content p {

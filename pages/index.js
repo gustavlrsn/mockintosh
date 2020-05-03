@@ -27,16 +27,22 @@ export default ({ initialWindows }) => {
         <title>Pluto Computer Club</title>
       </Head>
       <div className="flex flex-col min-h-screen">
-        <div
-          className="corner bg-white px-5 border-b border-black flex items-center "
-          style={{ height: 19 }}
-        >
-          <img
-            src="/filledcircle.svg"
-            className="mr-2"
-            style={{ height: 11, width: 11 }}
-          />
-          <h1 className="font-chicago">Pluto</h1>
+        <div className="corner bg-white px-4 h-5 border-b border-black flex items-stretch justify-between">
+          <div className="flex items-center">
+            <img
+              src="/filledcircle.svg"
+              className="mr-2"
+              style={{ height: 11, width: 11 }}
+            />
+            <h1 className="font-chicago">Pluto</h1>
+          </div>
+          <a
+            className="block flex items-center px-1 font-chicago active:bg-black active:text-white"
+            target="_blank"
+            href="https://github.com/plutocomputerclub/pluto"
+          >
+            Source
+          </a>
         </div>
         <div className="flex-grow">
           {windows.map((window, i) => {
@@ -64,6 +70,12 @@ export default ({ initialWindows }) => {
 
 export async function getStaticProps() {
   const initialWindows = [
+    {
+      id: "CONTRIBUTING.md",
+      type: "FILE",
+      defaultPosition: { x: 750, y: 400 },
+      content: await getFileContent("CONTRIBUTING.md"),
+    },
     {
       id: "todo.md",
       type: "FILE",
