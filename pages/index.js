@@ -24,7 +24,11 @@ export default ({ initialWindows }) => {
   return (
     <>
       <Head>
-        <title>Pluto Computer Club</title>
+        <title>Pluto</title>
+        <meta property="og:title" content="Pluto" />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://plutocomputer.club" />
+        <meta property="og:image" content="https://plutocomputer.club/og.png" />
       </Head>
       <div className="flex flex-col min-h-screen">
         <div className="corner bg-white px-4 h-5 border-b border-black flex items-stretch justify-between">
