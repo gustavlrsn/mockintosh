@@ -3,12 +3,18 @@ import { useState } from "react";
 import Window from "../components/window";
 import File from "../components/file";
 import { getFileContent } from "../lib/api";
+import PhotoBooth from "../components/photobooth";
+import Icon from "../components/icon";
 
 export default ({ initialWindows }) => {
   const [windows, setOpenWindows] = useState(initialWindows);
 
   const closeWindow = (id) =>
     setOpenWindows([...windows.filter((window) => window.id !== id)]);
+
+  const openWindow = (window) => {
+    setOpenWindows([...windows, window]);
+  };
 
   const setActiveWindow = (id) => {
     if (windows[windows.length - 1].id !== id)
@@ -64,8 +70,38 @@ export default ({ initialWindows }) => {
                     <File content={window.content} />
                   </Window>
                 );
+              case "PHOTOBOOTH":
+                return (
+                  <Window
+                    title={window.id}
+                    key={window.id}
+                    defaultPosition={window.defaultPosition}
+                    close={() => closeWindow(window.id)}
+                    setActive={() => setActiveWindow(window.id)}
+                    active={i === windows.length - 1}
+                    width={483}
+                  >
+                    <PhotoBooth active={i === window.length - 1} />
+                  </Window>
+                );
             }
           })}
+          <div className="flex justify-end p-4">
+            <Icon
+              img="/icons/photo.png"
+              title="Photo booth"
+              openWindow={() =>
+                openWindow({
+                  id: "Photo booth",
+                  type: "PHOTOBOOTH",
+                  defaultPosition: { x: 250, y: 300 },
+                })
+              }
+              open={Boolean(
+                windows.find((window) => window.id === "Photo booth")
+              )}
+            />
+          </div>
         </div>
       </div>
     </>

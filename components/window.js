@@ -5,6 +5,7 @@ export default ({
   title,
   children,
   active,
+  width,
   setActive,
   defaultPosition = { x: 450, y: 50 },
 }) => {
@@ -14,7 +15,10 @@ export default ({
       defaultPosition={defaultPosition}
       onMouseDown={setActive}
     >
-      <div className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64">
+      <div
+        className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64"
+        style={{ width }}
+      >
         <div className="handle border-b border-black h-5 flex items-center justify-center text-sm">
           <div
             className={active ? "bg-stripes" : ""}
