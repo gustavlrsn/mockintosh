@@ -19,12 +19,12 @@ const getDefaultPosition = (openWindows) => {
       y: openWindows[openWindows.length - 1].defaultPosition.y,
     };
     return {
-      x: posBelow.x > 15 ? posBelow.x - 15 : posBelow.x + 15,
-      y: posBelow.y > 15 ? posBelow.y + 15 : posBelow.y + 15,
+      x: posBelow.x > 25 ? posBelow.x - 25 : posBelow.x + 25,
+      y: posBelow.y > 25 ? posBelow.y + 25 : posBelow.y + 25,
     };
   } else {
     return {
-      x: 150,
+      x: 130,
       y: 15,
     };
   }
