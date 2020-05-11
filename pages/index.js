@@ -85,7 +85,6 @@ export default ({ initialWindows, icons }) => {
                   dropdownOpen ? "inverted bg-white" : ""
                 }`}
                 onMouseDown={() => setDropdownOpen(!dropdownOpen)}
-                // onClick={() => setDropdownOpen(!dropdownOpen)}
               >
                 <div className="flex items-center">
                   <img
@@ -97,25 +96,32 @@ export default ({ initialWindows, icons }) => {
                 </div>
               </button>
               {dropdownOpen && (
-                <div className="absolute w-40 py-1 flex flex-col items-stretch left-0 top-0 mt-5 font-chicago bg-white border-t-0 border-b-2 border-r-2 border border-black">
-                  {/* <div className="px-4 py-1 hover:bg-black hover:text-white">
+                <>
+                  <button
+                    onClick={() => setDropdownOpen(false)}
+                    tabIndex="-1"
+                    className="z-10 fixed inset-0 h-full w-full cursor-default"
+                  ></button>
+                  <div className="absolute w-40 z-20 py-1 flex flex-col items-stretch left-0 top-0 mt-5 font-chicago bg-white border-t-0 border-b-2 border-r-2 border border-black">
+                    {/* <div className="px-4 py-1 hover:bg-black hover:text-white">
                     About This Computer...
                   </div>
                   <hr className="border-b-1 border-black border-dotted my-1" /> */}
-                  <button
-                    className="px-4 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
-                    onClick={toggleFullscreen}
-                  >
-                    Full Screen
-                  </button>
-                  <a
-                    className="px-4 py-1 block hover:bg-black hover:text-white"
-                    href="https://github.com/plutocomputerclub/pluto"
-                    target="_blank"
-                  >
-                    View Source
-                  </a>
-                </div>
+                    <button
+                      className="px-4 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
+                      onClick={toggleFullscreen}
+                    >
+                      Full Screen
+                    </button>
+                    <a
+                      className="px-4 py-1 block hover:bg-black hover:text-white"
+                      href="https://github.com/plutocomputerclub/pluto"
+                      target="_blank"
+                    >
+                      View Source
+                    </a>
+                  </div>
+                </>
               )}
             </div>
           </div>
