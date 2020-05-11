@@ -8,6 +8,10 @@
   - [x] file icon
   - [x] folder icon
   - [ ] trash icon and dragging icons to trash
+- [ ] fix crispier pixelated font
+- [ ] resizeable windows
+- [x] menu dropdown
+- [ ] about this computer popup
 - [ ] login system
 - [ ] control panel
 - [ ] "app store"

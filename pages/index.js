@@ -5,6 +5,7 @@ import File from "../components/file";
 import { getFileContent } from "../lib/api";
 import PhotoBooth from "../components/photobooth";
 import Icon from "../components/icon";
+import toggleFullscreen from "../utils/toggleFullscreen";
 
 const windowTypes = {
   PHOTO_BOOTH: "PHOTO_BOOTH",
@@ -32,7 +33,7 @@ const getDefaultPosition = (openWindows) => {
 
 export default ({ initialWindows, icons }) => {
   const [openWindows, setOpenWindows] = useState(initialWindows);
-
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const closeWindow = (title) =>
     setOpenWindows([...openWindows.filter((window) => window.title !== title)]);
 
@@ -77,22 +78,46 @@ export default ({ initialWindows, icons }) => {
           style={{ width: 512, height: 342 }}
           className="flex corner-bottom flex-col overflow-hidden"
         >
-          <div className="corner-top bg-white px-4 h-5 border-b border-black flex items-stretch justify-between">
-            <div className="flex items-center">
-              <img
-                src="/pluto.png"
-                className="mr-2"
-                style={{ height: 11, width: 11 }}
-              />
-              <h1 className="font-chicago">Pluto</h1>
+          <div className="corner-top bg-white px-2 h-5 border-b border-black flex items-stretch justify-between">
+            <div className="flex items-stretch relative">
+              <button
+                className={`focus:outline-none px-2 mr-1 ${
+                  dropdownOpen ? "inverted bg-white" : ""
+                }`}
+                onMouseDown={() => setDropdownOpen(!dropdownOpen)}
+                // onClick={() => setDropdownOpen(!dropdownOpen)}
+              >
+                <div className="flex items-center">
+                  <img
+                    src="/pluto.png"
+                    className="mr-2"
+                    style={{ height: 11, width: 11 }}
+                  />
+                  <h1 className="font-chicago">Pluto</h1>
+                </div>
+              </button>
+              {dropdownOpen && (
+                <div className="absolute w-40 py-1 flex flex-col items-stretch left-0 top-0 mt-5 font-chicago bg-white border-t-0 border-b-2 border-r-2 border border-black">
+                  {/* <div className="px-4 py-1 hover:bg-black hover:text-white">
+                    About This Computer...
+                  </div>
+                  <hr className="border-b-1 border-black border-dotted my-1" /> */}
+                  <button
+                    className="px-4 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
+                    onClick={toggleFullscreen}
+                  >
+                    Full Screen
+                  </button>
+                  <a
+                    className="px-4 py-1 block hover:bg-black hover:text-white"
+                    href="https://github.com/plutocomputerclub/pluto"
+                    target="_blank"
+                  >
+                    View Source
+                  </a>
+                </div>
+              )}
             </div>
-            <a
-              className="block flex items-center px-1 font-chicago active:bg-black active:text-white"
-              target="_blank"
-              href="https://github.com/plutocomputerclub/pluto"
-            >
-              Source
-            </a>
           </div>
 
           {/* Windows */}
