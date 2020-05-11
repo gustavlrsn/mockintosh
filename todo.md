@@ -1,19 +1,31 @@
 # operating system
 
 - [x] windows and stack order
-- [ ] hard drive
-- [/] desktop icons
+- [x] folders
+- [x] desktop icons
+  - [x] photo booth icon
+  - [ ] hard drive icon
+  - [x] file icon
+  - [x] folder icon
+  - [ ] trash icon and dragging icons to trash
 - [ ] login system
 - [ ] control panel
-- [ ] more easter eggs
+- [ ] "app store"
 
 # programs
 
 - [x] file viewer
 - [x] photo booth
+  - [ ] handle no camera available
+  - [ ] icon not active state
 - [ ] chat
+- [ ] plutogram
+- [ ] paint
+- [ ] "browser"
+- [ ] "terminal"
 - [ ] multiplayer minesweeper?
 - [ ] music player
+- [ ] processing/p5js visualisations
 - [ ] trello clone?
 - [ ] collaborative drawing
 - [ ] ...
