@@ -29,10 +29,27 @@ body {
   background-repeat: no-repeat, no-repeat, repeat;
   min-height: 100vh;
 }
-.corner {
+.corner-top {
   background-image: url("/corner-lt.png"), url("/corner-rt.png");
   background-position: left top, right top; /* this positions the second image */
   background-repeat: no-repeat; /* this applies to both images */
+}
+
+.corner-bottom {
+  background-image: url("/corner-lb.png"), url("/corner-rb.png"), url("/bg.png");
+  background-position: left bottom, right bottom, left top;
+  background-repeat: no-repeat, no-repeat, repeat;
+}
+
+.bg-checkers {
+  background-image: url("/checkers.png");
+  background-position: left top;
+  background-repeat: repeat;
+  /* filter: invert(1); */
+}
+
+.inverted {
+  filter: invert(1);
 }
 
 * {
@@ -43,6 +60,7 @@ body {
 .font-chicago {
   font-family: "Chicago";
   font-size: 8px;
+  line-height: 9px;
 
   @apply tracking-widest;
 

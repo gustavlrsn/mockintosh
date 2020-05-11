@@ -1,19 +1,18 @@
 import Draggable from "react-draggable"; // The default
 
 export default ({
-  close,
-  title,
+  closeWindow,
+  window,
   children,
   active,
   width,
-  setActive,
-  defaultPosition = { x: 450, y: 50 },
+  bringWindowToFront,
 }) => {
   return (
     <Draggable
       handle=".handle"
-      defaultPosition={defaultPosition}
-      onMouseDown={setActive}
+      defaultPosition={window.defaultPosition}
+      onMouseDown={() => bringWindowToFront(window.title)}
     >
       <div
         className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64"
@@ -28,7 +27,7 @@ export default ({
             className={`border focus:outline-none ${
               active ? "border-black" : "border-transparent"
             }`}
-            onClick={close}
+            onClick={() => closeWindow(window.title)}
             style={{ height: 11, width: 11 }}
           ></button>
           <div
@@ -42,7 +41,7 @@ export default ({
               marginRight: 5,
             }}
           >
-            {title}
+            {window.title}
           </span>
           <div
             className={`flex-grow ${active && "bg-stripes"}`}

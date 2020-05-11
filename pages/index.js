@@ -6,22 +6,58 @@ import { getFileContent } from "../lib/api";
 import PhotoBooth from "../components/photobooth";
 import Icon from "../components/icon";
 
-export default ({ initialWindows }) => {
-  const [windows, setOpenWindows] = useState(initialWindows);
+const windowTypes = {
+  PHOTO_BOOTH: "PHOTO_BOOTH",
+  FILE: "FILE",
+  FOLDER: "FOLDER",
+};
 
-  const closeWindow = (id) =>
-    setOpenWindows([...windows.filter((window) => window.id !== id)]);
+const getDefaultPosition = (openWindows) => {
+  if (openWindows.length) {
+    const posBelow = {
+      x: openWindows[openWindows.length - 1].defaultPosition.x,
+      y: openWindows[openWindows.length - 1].defaultPosition.y,
+    };
+    return {
+      x: posBelow.x > 15 ? posBelow.x - 15 : posBelow.x + 15,
+      y: posBelow.y > 15 ? posBelow.y + 15 : posBelow.y + 15,
+    };
+  } else {
+    return {
+      x: 150,
+      y: 15,
+    };
+  }
+};
+
+export default ({ initialWindows, icons }) => {
+  const [openWindows, setOpenWindows] = useState(initialWindows);
+
+  const closeWindow = (title) =>
+    setOpenWindows([...openWindows.filter((window) => window.title !== title)]);
 
   const openWindow = (window) => {
-    setOpenWindows([...windows, window]);
+    const windowIsOpen = Boolean(
+      openWindows.find((openWindow) => openWindow.title === window.title)
+    );
+
+    if (windowIsOpen) {
+      bringWindowToFront(window.title);
+    } else {
+      const defaultPosition = getDefaultPosition(openWindows);
+      setOpenWindows([...openWindows, { defaultPosition, ...window }]);
+    }
   };
 
-  const setActiveWindow = (id) => {
-    if (windows[windows.length - 1].id !== id)
+  const bringWindowToFront = (title) => {
+    if (
+      openWindows.length &&
+      openWindows[openWindows.length - 1].title !== title
+    )
       setOpenWindows([
-        ...windows.sort((a, b) => {
-          if (a.id === id) return 1;
-          if (b.id === id) return -1;
+        ...openWindows.sort((a, b) => {
+          if (a.title === title) return 1;
+          if (b.title === title) return -1;
           return 0;
         }),
       ]);
@@ -36,71 +72,95 @@ export default ({ initialWindows }) => {
         <meta property="og:url" content="https://plutocomputer.club" />
         <meta property="og:image" content="https://plutocomputer.club/og.png" />
       </Head>
-      <div className="flex flex-col min-h-screen">
-        <div className="corner bg-white px-4 h-5 border-b border-black flex items-stretch justify-between">
-          <div className="flex items-center">
-            <img
-              src="/filledcircle.svg"
-              className="mr-2"
-              style={{ height: 11, width: 11 }}
-            />
-            <h1 className="font-chicago">Pluto</h1>
+      <div className="flex justify-center items-center min-h-screen bg-black">
+        <div
+          style={{ width: 512, height: 342 }}
+          className="flex corner-bottom flex-col overflow-hidden"
+        >
+          <div className="corner-top bg-white px-4 h-5 border-b border-black flex items-stretch justify-between">
+            <div className="flex items-center">
+              <img
+                src="/pluto.png"
+                className="mr-2"
+                style={{ height: 11, width: 11 }}
+              />
+              <h1 className="font-chicago">Pluto</h1>
+            </div>
+            <a
+              className="block flex items-center px-1 font-chicago active:bg-black active:text-white"
+              target="_blank"
+              href="https://github.com/plutocomputerclub/pluto"
+            >
+              Source
+            </a>
           </div>
-          <a
-            className="block flex items-center px-1 font-chicago active:bg-black active:text-white"
-            target="_blank"
-            href="https://github.com/plutocomputerclub/pluto"
-          >
-            Source
-          </a>
-        </div>
-        <div className="flex-grow">
-          {windows.map((window, i) => {
-            switch (window.type) {
-              case "FILE":
-                return (
-                  <Window
-                    title={window.id}
-                    key={window.id}
-                    defaultPosition={window.defaultPosition}
-                    close={() => closeWindow(window.id)}
-                    setActive={() => setActiveWindow(window.id)}
-                    active={i === windows.length - 1}
-                  >
-                    <File content={window.content} />
-                  </Window>
-                );
-              case "PHOTOBOOTH":
-                return (
-                  <Window
-                    title={window.id}
-                    key={window.id}
-                    defaultPosition={window.defaultPosition}
-                    close={() => closeWindow(window.id)}
-                    setActive={() => setActiveWindow(window.id)}
-                    active={i === windows.length - 1}
-                    width={483}
-                  >
-                    <PhotoBooth active={i === window.length - 1} />
-                  </Window>
-                );
-            }
-          })}
-          <div className="flex justify-end p-4">
-            <Icon
-              img="/icons/photo.png"
-              title="Photo booth"
-              openWindow={() =>
-                openWindow({
-                  id: "Photo booth",
-                  type: "PHOTOBOOTH",
-                  defaultPosition: { x: 250, y: 300 },
-                })
+
+          {/* Windows */}
+          <div className="flex-grow ">
+            {openWindows.map((window, i) => {
+              switch (window.type) {
+                case windowTypes.FOLDER:
+                  return (
+                    <Window
+                      key={window.title}
+                      window={window}
+                      closeWindow={closeWindow}
+                      bringWindowToFront={bringWindowToFront}
+                      active={i === openWindows.length - 1}
+                    >
+                      <div className="p-5 overflow-hidden flex">
+                        {window.payload.icons.map((icon) => (
+                          <Icon
+                            key={icon.title}
+                            icon={icon}
+                            openWindow={openWindow}
+                            openWindows={openWindows}
+                          />
+                        ))}
+                      </div>
+                    </Window>
+                  );
+                case windowTypes.FILE:
+                  return (
+                    <Window
+                      key={window.title}
+                      window={window}
+                      closeWindow={closeWindow}
+                      bringWindowToFront={bringWindowToFront}
+                      active={i === openWindows.length - 1}
+                    >
+                      <File {...window.payload} />
+                    </Window>
+                  );
+                case windowTypes.PHOTO_BOOTH:
+                  return (
+                    <Window
+                      key={window.title}
+                      window={window}
+                      closeWindow={closeWindow}
+                      bringWindowToFront={bringWindowToFront}
+                      active={i === openWindows.length - 1}
+                      width={259}
+                    >
+                      <PhotoBooth active={i === window.length - 1} />
+                    </Window>
+                  );
               }
-              open={Boolean(
-                windows.find((window) => window.id === "Photo booth")
-              )}
-            />
+            })}
+
+            {/* Icons */}
+            <div className="flex justify-end py-3 px-2">
+              <div className="grid grid-cols-1 gap-0">
+                {icons.map((icon) => (
+                  <Icon
+                    key={icon.title}
+                    icon={icon}
+                    openWindow={openWindow}
+                    openWindows={openWindows}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -109,28 +169,52 @@ export default ({ initialWindows }) => {
 };
 
 export async function getStaticProps() {
-  const initialWindows = [
+  const initialWindows = [];
+
+  const icons = [
     {
-      id: "CONTRIBUTING.md",
-      type: "FILE",
-      defaultPosition: { x: 750, y: 400 },
-      content: await getFileContent("CONTRIBUTING.md"),
+      title: "Photo booth",
+      type: windowTypes.PHOTO_BOOTH,
+      img: "/icons/film.png",
+      payload: {},
     },
+
     {
-      id: "todo.md",
-      type: "FILE",
-      defaultPosition: { x: 420, y: 100 },
-      content: await getFileContent("todo.md"),
-    },
-    {
-      id: "README.md",
-      type: "FILE",
-      defaultPosition: { x: 75, y: 65 },
-      content: await getFileContent("README.md"),
+      title: "Development",
+      type: windowTypes.FOLDER,
+      img: "/icons/folder.png",
+      payload: {
+        icons: [
+          {
+            title: "README.md",
+            type: windowTypes.FILE,
+            img: "/icons/file.png",
+            payload: {
+              content: await getFileContent("README.md"),
+            },
+          },
+          {
+            title: "CONTRIBUTING.md",
+            type: windowTypes.FILE,
+            img: "/icons/file.png",
+            payload: {
+              content: await getFileContent("CONTRIBUTING.md"),
+            },
+          },
+          {
+            title: "todo.md",
+            type: windowTypes.FILE,
+            img: "/icons/file.png",
+            payload: {
+              content: await getFileContent("todo.md"),
+            },
+          },
+        ],
+      },
     },
   ];
 
   return {
-    props: { initialWindows },
+    props: { initialWindows, icons },
   };
 }
