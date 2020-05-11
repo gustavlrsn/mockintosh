@@ -23,11 +23,11 @@ export default ({}) => {
   }
 
   function paintToCanvas() {
-    const width = 480;
-    const height = 360;
+    const width = 256;
+    const height = 192;
 
-    const thumbnailWidth = 96;
-    const thumbnailHeight = 72;
+    const thumbnailWidth = 60;
+    const thumbnailHeight = 45;
 
     video.current.setAttribute("width", width);
     video.current.setAttribute("height", width);
@@ -102,7 +102,7 @@ export default ({}) => {
 
   return (
     <div>
-      <canvas ref={canvas} className="" style={{ height: 360 }} />
+      <canvas ref={canvas} className="" style={{ height: 192 }} />
       <video ref={video} className="hidden" />
 
       <canvas ref={thumbnailCanvas} className="hidden" />
@@ -110,7 +110,7 @@ export default ({}) => {
 
       <div>
         <button
-          className="border rounded my-2 block mx-auto focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+          className="border rounded my-1 block mx-auto focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
           onClick={takePhoto}
         >
           Take photo
@@ -118,14 +118,30 @@ export default ({}) => {
       </div>
 
       <div className="overflow-x-scroll">
-        <div className="flex overflow-x-auto bg-black h-20 py-1 border-t border-black">
+        <div className="flex overflow-x-auto bg-black py-1 border-t-2 border-black">
           {photos.map(({ full, thumbnail, time }) => (
-            <div key={time} className="w-24 flex-none ml-1">
+            <div key={time} className=" flex-none ml-1">
               <a href={full} download={`pluto-photobooth-${time}`}>
                 <img className="" src={thumbnail} />
               </a>
             </div>
           ))}
+          <div
+            className="bg-checkers inverted ml-1 flex-none"
+            style={{ width: 60, height: 45 }}
+          ></div>
+          <div
+            className="bg-checkers inverted ml-1 flex-none"
+            style={{ width: 60, height: 45 }}
+          ></div>
+          <div
+            className="bg-checkers inverted ml-1 flex-none"
+            style={{ width: 60, height: 45 }}
+          ></div>
+          <div
+            className="bg-checkers inverted ml-1 flex-none"
+            style={{ width: 60, height: 45 }}
+          ></div>
         </div>
       </div>
     </div>
@@ -137,8 +153,8 @@ function floydSteinbergDithering(pixels, width, height) {
     return (x + y * width) * 4;
   }
 
-  for (let y = 0; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
       const red = pixels.data[index(x, y, width)];
       const green = pixels.data[index(x, y, width) + 1];
       const blue = pixels.data[index(x, y, width) + 2];
