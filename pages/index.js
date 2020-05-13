@@ -1,5 +1,5 @@
 import Head from "next/head";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Window from "../components/window";
 import File from "../components/file";
 import { getFileContent } from "../lib/api";
@@ -33,6 +33,7 @@ const getDefaultPosition = (openWindows) => {
 };
 
 export default ({ initialWindows, icons }) => {
+  const [showingSplashscreen, setSplashScreen] = useState(true);
   const [openWindows, setOpenWindows] = useState(initialWindows);
   const [zoomed, setZoomed] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -66,6 +67,10 @@ export default ({ initialWindows, icons }) => {
       ]);
   };
 
+  useEffect(() => {
+    setTimeout(() => setSplashScreen(false), 1000);
+  }, []);
+
   const title = `pluto ${version}`;
   return (
     <>
@@ -90,7 +95,7 @@ export default ({ initialWindows, icons }) => {
       <div className="flex justify-center items-center min-h-screen bg-black">
         <div
           style={{ width: 512, height: 342, ...(zoomed && { zoom: 2 }) }}
-          className="flex corner-bottom flex-col overflow-hidden"
+          className="flex corner flex-col overflow-hidden relative"
         >
           <div className="corner-top bg-white px-2 h-5 border-b border-black flex items-stretch justify-between">
             <div className="flex items-stretch relative">
@@ -114,7 +119,7 @@ export default ({ initialWindows, icons }) => {
                   <button
                     onClick={() => setDropdownOpen(false)}
                     tabIndex="-1"
-                    className="z-10 fixed inset-0 h-full w-full cursor-default"
+                    className="z-10 fixed inset-0 h-full w-full cursor-default focus:outline-none"
                   ></button>
                   <div className="absolute w-40 z-20 py-1 flex flex-col items-stretch left-0 top-0 mt-5 font-chicago bg-white border-t-0 border-b-2 border-r-2 border border-black">
                     {/* <div className="px-4 py-1 hover:bg-black hover:text-white">
@@ -145,7 +150,6 @@ export default ({ initialWindows, icons }) => {
               )}
             </div>
           </div>
-
           {/* Windows */}
           <div className="flex-grow ">
             {openWindows.map((window, i) => {
@@ -213,6 +217,11 @@ export default ({ initialWindows, icons }) => {
               </div>
             </div>
           </div>
+          {showingSplashscreen && (
+            <div className="absolute z-100  corner  top-0 bottom-0 right-0 left-0 flex items-center justify-center">
+              <img src="/icons/happy.png" />
+            </div>
+          )}
         </div>
       </div>
     </>

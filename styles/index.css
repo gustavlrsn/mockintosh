@@ -23,11 +23,7 @@
 }
 
 body {
-  image-rendering: pixelated;
-  background-image: url("/corner-lb.png"), url("/corner-rb.png"), url("/bg.png");
-  background-position: left bottom, right bottom, left top;
-  background-repeat: no-repeat, no-repeat, repeat;
-  min-height: 100vh;
+  @apply bg-black min-h-screen;
 }
 .corner-top {
   background-image: url("/corner-lt.png"), url("/corner-rt.png");
@@ -35,10 +31,11 @@ body {
   background-repeat: no-repeat; /* this applies to both images */
 }
 
-.corner-bottom {
-  background-image: url("/corner-lb.png"), url("/corner-rb.png"), url("/bg.png");
-  background-position: left bottom, right bottom, left top;
-  background-repeat: no-repeat, no-repeat, repeat;
+.corner {
+  background-image: url("/corner-lt.png"), url("/corner-rt.png"),
+    url("/corner-lb.png"), url("/corner-rb.png"), url("/bg.png");
+  background-position: left top, right top, left bottom, right bottom, left top;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat;
 }
 
 .bg-checkers {
