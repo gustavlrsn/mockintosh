@@ -25,6 +25,7 @@
 body {
   @apply bg-black min-h-screen;
 }
+
 .corner-top {
   background-image: url("/corner-lt.png"), url("/corner-rt.png");
   background-position: left top, right top; /* this positions the second image */

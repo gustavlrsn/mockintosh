@@ -6,7 +6,10 @@ import { getFileContent } from "../lib/api";
 import PhotoBooth from "../components/photobooth";
 import Icon from "../components/icon";
 import toggleFullscreen from "../utils/toggleFullscreen";
+import getDefaultPosition from "../utils/getDefaultPosition";
 import { version } from "../package.json";
+
+const simulatedBootTime = 1337;
 
 const windowTypes = {
   PHOTO_BOOTH: "PHOTO_BOOTH",
@@ -14,26 +17,13 @@ const windowTypes = {
   FOLDER: "FOLDER",
 };
 
-const getDefaultPosition = (openWindows) => {
-  if (openWindows.length) {
-    const posBelow = {
-      x: openWindows[openWindows.length - 1].defaultPosition.x,
-      y: openWindows[openWindows.length - 1].defaultPosition.y,
-    };
-    return {
-      x: posBelow.x > 25 ? posBelow.x - 25 : posBelow.x + 25,
-      y: posBelow.y > 25 ? posBelow.y + 25 : posBelow.y + 25,
-    };
-  } else {
-    return {
-      x: 130,
-      y: 15,
-    };
-  }
-};
-
 export default ({ initialWindows, icons }) => {
   const [showingSplashscreen, setSplashScreen] = useState(true);
+
+  useEffect(() => {
+    setTimeout(() => setSplashScreen(false), simulatedBootTime);
+  }, []);
+
   const [openWindows, setOpenWindows] = useState(initialWindows);
   const [zoomed, setZoomed] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -67,10 +57,6 @@ export default ({ initialWindows, icons }) => {
       ]);
   };
 
-  useEffect(() => {
-    setTimeout(() => setSplashScreen(false), 1000);
-  }, []);
-
   const title = `pluto ${version}`;
   return (
     <>
@@ -92,10 +78,10 @@ export default ({ initialWindows, icons }) => {
 
         <title>{title}</title>
       </Head>
-      <div className="flex justify-center items-center min-h-screen bg-black">
+      <div className="flex justify-center items-center min-h-screen">
         <div
           style={{ width: 512, height: 342, ...(zoomed && { zoom: 2 }) }}
-          className="flex corner flex-col overflow-hidden relative"
+          className="flex corner flex-col relative"
         >
           <div className="corner-top bg-white px-2 h-5 border-b border-black flex items-stretch justify-between">
             <div className="flex items-stretch relative">
