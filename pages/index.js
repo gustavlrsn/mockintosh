@@ -204,7 +204,10 @@ export default ({ initialWindows, icons }) => {
             </div>
           </div>
           {showingSplashscreen && (
-            <div className="absolute z-100  corner  top-0 bottom-0 right-0 left-0 flex items-center justify-center">
+            <div
+              className="absolute z-100  corner  top-0 bottom-0 right-0 left-0 flex items-center justify-center"
+              onClick={() => setSplashScreen(false)}
+            >
               <img src="/icons/happy.png" />
             </div>
           )}
