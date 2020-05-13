@@ -83,6 +83,14 @@ export default ({ initialWindows, icons }) => {
           style={{ width: 512, height: 342, ...(zoomed && { zoom: 2 }) }}
           className="flex corner flex-col relative"
         >
+          {showingSplashscreen && (
+            <div
+              className="absolute z-50 corner top-0 bottom-0 right-0 left-0 flex items-center justify-center"
+              onClick={() => setSplashScreen(false)}
+            >
+              <img src="/icons/happy.png" />
+            </div>
+          )}
           <div className="corner-top bg-white px-2 h-5 border-b border-black flex items-stretch justify-between">
             <div className="flex items-stretch relative">
               <button
@@ -203,14 +211,8 @@ export default ({ initialWindows, icons }) => {
               </div>
             </div>
           </div>
-          {showingSplashscreen && (
-            <div
-              className="absolute z-100  corner  top-0 bottom-0 right-0 left-0 flex items-center justify-center"
-              onClick={() => setSplashScreen(false)}
-            >
-              <img src="/icons/happy.png" />
-            </div>
-          )}
+
+          {/* put it here */}
         </div>
       </div>
     </>
