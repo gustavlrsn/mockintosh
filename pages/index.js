@@ -67,11 +67,12 @@ export default ({ initialWindows, icons }) => {
   return (
     <>
       <Head>
-        <title>Pluto</title>
+        <meta property="og:image" content="https://plutocomputer.club/og.png" />
         <meta property="og:title" content="Pluto" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://plutocomputer.club" />
-        <meta property="og:image" content="https://plutocomputer.club/og.png" />
+
+        <title>Pluto</title>
       </Head>
       <div className="flex justify-center items-center min-h-screen bg-black">
         <div
