@@ -8,6 +8,14 @@ export default ({}) => {
   const thumbnailVideo = useRef(null);
 
   const [photos, setPhotos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState("");
+
+  const width = 256;
+  const height = 192;
+
+  const thumbnailWidth = 60;
+  const thumbnailHeight = 45;
 
   function getVideo() {
     navigator.mediaDevices
@@ -19,16 +27,14 @@ export default ({}) => {
         thumbnailVideo.current.srcObject = localMediaStream;
         thumbnailVideo.current.play();
       })
-      .catch((err) => alert(err.message));
+      .catch((err) => {
+        setErrorText(err.message);
+        setLoading(false);
+      });
   }
 
   function paintToCanvas() {
-    const width = 256;
-    const height = 192;
-
-    const thumbnailWidth = 60;
-    const thumbnailHeight = 45;
-
+    setLoading(false);
     video.current.setAttribute("width", width);
     video.current.setAttribute("height", width);
 
@@ -91,18 +97,31 @@ export default ({}) => {
     video.current.addEventListener("canplay", paintToCanvas);
     return () => {
       video.current.removeEventListener("canplay", paintToCanvas);
-
-      const tracks = video.current.srcObject.getTracks();
-      tracks.forEach(function (track) {
-        track.stop();
-      });
-      video.current.srcObject = null;
+      if (video.current.srcObject) {
+        const tracks = video.current.srcObject.getTracks();
+        tracks.forEach(function (track) {
+          track.stop();
+        });
+        video.current.srcObject = null;
+      }
     };
   }, []);
 
   return (
     <div>
-      <canvas ref={canvas} className="" style={{ height: 192 }} />
+      <div className="relative" style={{ height }}>
+        {loading && (
+          <div className="absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center">
+            <img src="/icons/watch.png" />
+          </div>
+        )}
+        {errorText && (
+          <div className="absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center">
+            <h1 className="font-chicago">{errorText}</h1>
+          </div>
+        )}
+        <canvas ref={canvas} className="" />
+      </div>
       <video ref={video} className="hidden" />
 
       <canvas ref={thumbnailCanvas} className="hidden" />
@@ -112,6 +131,7 @@ export default ({}) => {
         <button
           className="border rounded my-1 block mx-auto focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
           onClick={takePhoto}
+          disabled={loading}
         >
           Take photo
         </button>
