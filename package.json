@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "next",
     "build": "next build",
+    "postbuild": "node post-build.js",
     "start": "next start"
   },
   "dependencies": {
