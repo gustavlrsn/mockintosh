@@ -21,6 +21,7 @@
 - [x] file viewer
 - [x] photo booth
   - [ ] handle no camera available
+  - [ ] gettracks of null (closing before its loaded)
   - [ ] icon not active state
 - [ ] chat
 - [ ] plutogram

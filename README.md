@@ -2,9 +2,9 @@
 
 # Welcome
 
-Pluto is a vaporware operating system (and pluto computer club; some kind of collaborative open source art collective..?)
+Pluto is a mock operating system in the style of Macintosh System 6, but with the abilities of a modern web app.
 
-The idea and esthetics is very inspired by the awesome [Poolside.fm](https://poolside.fm), but here you are invited to participate in building new features and programs.
+It is inspired by the awesome [Poolside.fm](https://poolside.fm), but here you are invited to participate in building new features and programs.
 
 The thing is built in React and instructions on how to set up the development environment are in CONTRIBUTING.md.
 
