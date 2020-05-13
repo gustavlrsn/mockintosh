@@ -69,8 +69,18 @@ export default ({ initialWindows, icons }) => {
       <Head>
         <meta property="og:image" content="https://plutocomputer.club/og.png" />
         <meta property="og:title" content="Pluto" />
+        <meta property="og:description" content="mock operating system" />
         <meta property="og:type" content="website" />
-        <meta property="og:url" content="https://plutocomputer.club" />
+        <meta property="og:url" content="https://plutocomputer.club/" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@plutocompclub" />
+        <meta name="twitter:creator" content="@gustavlrsn" />
+        <meta name="twitter:title" content="Pluto" />
+        <meta name="twitter:description" content="mock operating system" />
+        <meta
+          name="twitter:image"
+          content="https://plutocomputer.club/og.png"
+        />
 
         <title>Pluto</title>
       </Head>
