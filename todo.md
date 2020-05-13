@@ -20,9 +20,13 @@
 
 - [x] file viewer
 - [x] photo booth
-  - [ ] handle no camera available
-  - [ ] gettracks of null (closing before its loaded)
+  - [x] handle no camera available
+  - [x] gettracks of null (closing before its loaded)
   - [ ] icon not active state
+  - [x] see photo you just took
+  - [x] view photos in roll
+  - [x] delete photo from roll
+  - [x] download from roll
 - [ ] chat
 - [ ] plutogram
 - [ ] paint
