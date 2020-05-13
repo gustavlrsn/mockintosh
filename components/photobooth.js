@@ -8,6 +8,13 @@ export default ({}) => {
   const thumbnailVideo = useRef(null);
 
   const [photos, setPhotos] = useState([]);
+  const [viewingPhoto, setViewingPhoto] = useState(null);
+  const deletePhoto = (index) => {
+    setPhotos(photos.filter((_, i) => i !== index));
+
+    setViewingPhoto(null);
+  };
+
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
 
@@ -89,6 +96,7 @@ export default ({}) => {
     const full = canvas.current.toDataURL("image/png");
     const thumbnail = thumbnailCanvas.current.toDataURL("image/png");
     setPhotos([{ full, thumbnail, time }, ...photos]);
+    setViewingPhoto(0);
   }
 
   useEffect(() => {
@@ -121,31 +129,65 @@ export default ({}) => {
           </div>
         )}
         <canvas ref={canvas} className="" />
+        {viewingPhoto !== null && (
+          <div className="absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center">
+            <img src={photos[viewingPhoto].full} />
+          </div>
+        )}
       </div>
       <video ref={video} className="hidden" />
 
       <canvas ref={thumbnailCanvas} className="hidden" />
       <video ref={thumbnailVideo} className="hidden" />
 
-      <div>
-        <button
-          className="border rounded my-1 block mx-auto focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
-          onClick={takePhoto}
-          disabled={loading}
-        >
-          Take photo
-        </button>
+      <div className="flex items-center justify-center">
+        {viewingPhoto == null ? (
+          <button
+            className="border rounded my-1 block mx-2 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+            onClick={takePhoto}
+            disabled={loading}
+          >
+            Take photo
+          </button>
+        ) : (
+          <>
+            <button
+              className="border rounded my-1 block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+              onClick={() => setViewingPhoto(null)}
+            >
+              Back to camera
+            </button>
+            <a
+              className="border rounded my-1 block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+              href={photos[viewingPhoto].full}
+              download={`pluto-photobooth-${photos[viewingPhoto].time}`}
+            >
+              Save
+            </a>
+
+            <button
+              className="border rounded my-1 block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+              onClick={() => deletePhoto(viewingPhoto)}
+            >
+              Delete
+            </button>
+          </>
+        )}
       </div>
 
       <div className="overflow-x-scroll">
         <div className="flex overflow-x-auto bg-black py-1 border-t-2 border-black">
-          {photos.map(({ full, thumbnail, time }) => (
-            <div key={time} className=" flex-none ml-1">
-              <a href={full} download={`pluto-photobooth-${time}`}>
-                <img className="" src={thumbnail} />
-              </a>
-            </div>
+          {photos.map(({ thumbnail, time }, i) => (
+            <button
+              key={time}
+              onClick={() => setViewingPhoto(i)}
+              className="flex-none ml-1 focus:outline-none"
+            >
+              <img className="" src={thumbnail} />
+            </button>
           ))}
+          {/* <button href={full} download={`pluto-photobooth-${time}`}> */}
+
           <div
             className="bg-checkers inverted ml-1 flex-none"
             style={{ width: 60, height: 45 }}
