@@ -5,22 +5,19 @@ const Icon = ({
 }) => {
   const active =
     openWindows.length && openWindows[openWindows.length - 1].title === title;
-  const open = Boolean(openWindows.find((window) => window.title === title));
-
+  // const open = Boolean(openWindows.find((window) => window.title === title));
+  const open = false;
   return (
     <div
       className={`m-1 flex items-center flex-col ${
         open ? "cursor-default" : "cursor-pointer"
       }`}
-      onClick={
-        open
-          ? () => {}
-          : () =>
-              openWindow({
-                title,
-                type,
-                payload,
-              })
+      onClick={() =>
+        openWindow({
+          title,
+          type,
+          payload,
+        })
       }
     >
       {false ? (
