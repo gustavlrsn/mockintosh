@@ -6,6 +6,7 @@ import { getFileContent } from "../lib/api";
 import PhotoBooth from "../components/photobooth";
 import Icon from "../components/icon";
 import toggleFullscreen from "../utils/toggleFullscreen";
+import { version } from "../package.json";
 
 const windowTypes = {
   PHOTO_BOOTH: "PHOTO_BOOTH",
@@ -64,25 +65,26 @@ export default ({ initialWindows, icons }) => {
       ]);
   };
 
+  const title = `pluto ${version}`;
   return (
     <>
       <Head>
         <meta property="og:image" content="https://plutocomputer.club/og.png" />
-        <meta property="og:title" content="Pluto" />
+        <meta property="og:title" content={title} />
         <meta property="og:description" content="mock operating system" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://plutocomputer.club/" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:site" content="@plutocompclub" />
         <meta name="twitter:creator" content="@gustavlrsn" />
-        <meta name="twitter:title" content="Pluto" />
+        <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content="mock operating system" />
         <meta
           name="twitter:image"
           content="https://plutocomputer.club/og.png"
         />
 
-        <title>Pluto</title>
+        <title>{title}</title>
       </Head>
       <div className="flex justify-center items-center min-h-screen bg-black">
         <div
@@ -257,6 +259,6 @@ export async function getStaticProps() {
   ];
 
   return {
-    props: { initialWindows, icons },
+    props: { initialWindows, icons, version },
   };
 }
