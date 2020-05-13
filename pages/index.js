@@ -34,6 +34,7 @@ const getDefaultPosition = (openWindows) => {
 
 export default ({ initialWindows, icons }) => {
   const [openWindows, setOpenWindows] = useState(initialWindows);
+  const [zoomed, setZoomed] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const closeWindow = (title) =>
     setOpenWindows([...openWindows.filter((window) => window.title !== title)]);
@@ -88,7 +89,7 @@ export default ({ initialWindows, icons }) => {
       </Head>
       <div className="flex justify-center items-center min-h-screen bg-black">
         <div
-          style={{ width: 512, height: 342 }}
+          style={{ width: 512, height: 342, ...(zoomed && { zoom: 2 }) }}
           className="flex corner-bottom flex-col overflow-hidden"
         >
           <div className="corner-top bg-white px-2 h-5 border-b border-black flex items-stretch justify-between">
@@ -125,6 +126,12 @@ export default ({ initialWindows, icons }) => {
                       onClick={toggleFullscreen}
                     >
                       Full Screen
+                    </button>
+                    <button
+                      className="px-4 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
+                      onClick={() => setZoomed(!zoomed)}
+                    >
+                      {zoomed ? "Zoom Out" : "Zoom In"}
                     </button>
                     <a
                       className="px-4 py-1 block hover:bg-black hover:text-white"
