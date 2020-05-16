@@ -198,8 +198,9 @@ export default ({ initialWindows, icons }) => {
             })}
 
             {/* Icons */}
-            <div className="flex justify-end py-3 px-2">
-              <div className="grid grid-cols-1 gap-0">
+            <div className="">
+              {/* flex justify-end py-3 px-2 */}
+              <div className="grid grid-cols-icons grid-rows-icons grid-flow-col gap-2 m-2">
                 {icons.map((icon) => (
                   <Icon
                     key={icon.title}

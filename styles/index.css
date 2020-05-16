@@ -22,6 +22,13 @@
   font-style: normal;
 }
 
+@font-face {
+  font-family: "Geneva";
+  src: url("/fonts/FindersKeepers.ttf");
+  font-weight: normal;
+  font-style: normal;
+}
+
 body {
   @apply bg-black min-h-screen;
 }
@@ -72,6 +79,12 @@ body {
   font-size: 8px;
 }
 
+.font-geneva {
+  font-family: "Geneva";
+  font-size: 16px;
+  line-height: 0.75;
+}
+
 ::selection {
   color: white;
   background: rgba(0, 0, 0, 0.99);
@@ -86,7 +99,7 @@ h2,
 h3,
 h4,
 h5 {
-  @apply mb-2 font-chicago;
+  @apply mb-2 font-chicago leading-4;
 }
 
 .content ul {
@@ -98,11 +111,13 @@ h5 {
 
 .content pre {
   @apply p-1 -mt-1 border border-dashed border-black overflow-hidden overflow-x-scroll cursor-text;
-  font-family: "Courier";
-  font-size: 9px;
+
   user-select: text;
 }
 .content code {
+  font-family: "Geneva";
+  font-size: 16px;
+  line-height: 0.75;
   user-select: text;
 }
 
@@ -111,7 +126,7 @@ h5 {
 }
 
 .content p {
-  @apply mb-3 leading-4;
+  @apply mb-2 leading-4;
 }
 
 .content hr {

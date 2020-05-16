@@ -9,7 +9,7 @@ const Icon = ({
   const open = false;
   return (
     <div
-      className={`m-1 flex items-center flex-col ${
+      className={`col-start-7 flex items-center flex-col ${
         open ? "cursor-default" : "cursor-pointer"
       }`}
       onClick={() =>
@@ -27,10 +27,10 @@ const Icon = ({
       )}
 
       <span
-        className={`block font-arial ${
+        className={`block font-geneva whitespace-no-wrap ${
           active ? "bg-black text-white" : "bg-white"
         }`}
-        style={{ padding: "2px 2px 0 2px" }}
+        style={{ padding: "0 2px", display: "inline-table" }}
       >
         {title}
       </span>
