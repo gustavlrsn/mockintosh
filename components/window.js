@@ -7,12 +7,14 @@ export default ({
   active,
   width,
   bringWindowToFront,
+  scale,
 }) => {
   return (
     <Draggable
       handle=".handle"
       defaultPosition={window.defaultPosition}
       onMouseDown={() => bringWindowToFront(window.title)}
+      scale={scale}
     >
       <div
         className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64"
