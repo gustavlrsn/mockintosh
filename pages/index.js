@@ -25,7 +25,7 @@ export default ({ initialWindows, icons }) => {
   }, []);
 
   const [openWindows, setOpenWindows] = useState(initialWindows);
-  const [zoomed, setZoomed] = useState(false);
+  const [zoom, setZoom] = useState(1);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const closeWindow = (title) =>
     setOpenWindows([...openWindows.filter((window) => window.title !== title)]);
@@ -80,7 +80,7 @@ export default ({ initialWindows, icons }) => {
       </Head>
       <div className="flex justify-center items-center min-h-screen">
         <div
-          style={{ width: 512, height: 342, ...(zoomed && { zoom: 2 }) }}
+          style={{ width: 512, height: 342, zoom }}
           className="flex corner flex-col relative"
         >
           {showingSplashscreen && (
@@ -128,9 +128,9 @@ export default ({ initialWindows, icons }) => {
                     </button>
                     <button
                       className="px-4 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
-                      onClick={() => setZoomed(!zoomed)}
+                      onClick={() => setZoom(zoom === 1 ? 2 : 1)}
                     >
-                      {zoomed ? "Zoom Out" : "Zoom In"}
+                      {zoom === 1 ? "Zoom In" : "Zoom Out"}
                     </button>
                     <a
                       className="px-4 py-1 block hover:bg-black hover:text-white"
@@ -145,7 +145,7 @@ export default ({ initialWindows, icons }) => {
             </div>
           </div>
           {/* Windows */}
-          <div className="flex-grow ">
+          <div className="flex-grow relative">
             {openWindows.map((window, i) => {
               switch (window.type) {
                 case windowTypes.FOLDER:
@@ -156,6 +156,7 @@ export default ({ initialWindows, icons }) => {
                       closeWindow={closeWindow}
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
+                      scale={zoom}
                     >
                       <div className="p-5 overflow-hidden flex">
                         {window.payload.icons.map((icon) => (
@@ -177,6 +178,7 @@ export default ({ initialWindows, icons }) => {
                       closeWindow={closeWindow}
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
+                      scale={zoom}
                     >
                       <File {...window.payload} />
                     </Window>
@@ -190,6 +192,7 @@ export default ({ initialWindows, icons }) => {
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
                       width={259}
+                      scale={zoom}
                     >
                       <PhotoBooth active={i === window.length - 1} />
                     </Window>
