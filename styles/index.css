@@ -1,5 +1,12 @@
 @tailwind base;
+
+/* Write your own custom base styles here */
+
+/* Start purging... */
 @tailwind components;
+/* Stop purging. */
+
+/* Write you own custom component styles here */
 
 @import "./scrollbars.css";
 
@@ -146,4 +153,8 @@ h5 {
   cursor: grabbing !important;
 }
 
+/* Start purging... */
 @tailwind utilities;
+/* Stop purging. */
+
+/* Your own custom utilities */
