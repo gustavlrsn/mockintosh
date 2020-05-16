@@ -5,7 +5,14 @@ module.exports = {
       none: "none",
       square: "square",
     },
-    extend: {},
+    extend: {
+      gridTemplateColumns: {
+        icons: "repeat(7, 64px)",
+      },
+      gridTemplateRows: {
+        icons: "repeat(5, 44px)",
+      },
+    },
   },
   variants: {
     textColor: ["responsive", "hover", "focus", "active"],
