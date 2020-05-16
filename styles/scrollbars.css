@@ -1,0 +1,106 @@
+::-webkit-resizer {
+  background-image: url("/resize.png");
+  background-position: center;
+  background-repeat: no-repeat;
+}
+/* width */
+::-webkit-scrollbar {
+  width: 15px;
+  height: 15px;
+}
+
+::-webkit-scrollbar-button {
+  height: 15px;
+  width: 15px;
+}
+
+::-webkit-scrollbar-button:start:increment {
+  display: none;
+}
+
+::-webkit-scrollbar-button:start:decrement:vertical {
+  display: block;
+  border-left: 1px solid black;
+  border-bottom: 1px solid black;
+  background-image: url("/arrow-up.png");
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+::-webkit-scrollbar-button:end:increment:vertical {
+  display: block;
+  background-image: url("/arrow-down.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  border-top: 1px solid black;
+  border-left: 1px solid black;
+}
+
+::-webkit-scrollbar-button:start:decrement:horizontal {
+  display: block;
+  background-color: white;
+  border-top: 1px solid black;
+  border-right: 1px solid black;
+  background-image: url("/arrow-left.png");
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+::-webkit-scrollbar-button:end:increment:horizontal {
+  display: block;
+  background-color: white;
+
+  background-image: url("/arrow-right.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  border-top: 1px solid black;
+  border-left: 1px solid black;
+}
+
+::-webkit-scrollbar-button:end:decrement {
+  display: none;
+}
+
+/* Track */
+::-webkit-scrollbar-track {
+  background-image: url("/scrollbar-bg.png");
+  background-position: left top;
+  background-repeat: repeat;
+}
+
+::-webkit-scrollbar-track-piece {
+  /* background: blue; */
+}
+
+::-webkit-scrollbar-track:vertical {
+  border-left: 1px solid black;
+}
+
+::-webkit-scrollbar-track:horizontal {
+  border-top: 1px solid black;
+}
+
+/* Handle */
+
+::-webkit-scrollbar-thumb {
+  background: white;
+  border-top: 1px solid black;
+  border-left: 1px solid black;
+}
+
+::-webkit-scrollbar-thumb:vertical {
+  border-bottom: 1px solid black;
+}
+
+::-webkit-scrollbar-thumb:horizontal {
+  border-right: 1px solid black;
+}
+
+/* Handle on hover */
+::-webkit-scrollbar-thumb:hover {
+}
+
+::-webkit-scrollbar-corner {
+  border-top: 1px solid black;
+  border-left: 1px solid black;
+}

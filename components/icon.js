@@ -9,9 +9,10 @@ const Icon = ({
   const open = false;
   return (
     <div
-      className={`col-start-7 flex items-center flex-col ${
+      className={`col-start-7 flex-none flex items-center flex-col ${
         open ? "cursor-default" : "cursor-pointer"
       }`}
+      style={{ minWidth: 64 }}
       onClick={() =>
         openWindow({
           title,

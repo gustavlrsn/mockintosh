@@ -175,8 +175,11 @@ export default ({}) => {
         )}
       </div>
 
-      <div className="overflow-x-scroll">
-        <div className="flex overflow-x-auto bg-black py-1 border-t-2 border-black">
+      <div className="max-w-full overflow-x-scroll bg-black">
+        <div
+          className="flex py-1 border-t-2 border-black "
+          style={{ height: "55px" }}
+        >
           {photos.map(({ thumbnail, time }, i) => (
             <button
               key={time}
@@ -187,23 +190,6 @@ export default ({}) => {
             </button>
           ))}
           {/* <button href={full} download={`pluto-photobooth-${time}`}> */}
-
-          <div
-            className="bg-checkers inverted ml-1 flex-none"
-            style={{ width: 60, height: 45 }}
-          ></div>
-          <div
-            className="bg-checkers inverted ml-1 flex-none"
-            style={{ width: 60, height: 45 }}
-          ></div>
-          <div
-            className="bg-checkers inverted ml-1 flex-none"
-            style={{ width: 60, height: 45 }}
-          ></div>
-          <div
-            className="bg-checkers inverted ml-1 flex-none"
-            style={{ width: 60, height: 45 }}
-          ></div>
         </div>
       </div>
     </div>

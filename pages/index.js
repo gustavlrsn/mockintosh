@@ -157,8 +157,9 @@ export default ({ initialWindows, icons }) => {
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
                       scale={zoom}
+                      resizable
                     >
-                      <div className="p-5 overflow-hidden flex">
+                      <div className="p-5 flex">
                         {window.payload.icons.map((icon) => (
                           <Icon
                             key={icon.title}
@@ -179,6 +180,7 @@ export default ({ initialWindows, icons }) => {
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
                       scale={zoom}
+                      resizable
                     >
                       <File {...window.payload} />
                     </Window>
@@ -191,7 +193,7 @@ export default ({ initialWindows, icons }) => {
                       closeWindow={closeWindow}
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
-                      width={259}
+                      // width={256}
                       scale={zoom}
                     >
                       <PhotoBooth active={i === window.length - 1} />

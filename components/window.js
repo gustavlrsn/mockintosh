@@ -8,6 +8,7 @@ export default ({
   width,
   bringWindowToFront,
   scale,
+  resizable = false,
 }) => {
   return (
     <Draggable
@@ -15,11 +16,9 @@ export default ({
       defaultPosition={window.defaultPosition}
       onMouseDown={() => bringWindowToFront(window.title)}
       scale={scale}
+      // bounds="parent"
     >
-      <div
-        className="absolute text-sm border border-black  border-r-2 border-b-2 bg-white w-64"
-        style={{ width }}
-      >
+      <div className="absolute text-sm border border-black border-r-2 border-b-2 bg-white">
         <div className="handle border-b border-black h-5 flex items-center justify-center text-sm">
           <div
             className={active ? "bg-stripes" : ""}
@@ -47,10 +46,22 @@ export default ({
           </span>
           <div
             className={`flex-grow ${active && "bg-stripes"}`}
-            style={{ height: 11, marginLeft: 1, marginRight: 1 }}
+            style={{ height: 11, width: 16, marginLeft: 1, marginRight: 1 }}
           ></div>
         </div>
-        {children}
+        <div
+          className={`${
+            resizable ? "overflow-auto overflow-y-scroll" : ""
+          } w-64`}
+          style={{
+            resize: resizable ? "both" : "none",
+            minWidth: "150px",
+            minHeight: "80px",
+            width,
+          }}
+        >
+          {children}
+        </div>
       </div>
     </Draggable>
   );

@@ -6,12 +6,12 @@ const getDefaultPosition = (openWindows) => {
     };
     return {
       x: posBelow.x > 25 ? posBelow.x - 25 : posBelow.x + 25,
-      y: posBelow.y > 25 ? posBelow.y + 25 : posBelow.y + 25,
+      y: posBelow.y > 25 ? posBelow.y - 5 : posBelow.y + 5,
     };
   } else {
     return {
       x: 130,
-      y: 15,
+      y: 5,
     };
   }
 };

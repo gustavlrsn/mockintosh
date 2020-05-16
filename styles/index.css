@@ -1,6 +1,8 @@
 @tailwind base;
 @tailwind components;
 
+@import "./scrollbars.css";
+
 @font-face {
   font-family: "Chicago";
   src: url("/pixChicago.woff");
