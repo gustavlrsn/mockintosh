@@ -175,7 +175,7 @@ export default ({}) => {
         )}
       </div>
 
-      <div className="max-w-full overflow-x-scroll bg-black">
+      <div className="max-w-full overflow-x-scroll scroll bg-black">
         <div
           className="flex py-1 border-t-2 border-black "
           style={{ height: "55px" }}

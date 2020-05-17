@@ -50,9 +50,9 @@ export default ({
           ></div>
         </div>
         <div
-          className={`${
-            resizable ? "overflow-auto overflow-y-scroll" : ""
-          } w-64`}
+          className={`${resizable ? "overflow-scroll" : ""} scroll w-64 ${
+            active ? "" : "inactive"
+          }`}
           style={{
             resize: resizable ? "both" : "none",
             minWidth: "150px",
