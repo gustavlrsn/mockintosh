@@ -80,7 +80,7 @@ export default ({ initialWindows, icons }) => {
       </Head>
       <div className="flex justify-center items-center min-h-screen">
         <div
-          style={{ width: 512, height: 342, zoom }}
+          style={{ width: 512, height: 342, transform: `scale(${zoom})` }}
           className="flex corner flex-col relative"
         >
           {showingSplashscreen && (
