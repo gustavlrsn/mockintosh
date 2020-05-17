@@ -134,7 +134,7 @@ export default ({ initialWindows, icons }) => {
                     </button>
                     <a
                       className="px-4 py-1 block hover:bg-black hover:text-white"
-                      href="https://github.com/plutocomputerclub/pluto"
+                      href="https://github.com/gustavlrsn/pluto"
                       target="_blank"
                     >
                       View Source
