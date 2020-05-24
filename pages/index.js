@@ -4,6 +4,7 @@ import Window from "../components/window";
 import File from "../components/file";
 import { getFileContent } from "../lib/api";
 import PhotoBooth from "../components/photobooth";
+import AboutThisMockintosh from "../components/about";
 import Icon from "../components/icon";
 import toggleFullscreen from "../utils/toggleFullscreen";
 import getDefaultPosition from "../utils/getDefaultPosition";
@@ -15,6 +16,7 @@ const windowTypes = {
   PHOTO_BOOTH: "PHOTO_BOOTH",
   FILE: "FILE",
   FOLDER: "FOLDER",
+  ABOUT_THIS_MOCKINTOSH: "ABOUT_THIS_MOCKINTOSH",
 };
 
 export default ({ initialWindows, icons }) => {
@@ -117,19 +119,29 @@ export default ({ initialWindows, icons }) => {
                     tabIndex="-1"
                     className="z-10 fixed inset-0 h-full w-full cursor-default focus:outline-none"
                   ></button>
-                  <div className="absolute w-40 z-20 py-1 flex flex-col items-stretch left-0 top-0 mt-5 font-chicago bg-white border-t-0 border-b-2 border-r-2 border border-black">
-                    {/* <div className="px-4 py-1 hover:bg-black hover:text-white">
-                    About This Computer...
-                  </div>
-                  <hr className="border-b-1 border-black border-dotted my-1" /> */}
+                  <div className="absolute w-48 z-20 py-1 flex flex-col items-stretch left-0 top-0 mt-5 font-chicago bg-white border-t-0 border-b-2 border-r-2 border border-black">
                     <button
-                      className="px-4 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
+                      className="px-3 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
+                      onClick={() => {
+                        openWindow({
+                          title: "About This Mockintosh",
+                          type: windowTypes.ABOUT_THIS_MOCKINTOSH,
+                        });
+                        setDropdownOpen(false);
+                      }}
+                    >
+                      About This Mockintosh...
+                    </button>
+                    <hr className="border-b-1 border-black border-dotted my-1" />
+
+                    <button
+                      className="px-3 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
                       onClick={toggleFullscreen}
                     >
                       Full Screen
                     </button>
                     <button
-                      className="px-4 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
+                      className="px-3 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
                       onClick={() => setZoom(zoom === 1 ? 2 : 1)}
                     >
                       {zoom === 1 ? "Zoom In" : "Zoom Out"}
@@ -199,6 +211,20 @@ export default ({ initialWindows, icons }) => {
                       scale={zoom}
                     >
                       <PhotoBooth active={i === window.length - 1} />
+                    </Window>
+                  );
+                case windowTypes.ABOUT_THIS_MOCKINTOSH:
+                  return (
+                    <Window
+                      key={window.title}
+                      window={window}
+                      closeWindow={closeWindow}
+                      bringWindowToFront={bringWindowToFront}
+                      active={i === openWindows.length - 1}
+                      scale={zoom}
+                      width={350}
+                    >
+                      <AboutThisMockintosh />
                     </Window>
                   );
               }
