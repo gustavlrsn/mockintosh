@@ -1,7 +1,7 @@
 import { version } from "../package.json";
 
 // todo: fetch this from github api
-const contributors = [{ username: "gustavlrsn", commits: 259 }];
+const contributors = [{ username: "gustavlrsn", commits: 74 }];
 
 export default () => {
   return (
