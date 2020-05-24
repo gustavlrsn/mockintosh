@@ -1,6 +1,6 @@
 {
-  "name": "pluto",
-  "version": "0.1.1",
+  "name": "mockintosh",
+  "version": "0.1.2",
   "scripts": {
     "dev": "next",
     "build": "next build",

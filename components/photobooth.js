@@ -160,7 +160,7 @@ export default ({}) => {
             <a
               className="border rounded my-1 block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
               href={photos[viewingPhoto].full}
-              download={`pluto-photobooth-${photos[viewingPhoto].time}`}
+              download={`mockintosh-photobooth-${photos[viewingPhoto].time}`}
             >
               Save
             </a>
@@ -189,7 +189,7 @@ export default ({}) => {
               <img className="" src={thumbnail} />
             </button>
           ))}
-          {/* <button href={full} download={`pluto-photobooth-${time}`}> */}
+          {/* <button href={full} download={`mockintosh-photobooth-${time}`}> */}
         </div>
       </div>
     </div>

@@ -1,11 +1,11 @@
-![dead mac symbol](https://plutocomputer.club/dead.png)
+![dead mac symbol](https://mockintosh.com/dead.png)
 
 # Welcome
 
-Pluto is a mock operating system in the style of Macintosh System 6, but with the abilities of a modern web app.
+Mockintosh is a mock operating system in classic Macintosh OS style.
 
-It is inspired by the awesome [Poolside.fm](https://poolside.fm), but here you are invited to participate in building new features and programs.
+The code is [open source](https://github.com/gustavlrsn/mockintosh) but all credit for the design language and most icons belong to [Susan Kare](https://twitter.com/SusanKare), the designer of the original Macintosh GUI.
 
-The thing is built in React and instructions on how to set up the development environment are in CONTRIBUTING.md.
+It is built with React and instructions on how to set up the development environment are in CONTRIBUTING.md.
 
 \- [@gustavlrsn](https://twitter.com/gustavlrsn)

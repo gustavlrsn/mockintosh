@@ -2,7 +2,7 @@ import "../styles/index.css";
 import logMessageForHackers from "../lib/logMessageForHackers";
 
 function MyApp({ Component, pageProps }) {
-  logMessageForHackers();
+  //logMessageForHackers();
 
   return <Component {...pageProps} />;
 }

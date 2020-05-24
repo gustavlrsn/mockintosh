@@ -57,27 +57,26 @@ export default ({ initialWindows, icons }) => {
       ]);
   };
 
-  const title = `pluto ${version}`;
+  const title = `mockintosh ${version}`;
   return (
     <>
       <Head>
-        <meta property="og:image" content="https://plutocomputer.club/og.png" />
+        <meta property="og:image" content="https://mockintosh.com/og.png" />
         <meta property="og:title" content={title} />
         <meta property="og:description" content="mock operating system" />
         <meta property="og:type" content="website" />
-        <meta property="og:url" content="https://plutocomputer.club/" />
+        <meta property="og:url" content="https://mockintosh.com/" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:site" content="@plutocompclub" />
+        {/* <meta name="twitter:site" content="@plutocompclub" /> */}
         <meta name="twitter:creator" content="@gustavlrsn" />
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content="mock operating system" />
-        <meta
-          name="twitter:image"
-          content="https://plutocomputer.club/og.png"
-        />
+        <meta name="twitter:image" content="https://mockintosh.com/og.png" />
 
         <title>{title}</title>
       </Head>
+      <audio ref={audio} src="sesound.mp3" preload="auto" />
+
       <div className="flex justify-center items-center min-h-screen">
         <div
           style={{ width: 512, height: 342, transform: `scale(${zoom})` }}
@@ -101,11 +100,14 @@ export default ({ initialWindows, icons }) => {
               >
                 <div className="flex items-center">
                   <img
-                    src="/pluto.png"
-                    className="mr-2"
-                    style={{ height: 11, width: 11 }}
+                    src="/eaten_apple.png"
+                    className=""
+                    style={{
+                      height: 11,
+                      width: 9,
+                    }}
                   />
-                  <h1 className="font-chicago">Pluto</h1>
+                  {/* <h1 className="font-chicago">Pluto</h1> */}
                 </div>
               </button>
               {dropdownOpen && (
@@ -133,8 +135,8 @@ export default ({ initialWindows, icons }) => {
                       {zoom === 1 ? "Zoom In" : "Zoom Out"}
                     </button>
                     <a
-                      className="px-4 py-1 block hover:bg-black hover:text-white"
-                      href="https://github.com/gustavlrsn/pluto"
+                      className="px-3 py-1 block hover:bg-black hover:text-white"
+                      href="https://github.com/gustavlrsn/mockintosh"
                       target="_blank"
                     >
                       View Source
