@@ -75,7 +75,7 @@ export default ({ initialWindows, icons }) => {
 
         <title>{title}</title>
       </Head>
-      <audio ref={audio} src="sesound.mp3" preload="auto" />
+      {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
 
       <div className="flex justify-center items-center min-h-screen">
         <div
