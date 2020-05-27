@@ -10,7 +10,9 @@ const Icon = ({
   return (
     <div
       className={`col-start-7 flex-none flex items-center flex-col ${
-        open ? "cursor-default" : "cursor-pointer"
+        (open ? "cursor-default" : "cursor-pointer") +
+        " " +
+        (title === "Trash" ? "row-start-6" : "")
       }`}
       style={{ minWidth: 64 }}
       onClick={() =>
@@ -24,7 +26,7 @@ const Icon = ({
       {false ? (
         <div className="bg-checkers w-8 h-8" />
       ) : (
-        <img src={img} className={`w-8 h-8 ${active ? "" : ""}`} />
+        <img src={img} className={`w-8 h-8 ${active ? "inverted" : ""}`} />
       )}
 
       <span

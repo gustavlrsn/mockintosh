@@ -10,7 +10,7 @@ const getDefaultPosition = (openWindows) => {
     };
   } else {
     return {
-      x: 130,
+      x: 90,
       y: 5,
     };
   }

@@ -1,19 +1,24 @@
 import Head from "next/head";
-import { useState, useEffect } from "react";
+import { useState, useEffect, createRef, useRef } from "react";
 import store from "store";
+
 import Window from "../components/window";
-import File from "../components/file";
 import { getFileContent } from "../lib/api";
-import PhotoBooth from "../components/photobooth";
-import AboutThisMockintosh from "../components/about";
+import PhotoBooth from "../components/windows/photobooth";
+import Folder from "../components/windows/folder";
+import File from "../components/windows/file";
+import AboutThisMockintosh from "../components/windows/about";
+import Menubar from "../components/menubar";
+import Splashscreen from "../components/splashscreen";
+import Desktop from "../components/desktop";
+import Screen from "../components/screen";
 import Icon from "../components/icon";
-import toggleFullscreen from "../utils/toggleFullscreen";
 import getDefaultPosition from "../utils/getDefaultPosition";
 import { version } from "../package.json";
 
 const simulatedBootTime = 1337;
 
-const windowTypes = {
+export const windowTypes = {
   PHOTO_BOOTH: "PHOTO_BOOTH",
   FILE: "FILE",
   FOLDER: "FOLDER",
@@ -40,7 +45,7 @@ export default ({ initialWindows, icons }) => {
   };
 
   const [openWindows, setOpenWindows] = useState(initialWindows);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+
   const closeWindow = (title) =>
     setOpenWindows([...openWindows.filter((window) => window.title !== title)]);
 
@@ -71,7 +76,7 @@ export default ({ initialWindows, icons }) => {
       ]);
   };
 
-  const title = `mockintosh ${version}`;
+  const title = `Mockintosh ${version}`;
   return (
     <>
       <Head>
@@ -81,7 +86,6 @@ export default ({ initialWindows, icons }) => {
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://mockintosh.com/" />
         <meta name="twitter:card" content="summary_large_image" />
-        {/* <meta name="twitter:site" content="@plutocompclub" /> */}
         <meta name="twitter:creator" content="@gustavlrsn" />
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content="mock operating system" />
@@ -92,84 +96,17 @@ export default ({ initialWindows, icons }) => {
       {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
 
       <div className="flex justify-center items-center min-h-screen">
-        <div
-          style={{ width: 512, height: 342, transform: `scale(${zoom})` }}
-          className="flex corner flex-col relative"
-        >
+        <Screen width={512} height={342} zoom={settings.zoom}>
           {showingSplashscreen && (
-            <div
-              className="absolute z-50 corner top-0 bottom-0 right-0 left-0 flex items-center justify-center"
-              onClick={() => setSplashScreen(false)}
-            >
-              <img src="/icons/happy.png" />
-            </div>
+            <Splashscreen onClick={() => setSplashScreen(false)} />
           )}
-          <div className="corner-top bg-white px-2 h-5 border-b border-black flex items-stretch justify-between">
-            <div className="flex items-stretch relative">
-              <button
-                className={`focus:outline-none px-2 mr-1 ${
-                  dropdownOpen ? "inverted bg-white" : ""
-                }`}
-                onMouseDown={() => setDropdownOpen(!dropdownOpen)}
-              >
-                <div className="flex items-center">
-                  <img
-                    src="/eaten_apple.png"
-                    className=""
-                    style={{
-                      height: 11,
-                      width: 9,
-                    }}
-                  />
-                  {/* <h1 className="font-chicago">Pluto</h1> */}
-                </div>
-              </button>
-              {dropdownOpen && (
-                <>
-                  <button
-                    onClick={() => setDropdownOpen(false)}
-                    tabIndex="-1"
-                    className="z-10 fixed inset-0 h-full w-full cursor-default focus:outline-none"
-                  ></button>
-                  <div className="absolute w-48 z-20 py-1 flex flex-col items-stretch left-0 top-0 mt-5 font-chicago bg-white border-t-0 border-b-2 border-r-2 border border-black">
-                    <button
-                      className="px-3 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
-                      onClick={() => {
-                        openWindow({
-                          title: "About This Mockintosh",
-                          type: windowTypes.ABOUT_THIS_MOCKINTOSH,
-                        });
-                        setDropdownOpen(false);
-                      }}
-                    >
-                      About This Mockintosh...
-                    </button>
-                    <hr className="border-b-1 border-black border-dotted my-1" />
 
-                    <button
-                      className="px-3 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
-                      onClick={toggleFullscreen}
-                    >
-                      Full Screen
-                    </button>
-                    <button
-                      className="px-3 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
-                      onClick={() => setZoom(zoom === 1 ? 2 : 1)}
-                    >
-                      {zoom === 1 ? "Zoom In" : "Zoom Out"}
-                    </button>
-                    <a
-                      className="px-3 py-1 block hover:bg-black hover:text-white"
-                      href="https://github.com/gustavlrsn/mockintosh"
-                      target="_blank"
-                    >
-                      View Source
-                    </a>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
+          <Menubar
+            openWindow={openWindow}
+            zoom={settings.zoom}
+            setZoom={(zoom) => setSetting("zoom", zoom)}
+          />
+
           {/* Windows */}
           <div className="flex-grow relative">
             {openWindows.map((window, i) => {
@@ -185,16 +122,11 @@ export default ({ initialWindows, icons }) => {
                       scale={zoom}
                       resizable
                     >
-                      <div className="p-5 flex">
-                        {window.payload.icons.map((icon) => (
-                          <Icon
-                            key={icon.title}
-                            icon={icon}
-                            openWindow={openWindow}
-                            openWindows={openWindows}
-                          />
-                        ))}
-                      </div>
+                      <Folder
+                        {...window.payload}
+                        openWindow={openWindow}
+                        openWindows={openWindows}
+                      />
                     </Window>
                   );
                 case windowTypes.FILE:
@@ -207,6 +139,7 @@ export default ({ initialWindows, icons }) => {
                       active={i === openWindows.length - 1}
                       scale={zoom}
                       resizable
+                      width={350}
                     >
                       <File {...window.payload} />
                     </Window>
@@ -242,24 +175,18 @@ export default ({ initialWindows, icons }) => {
               }
             })}
 
-            {/* Icons */}
-            <div className="">
-              {/* flex justify-end py-3 px-2 */}
-              <div className="grid grid-cols-icons grid-rows-icons grid-flow-col gap-2 m-2">
-                {icons.map((icon) => (
-                  <Icon
-                    key={icon.title}
-                    icon={icon}
-                    openWindow={openWindow}
-                    openWindows={openWindows}
-                  />
-                ))}
-              </div>
-            </div>
+            <Desktop>
+              {icons.map((icon) => (
+                <Icon
+                  key={icon.title}
+                  icon={icon}
+                  openWindow={openWindow}
+                  openWindows={openWindows}
+                />
+              ))}
+            </Desktop>
           </div>
-
-          {/* put it here */}
-        </div>
+        </Screen>
       </div>
     </>
   );
