@@ -99,8 +99,12 @@ body {
   background: rgba(0, 0, 0, 0.99);
 }
 
+.content {
+  @apply select-text;
+}
+
 .content a {
-  @apply border-b border-black;
+  @apply border-b border-black select-text;
 }
 
 .content h1,
@@ -108,11 +112,11 @@ h2,
 h3,
 h4,
 h5 {
-  @apply mb-2 font-chicago leading-4;
+  @apply mb-2 font-chicago leading-4 select-text;
 }
 
 .content ul {
-  @apply mb-3 list-square pl-4 leading-4;
+  @apply mb-3 list-square pl-4 leading-4 select-text;
 }
 .content .contains-task-list {
   @apply list-none p-0;
@@ -135,7 +139,7 @@ h5 {
 }
 
 .content p {
-  @apply mb-2 leading-4;
+  @apply mb-2 leading-4 select-text;
 }
 
 .content hr {
