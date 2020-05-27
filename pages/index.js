@@ -197,44 +197,58 @@ export async function getStaticProps() {
 
   const icons = [
     {
+      title: "Mockintosh HD",
+      type: windowTypes.FOLDER,
+      img: "/icons/hd.png",
+      payload: {
+        icons: [
+          {
+            title: "Development",
+            type: windowTypes.FOLDER,
+            img: "/icons/folder.png",
+            payload: {
+              icons: [
+                {
+                  title: "README.md",
+                  type: windowTypes.FILE,
+                  img: "/icons/file.png",
+                  payload: {
+                    content: await getFileContent("README.md"),
+                  },
+                },
+                {
+                  title: "CONTRIBUTING.md",
+                  type: windowTypes.FILE,
+                  img: "/icons/file.png",
+                  payload: {
+                    content: await getFileContent("CONTRIBUTING.md"),
+                  },
+                },
+                {
+                  title: "todo.md",
+                  type: windowTypes.FILE,
+                  img: "/icons/file.png",
+                  payload: {
+                    content: await getFileContent("todo.md"),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+    {
       title: "Photo booth",
       type: windowTypes.PHOTO_BOOTH,
       img: "/icons/film.png",
       payload: {},
     },
-
     {
-      title: "Development",
+      title: "Trash",
       type: windowTypes.FOLDER,
-      img: "/icons/folder.png",
-      payload: {
-        icons: [
-          {
-            title: "README.md",
-            type: windowTypes.FILE,
-            img: "/icons/file.png",
-            payload: {
-              content: await getFileContent("README.md"),
-            },
-          },
-          {
-            title: "CONTRIBUTING.md",
-            type: windowTypes.FILE,
-            img: "/icons/file.png",
-            payload: {
-              content: await getFileContent("CONTRIBUTING.md"),
-            },
-          },
-          {
-            title: "todo.md",
-            type: windowTypes.FILE,
-            img: "/icons/file.png",
-            payload: {
-              content: await getFileContent("todo.md"),
-            },
-          },
-        ],
-      },
+      img: "/icons/trash.png",
+      payload: {},
     },
   ];
 
