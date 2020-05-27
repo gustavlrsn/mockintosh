@@ -1,9 +1,7 @@
 # operating system
 
-- hard drive icon
-- trash icon and dragging icons to trash
-- fix crispier pixelated font
-- about this computer
+- dragging icons
+- avoid anti-aliasing on pixel fonts
 - accounts/login system
 - control panel
 - "app store"
@@ -11,7 +9,7 @@
 # programs
 
 - chat
-- plutogram
+- "instagram"
 - collaborative paint
 - "browser"
 - "terminal"

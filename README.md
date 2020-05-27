@@ -1,5 +1,3 @@
-![dead mac symbol](https://mockintosh.com/dead.png)
-
 # Welcome
 
 Mockintosh is a mock operating system in classic Macintosh OS style.
@@ -9,3 +7,5 @@ The code is [open source](https://github.com/gustavlrsn/mockintosh) but all cred
 It is built with React and instructions on how to set up the development environment are in CONTRIBUTING.md.
 
 \- [@gustavlrsn](https://twitter.com/gustavlrsn)
+
+![mockintosh 1-bit](https://mockintosh.com/mockintosh.png)
