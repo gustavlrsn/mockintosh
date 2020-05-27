@@ -7,10 +7,10 @@ module.exports = {
     },
     extend: {
       gridTemplateColumns: {
-        icons: "repeat(7, 64px)",
+        desktop: "repeat(7, 64px)",
       },
       gridTemplateRows: {
-        icons: "repeat(5, 44px)",
+        desktop: "repeat(6, 44px)",
       },
     },
   },
