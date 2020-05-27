@@ -1,5 +1,6 @@
 import Head from "next/head";
 import { useState, useEffect } from "react";
+import store from "store";
 import Window from "../components/window";
 import File from "../components/file";
 import { getFileContent } from "../lib/api";
@@ -21,13 +22,24 @@ const windowTypes = {
 
 export default ({ initialWindows, icons }) => {
   const [showingSplashscreen, setSplashScreen] = useState(true);
+  const [settings, setSettings] = useState({ zoom: 1 });
 
   useEffect(() => {
     setTimeout(() => setSplashScreen(false), simulatedBootTime);
+
+    const settingsInLocalStorage = store.get("settings");
+    if (settingsInLocalStorage) {
+      setSettings(settingsInLocalStorage);
+    }
   }, []);
 
+  const setSetting = (name, value) => {
+    const newSettings = { ...settings, [`${name}`]: value };
+    setSettings(newSettings);
+    store.set("settings", newSettings);
+  };
+
   const [openWindows, setOpenWindows] = useState(initialWindows);
-  const [zoom, setZoom] = useState(1);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const closeWindow = (title) =>
     setOpenWindows([...openWindows.filter((window) => window.title !== title)]);
