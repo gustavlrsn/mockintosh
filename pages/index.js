@@ -119,7 +119,7 @@ export default ({ initialWindows, icons }) => {
                       closeWindow={closeWindow}
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
-                      scale={zoom}
+                      scale={settings.zoom}
                       resizable
                     >
                       <Folder
@@ -137,7 +137,7 @@ export default ({ initialWindows, icons }) => {
                       closeWindow={closeWindow}
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
-                      scale={zoom}
+                      scale={settings.zoom}
                       resizable
                       width={350}
                     >
@@ -153,7 +153,7 @@ export default ({ initialWindows, icons }) => {
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
                       // width={256}
-                      scale={zoom}
+                      scale={settings.zoom}
                     >
                       <PhotoBooth active={i === window.length - 1} />
                     </Window>
@@ -166,7 +166,7 @@ export default ({ initialWindows, icons }) => {
                       closeWindow={closeWindow}
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
-                      scale={zoom}
+                      scale={settings.zoom}
                       width={350}
                     >
                       <AboutThisMockintosh />
