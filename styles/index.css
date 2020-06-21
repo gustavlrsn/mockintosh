@@ -62,6 +62,12 @@ body {
   /* filter: invert(1); */
 }
 
+.disabled {
+  background-image: url("/disabled.png");
+  background-position: left top;
+  background-repeat: repeat;
+}
+
 .inverted {
   filter: invert(1);
 }
