@@ -1,6 +1,9 @@
 module.exports = {
   purge: ["./components/**/*.js", "./pages/**/*.js"],
   theme: {
+    boxShadow: {
+      default: "1px 1px 0 black",
+    },
     listStyleType: {
       none: "none",
       square: "square",
