@@ -1,11 +1,9 @@
 import { useRef, useState, useEffect } from "react";
+import Button from "components/button";
 
 export default ({}) => {
   const canvas = useRef(null);
-
   const video = useRef(null);
-  const thumbnailCanvas = useRef(null);
-  const thumbnailVideo = useRef(null);
 
   const [photos, setPhotos] = useState([]);
   const [viewingPhoto, setViewingPhoto] = useState(null);
@@ -21,18 +19,12 @@ export default ({}) => {
   const width = 320;
   const height = 240;
 
-  const thumbnailWidth = 60;
-  const thumbnailHeight = 45;
-
   function getVideo() {
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: false })
       .then((localMediaStream) => {
         video.current.srcObject = localMediaStream;
         video.current.play();
-
-        thumbnailVideo.current.srcObject = localMediaStream;
-        thumbnailVideo.current.play();
       })
       .catch((err) => {
         setErrorText(err.message);
@@ -45,17 +37,10 @@ export default ({}) => {
     video.current.setAttribute("width", width);
     video.current.setAttribute("height", width);
 
-    thumbnailVideo.current.setAttribute("width", thumbnailWidth);
-    thumbnailVideo.current.setAttribute("height", thumbnailHeight);
-
     canvas.current.width = width;
     canvas.current.height = height;
 
-    thumbnailCanvas.current.width = thumbnailWidth;
-    thumbnailCanvas.current.height = thumbnailHeight;
-
     const ctx = canvas.current.getContext("2d");
-    const thumbnailCtx = thumbnailCanvas.current.getContext("2d");
 
     const interval = setInterval(() => {
       if (!video.current) {
@@ -65,28 +50,8 @@ export default ({}) => {
         let pixels = ctx.getImageData(0, 0, width, height);
         pixels = floydSteinbergDithering(pixels, width, height);
         ctx.putImageData(pixels, 0, 0);
-
-        thumbnailCtx.drawImage(
-          thumbnailVideo.current,
-          0,
-          0,
-          thumbnailWidth,
-          thumbnailHeight
-        );
-        let thumbnailPixels = thumbnailCtx.getImageData(
-          0,
-          0,
-          thumbnailWidth,
-          thumbnailHeight
-        );
-        thumbnailPixels = floydSteinbergDithering(
-          thumbnailPixels,
-          thumbnailWidth,
-          thumbnailHeight
-        );
-        thumbnailCtx.putImageData(thumbnailPixels, 0, 0);
       }
-    }, 256);
+    }, 128);
   }
 
   function takePhoto() {
@@ -94,8 +59,7 @@ export default ({}) => {
     //snap.play();a
     const time = Date.now();
     const full = canvas.current.toDataURL("image/png");
-    const thumbnail = thumbnailCanvas.current.toDataURL("image/png");
-    setPhotos([{ full, thumbnail, time }, ...photos]);
+    setPhotos([{ full, time }, ...photos]);
     setViewingPhoto(0);
   }
 
@@ -119,58 +83,42 @@ export default ({}) => {
     <div>
       <div className="relative" style={{ height }}>
         {loading && (
-          <div className="absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center">
-            <img src="/icons/watch.png" />
+          <div className="absolute inset-0 flex items-center justify-center cursor-loading font-chicago">
+            {/* <img src="/icons/watch.png" /> */}
+            Initializing camera...
           </div>
         )}
         {errorText && (
-          <div className="absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center justify-center">
             <h1 className="font-chicago">{errorText}</h1>
           </div>
         )}
         <canvas ref={canvas} className="" />
         {viewingPhoto !== null && (
-          <div className="absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center justify-center">
             <img src={photos[viewingPhoto].full} />
           </div>
         )}
       </div>
       <video ref={video} className="hidden" />
 
-      <canvas ref={thumbnailCanvas} className="hidden" />
-      <video ref={thumbnailVideo} className="hidden" />
-
       <div className="flex items-center justify-center border-t border-black py-1">
         {viewingPhoto == null ? (
-          <button
-            className="border rounded block mx-2 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
-            onClick={takePhoto}
-            disabled={loading}
-          >
+          <Button onClick={takePhoto} disabled={loading || errorText}>
             Take photo
-          </button>
+          </Button>
         ) : (
           <>
-            {/* <button
-              className="border rounded block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
-              onClick={() => setViewingPhoto(null)}
-            >
-              Back to camera
-            </button> */}
-
-            <button
-              className="border rounded block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
-              onClick={() => deletePhoto(viewingPhoto)}
-            >
+            <Button className="mx-1" onClick={() => deletePhoto(viewingPhoto)}>
               Delete
-            </button>
-            <a
-              className="border rounded block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+            </Button>
+            <Button
+              className="mx-1"
               href={photos[viewingPhoto].full}
               download={`mockintosh-photobooth-${photos[viewingPhoto].time}`}
             >
               Save
-            </a>
+            </Button>
           </>
         )}
       </div>

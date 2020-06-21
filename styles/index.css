@@ -72,6 +72,10 @@ body {
   filter: invert(1);
 }
 
+.cursor-loading {
+  cursor: url("/icons/watch.png"), auto;
+}
+
 * {
   @apply select-none;
   image-rendering: pixelated;
