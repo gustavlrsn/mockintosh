@@ -123,10 +123,9 @@ h5 {
 }
 
 .content pre {
-  @apply p-1 -mt-1 border border-dashed border-black overflow-hidden overflow-x-scroll cursor-text;
-
-  user-select: text;
+  @apply p-1 -mt-1 border border-dashed border-black overflow-hidden overflow-x-scroll cursor-text select-text;
 }
+
 .content code {
   font-family: "Geneva";
   font-size: 16px;

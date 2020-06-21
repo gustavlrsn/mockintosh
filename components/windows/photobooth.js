@@ -18,8 +18,8 @@ export default ({}) => {
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
 
-  const width = 256;
-  const height = 192;
+  const width = 320;
+  const height = 240;
 
   const thumbnailWidth = 60;
   const thumbnailHeight = 45;
@@ -140,10 +140,10 @@ export default ({}) => {
       <canvas ref={thumbnailCanvas} className="hidden" />
       <video ref={thumbnailVideo} className="hidden" />
 
-      <div className="flex items-center justify-center">
+      <div className="flex items-center justify-center border-t border-black py-1">
         {viewingPhoto == null ? (
           <button
-            className="border rounded my-1 block mx-2 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+            className="border rounded block mx-2 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
             onClick={takePhoto}
             disabled={loading}
           >
@@ -151,47 +151,49 @@ export default ({}) => {
           </button>
         ) : (
           <>
-            <button
-              className="border rounded my-1 block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+            {/* <button
+              className="border rounded block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
               onClick={() => setViewingPhoto(null)}
             >
               Back to camera
+            </button> */}
+
+            <button
+              className="border rounded block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+              onClick={() => deletePhoto(viewingPhoto)}
+            >
+              Delete
             </button>
             <a
-              className="border rounded my-1 block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
+              className="border rounded block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
               href={photos[viewingPhoto].full}
               download={`mockintosh-photobooth-${photos[viewingPhoto].time}`}
             >
               Save
             </a>
-
-            <button
-              className="border rounded my-1 block mx-1 focus:outline-none active:bg-black active:text-white border-black py-1 px-2 font-chicago"
-              onClick={() => deletePhoto(viewingPhoto)}
-            >
-              Delete
-            </button>
           </>
         )}
       </div>
 
-      <div className="max-w-full overflow-x-scroll scroll bg-black">
-        <div
-          className="flex py-1 border-t-2 border-black "
-          style={{ height: "55px" }}
-        >
+      {/* <div className="max-w-full overflow-x-scroll scroll border-t border-black">
+        <div className="flex py-1 " style={{ height: "55px" }}>
           {photos.map(({ thumbnail, time }, i) => (
             <button
               key={time}
               onClick={() => setViewingPhoto(i)}
-              className="flex-none ml-1 focus:outline-none"
+              className={`flex-none ml-1 focus:outline-none border-black border `}
+              style={
+                viewingPhoto === i
+                  ? { outline: "2px solid black" }
+                  : { outline: "0" }
+              }
             >
               <img className="" src={thumbnail} />
             </button>
           ))}
           {/* <button href={full} download={`mockintosh-photobooth-${time}`}> */}
-        </div>
-      </div>
+      {/* </div>
+      </div> */}
     </div>
   );
 };

@@ -152,7 +152,7 @@ export default ({ initialWindows, icons }) => {
                       closeWindow={closeWindow}
                       bringWindowToFront={bringWindowToFront}
                       active={i === openWindows.length - 1}
-                      // width={256}
+                      width={320}
                       scale={settings.zoom}
                     >
                       <PhotoBooth active={i === window.length - 1} />
