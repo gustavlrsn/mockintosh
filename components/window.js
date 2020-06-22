@@ -18,7 +18,7 @@ export default ({
       scale={scale}
       // bounds="parent"
     >
-      <div className="absolute text-sm border border-black shadow bg-white">
+      <div className="absolute text-sm border border-black shadow bg-white z-10">
         <div className="handle border-b border-black h-5 flex items-center justify-center text-sm">
           <div
             className={active ? "bg-stripes" : ""}

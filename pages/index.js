@@ -79,6 +79,7 @@ export default ({ initialWindows, icons }) => {
   return (
     <>
       <Head>
+        <title>Mockintosh</title>
         <meta property="og:image" content="https://mockintosh.com/og.png" />
         <meta property="og:title" content="Mockintosh" />
         <meta property="og:description" content="mock operating system" />
@@ -89,8 +90,6 @@ export default ({ initialWindows, icons }) => {
         <meta name="twitter:title" content="Mockintosh" />
         <meta name="twitter:description" content="mock operating system" />
         <meta name="twitter:image" content="https://mockintosh.com/og.png" />
-
-        <title>Mockintosh</title>
       </Head>
       {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
 
