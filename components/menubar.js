@@ -90,7 +90,6 @@ export default ({ openWindow, zoom, setZoom }) => {
         <MenuItem>File</MenuItem>
         <MenuItem>Edit</MenuItem>
         <MenuItem>View</MenuItem>
-        <MenuItem>Label</MenuItem>
         <MenuItem>Special</MenuItem>
       </div>
     </div>

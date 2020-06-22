@@ -42,6 +42,18 @@ body {
   @apply bg-black min-h-screen;
 }
 
+.button-inside {
+  background-image: url("/btn-corner-lt.png"), url("/btn-corner-rt.png"),
+    url("/btn-corner-lb.png"), url("/btn-corner-rb.png");
+  background-position: left top, right top, left bottom, right bottom;
+  background-repeat: no-repeat;
+  padding: 5px 10px;
+}
+
+.button-outside {
+  box-shadow: inset 0px 0px 0px 1px black;
+}
+
 .corner-top {
   background-image: url("/corner-lt.png"), url("/corner-rt.png");
   background-position: left top, right top; /* this positions the second image */

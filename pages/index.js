@@ -1,5 +1,5 @@
 import Head from "next/head";
-import { useState, useEffect, createRef, useRef } from "react";
+import { useState, useEffect } from "react";
 import store from "store";
 
 import Window from "../components/window";
@@ -76,22 +76,21 @@ export default ({ initialWindows, icons }) => {
       ]);
   };
 
-  const title = `Mockintosh ${version}`;
   return (
     <>
       <Head>
         <meta property="og:image" content="https://mockintosh.com/og.png" />
-        <meta property="og:title" content={title} />
+        <meta property="og:title" content="Mockintosh" />
         <meta property="og:description" content="mock operating system" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://mockintosh.com/" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:creator" content="@gustavlrsn" />
-        <meta name="twitter:title" content={title} />
+        <meta name="twitter:title" content="Mockintosh" />
         <meta name="twitter:description" content="mock operating system" />
         <meta name="twitter:image" content="https://mockintosh.com/og.png" />
 
-        <title>{title}</title>
+        <title>Mockintosh</title>
       </Head>
       {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
 

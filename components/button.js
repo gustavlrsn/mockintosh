@@ -7,19 +7,15 @@ export default ({
   ...props
 }) => {
   const classes =
-    "border overflow-hidden rounded block focus:outline-none border-black py-1 px-2 font-chicago" +
+    "block focus:outline-none font-chicago" +
     " " +
-    (disabled ? "cursor-default" : "active:bg-black active:text-white") +
-    " " +
-    className;
+    (disabled ? "cursor-default" : "active:bg-black active:text-white");
 
   return (
-    <div className="relative">
-      {disabled && <div className="absolute inset-0 disabled"></div>}
-
+    <div className={"relative button-outside " + className}>
       {href ? (
         <a className={classes} href={href} {...props}>
-          {children}
+          <div className="relative block button-inside">{children}</div>
         </a>
       ) : (
         <button
@@ -28,7 +24,10 @@ export default ({
           disabled={disabled}
           {...props}
         >
-          {children}
+          <div className="relative block button-inside">
+            {disabled && <div className="absolute inset-0 disabled"></div>}
+            {children}
+          </div>
         </button>
       )}
     </div>
