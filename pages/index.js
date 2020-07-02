@@ -1,6 +1,7 @@
 import Head from "next/head";
 import { useState, useEffect } from "react";
 import store from "store";
+import { useSession } from "next-auth/client";
 
 import Window from "../components/window";
 import { getFileContent } from "../lib/api";
