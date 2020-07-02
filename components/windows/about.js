@@ -23,8 +23,21 @@ export default () => {
       >
         <ul className="px-4">
           {contributors.map((contributor) => (
-            <li key={contributor.username} className="flex justify-between">
-              <span>@{contributor.username}</span>{" "}
+            <li
+              key={contributor.username}
+              className="flex justify-between mt-1"
+            >
+              <div className="flex items-center">
+                <img
+                  src="/user2.png"
+                  className="mr-2"
+                  style={{
+                    height: 15,
+                    width: 12,
+                  }}
+                />
+                <span>@{contributor.username}</span>
+              </div>{" "}
               <span>{contributor.commits} commits</span>
             </li>
           ))}
