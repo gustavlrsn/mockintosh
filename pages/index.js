@@ -28,6 +28,7 @@ export const windowTypes = {
 export default ({ initialWindows, icons }) => {
   const [showingSplashscreen, setSplashScreen] = useState(true);
   const [settings, setSettings] = useState({ zoom: 1 });
+  const [session, loading] = useSession();
 
   useEffect(() => {
     setTimeout(() => setSplashScreen(false), simulatedBootTime);
@@ -76,6 +77,7 @@ export default ({ initialWindows, icons }) => {
       ]);
   };
 
+  const user = session?.user;
   return (
     <>
       <Head>
@@ -103,6 +105,7 @@ export default ({ initialWindows, icons }) => {
             openWindow={openWindow}
             zoom={settings.zoom}
             setZoom={(zoom) => setSetting("zoom", zoom)}
+            user={session?.user}
           />
 
           {/* Windows */}

@@ -178,6 +178,13 @@ h5 {
   cursor: grabbing !important;
 }
 
+/* Input: */
+@variants group-hover, hover, focus {
+  .inverted {
+    filter: invert(1);
+  }
+}
+
 /* Start purging... */
 @tailwind utilities;
 /* Stop purging. */
