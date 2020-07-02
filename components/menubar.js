@@ -2,7 +2,7 @@ import { useState } from "react";
 import toggleFullscreen from "../utils/toggleFullscreen";
 import { windowTypes } from "../pages/index";
 import Button from "components/button";
-import Login from "components/login";
+// import Login from "components/login";
 import { signin, signout } from "next-auth/client";
 
 const MenuItem = ({ children, dropdown, left }) => {
