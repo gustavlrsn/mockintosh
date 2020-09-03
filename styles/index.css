@@ -82,6 +82,7 @@ body {
 
 .inverted {
   filter: invert(1);
+  /* //z-index: -1; */
 }
 
 .cursor-loading {
@@ -91,6 +92,7 @@ body {
 * {
   @apply select-none;
   image-rendering: pixelated;
+  cursor: url("/cursor.png"), auto !important;
 }
 
 .font-chicago {
@@ -140,6 +142,7 @@ h5 {
 .content ul {
   @apply mb-3 list-square pl-4 leading-4 select-text;
 }
+
 .content .contains-task-list {
   @apply list-none p-0;
 }

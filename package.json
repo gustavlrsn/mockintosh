@@ -1,15 +1,19 @@
 {
   "name": "mockintosh",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "scripts": {
     "dev": "next",
     "build": "next build",
     "start": "next start"
   },
   "dependencies": {
+    "graphql": "^15.3.0",
+    "graphql-request": "^2.0.0",
     "gray-matter": "^4.0.2",
-    "next": "^9.4.1",
-    "next-auth": "^2.2.0",
+    "isomorphic-unfetch": "^3.0.0",
+    "isomorphic-ws": "^4.0.1",
+    "next": "^9.5.1",
+    "next-auth": "^3.1.0",
     "next-fonts": "^1.1.0",
     "pg": "^8.2.1",
     "react": "^16.12.0",
@@ -17,7 +21,10 @@
     "react-draggable": "^4.3.1",
     "remark": "^12.0.0",
     "remark-html": "^11.0.1",
-    "store": "^2.0.12"
+    "store": "^2.0.12",
+    "subscriptions-transport-ws": "^0.9.17",
+    "urql": "^1.9.8",
+    "ws": "^7.3.1"
   },
   "devDependencies": {
     "postcss-preset-env": "^6.7.0",

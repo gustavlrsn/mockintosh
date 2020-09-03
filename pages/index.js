@@ -1,21 +1,25 @@
-import Head from "next/head";
 import { useState, useEffect } from "react";
 import store from "store";
 import { useSession } from "next-auth/client";
 
-import Window from "../components/window";
-import { getFileContent } from "../lib/api";
-import PhotoBooth from "../components/windows/photobooth";
-import Folder from "../components/windows/folder";
-import File from "../components/windows/file";
-import AboutThisMockintosh from "../components/windows/about";
-import Menubar from "../components/menubar";
-import Splashscreen from "../components/splashscreen";
-import Desktop from "../components/desktop";
-import Screen from "../components/screen";
-import Icon from "../components/icon";
-import getDefaultPosition from "../utils/getDefaultPosition";
-import { version } from "../package.json";
+import Window from "components/window";
+import Head from "components/head";
+import { getFileContent } from "lib/api";
+import WithGraphQL from "lib/withGraphQL";
+import PhotoBooth from "components/windows/photobooth";
+import Chat from "components/windows/chat";
+import Folder from "components/windows/folder";
+import File from "components/windows/file";
+import AboutThisMockintosh from "components/windows/about";
+import Menubar from "components/menubar";
+import Splashscreen from "components/splashscreen";
+import Desktop from "components/desktop";
+import Screen from "components/screen";
+import Icon from "components/icon";
+import ChooseUsernamePopup from "components/chooseUsername";
+
+import getDefaultPosition from "utils/getDefaultPosition";
+import { version } from "package.json";
 
 const simulatedBootTime = 1337;
 
@@ -24,12 +28,16 @@ export const windowTypes = {
   FILE: "FILE",
   FOLDER: "FOLDER",
   ABOUT_THIS_MOCKINTOSH: "ABOUT_THIS_MOCKINTOSH",
+  CHAT: "CHAT",
+  //MOCKINGRAM: "MOCKINGRAM",
 };
 
-export default ({ initialWindows, icons }) => {
+const Index = ({ initialWindows, icons }) => {
   const [showingSplashscreen, setSplashScreen] = useState(true);
   const [settings, setSettings] = useState({ zoom: 1 });
+
   const [session, loading] = useSession();
+  const user = session?.user;
 
   useEffect(() => {
     setTimeout(() => setSplashScreen(false), simulatedBootTime);
@@ -78,118 +86,134 @@ export default ({ initialWindows, icons }) => {
       ]);
   };
 
-  const user = session?.user;
   return (
     <>
-      <Head>
-        <title>Mockintosh</title>
-        <meta property="og:image" content="https://mockintosh.com/og.png" />
-        <meta property="og:title" content="Mockintosh" />
-        <meta property="og:description" content="mock operating system" />
-        <meta property="og:type" content="website" />
-        <meta property="og:url" content="https://mockintosh.com/" />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:creator" content="@gustavlrsn" />
-        <meta name="twitter:title" content="Mockintosh" />
-        <meta name="twitter:description" content="mock operating system" />
-        <meta name="twitter:image" content="https://mockintosh.com/og.png" />
-      </Head>
-      {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
+      <WithGraphQL session={session}>
+        <Head />
+        {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
+        <div className="flex justify-center items-center min-h-screen">
+          <Screen width={512} height={342} zoom={settings.zoom}>
+            {showingSplashscreen && (
+              <Splashscreen onClick={() => setSplashScreen(false)} />
+            )}
+            <Menubar
+              openWindow={openWindow}
+              zoom={settings.zoom}
+              setZoom={(zoom) => setSetting("zoom", zoom)}
+              user={user}
+            />
 
-      <div className="flex justify-center items-center min-h-screen">
-        <Screen width={512} height={342} zoom={settings.zoom}>
-          {showingSplashscreen && (
-            <Splashscreen onClick={() => setSplashScreen(false)} />
-          )}
+            <ChooseUsernamePopup currentUser={user} />
+            {/* Windows */}
+            <div className="flex-grow relative">
+              {openWindows.map((window, i) => {
+                switch (window.type) {
+                  case windowTypes.FOLDER:
+                    return (
+                      <Window
+                        key={window.title}
+                        window={window}
+                        closeWindow={closeWindow}
+                        bringWindowToFront={bringWindowToFront}
+                        active={i === openWindows.length - 1}
+                        scale={settings.zoom}
+                        resizable
+                      >
+                        <Folder
+                          {...window.payload}
+                          openWindow={openWindow}
+                          openWindows={openWindows}
+                        />
+                      </Window>
+                    );
+                  case windowTypes.FILE:
+                    return (
+                      <Window
+                        key={window.title}
+                        window={window}
+                        closeWindow={closeWindow}
+                        bringWindowToFront={bringWindowToFront}
+                        active={i === openWindows.length - 1}
+                        scale={settings.zoom}
+                        resizable
+                        width={350}
+                      >
+                        <File {...window.payload} />
+                      </Window>
+                    );
+                  case windowTypes.PHOTO_BOOTH:
+                    return (
+                      <Window
+                        key={window.title}
+                        window={window}
+                        closeWindow={closeWindow}
+                        bringWindowToFront={bringWindowToFront}
+                        active={i === openWindows.length - 1}
+                        width={320}
+                        scale={settings.zoom}
+                      >
+                        <PhotoBooth active={i === window.length - 1} />
+                      </Window>
+                    );
+                  case windowTypes.ABOUT_THIS_MOCKINTOSH:
+                    return (
+                      <Window
+                        key={window.title}
+                        window={window}
+                        closeWindow={closeWindow}
+                        bringWindowToFront={bringWindowToFront}
+                        active={i === openWindows.length - 1}
+                        scale={settings.zoom}
+                        width={350}
+                      >
+                        <AboutThisMockintosh />
+                      </Window>
+                    );
+                  case windowTypes.CHAT:
+                    return (
+                      <Window
+                        key={window.title}
+                        window={window}
+                        closeWindow={closeWindow}
+                        bringWindowToFront={bringWindowToFront}
+                        active={i === openWindows.length - 1}
+                        scale={settings.zoom}
+                        width={300}
+                      >
+                        <Chat currentUser={user} />
+                      </Window>
+                    );
+                  // case windowTypes.MOCKINGRAM:
+                  //   return (
+                  //     <Window
+                  //       key={window.title}
+                  //       window={window}
+                  //       closeWindow={closeWindow}
+                  //       bringWindowToFront={bringWindowToFront}
+                  //       active={i === openWindows.length - 1}
+                  //       scale={settings.zoom}
+                  //       width={240}
+                  //     >
+                  //       <Chat />
+                  //     </Window>
+                  //   );
+                }
+              })}
 
-          <Menubar
-            openWindow={openWindow}
-            zoom={settings.zoom}
-            setZoom={(zoom) => setSetting("zoom", zoom)}
-            user={session?.user}
-          />
-
-          {/* Windows */}
-          <div className="flex-grow relative">
-            {openWindows.map((window, i) => {
-              switch (window.type) {
-                case windowTypes.FOLDER:
-                  return (
-                    <Window
-                      key={window.title}
-                      window={window}
-                      closeWindow={closeWindow}
-                      bringWindowToFront={bringWindowToFront}
-                      active={i === openWindows.length - 1}
-                      scale={settings.zoom}
-                      resizable
-                    >
-                      <Folder
-                        {...window.payload}
-                        openWindow={openWindow}
-                        openWindows={openWindows}
-                      />
-                    </Window>
-                  );
-                case windowTypes.FILE:
-                  return (
-                    <Window
-                      key={window.title}
-                      window={window}
-                      closeWindow={closeWindow}
-                      bringWindowToFront={bringWindowToFront}
-                      active={i === openWindows.length - 1}
-                      scale={settings.zoom}
-                      resizable
-                      width={350}
-                    >
-                      <File {...window.payload} />
-                    </Window>
-                  );
-                case windowTypes.PHOTO_BOOTH:
-                  return (
-                    <Window
-                      key={window.title}
-                      window={window}
-                      closeWindow={closeWindow}
-                      bringWindowToFront={bringWindowToFront}
-                      active={i === openWindows.length - 1}
-                      width={320}
-                      scale={settings.zoom}
-                    >
-                      <PhotoBooth active={i === window.length - 1} />
-                    </Window>
-                  );
-                case windowTypes.ABOUT_THIS_MOCKINTOSH:
-                  return (
-                    <Window
-                      key={window.title}
-                      window={window}
-                      closeWindow={closeWindow}
-                      bringWindowToFront={bringWindowToFront}
-                      active={i === openWindows.length - 1}
-                      scale={settings.zoom}
-                      width={350}
-                    >
-                      <AboutThisMockintosh />
-                    </Window>
-                  );
-              }
-            })}
-
-            <Desktop>
-              {icons.map((icon) => (
-                <Icon
-                  key={icon.title}
-                  icon={icon}
-                  openWindow={openWindow}
-                  openWindows={openWindows}
-                />
-              ))}
-            </Desktop>
-          </div>
-        </Screen>
-      </div>
+              <Desktop>
+                {icons.map((icon) => (
+                  <Icon
+                    key={icon.title}
+                    icon={icon}
+                    openWindow={openWindow}
+                    openWindows={openWindows}
+                  />
+                ))}
+              </Desktop>
+            </div>
+          </Screen>
+        </div>
+      </WithGraphQL>
     </>
   );
 };
@@ -241,11 +265,22 @@ export async function getStaticProps() {
       },
     },
     {
-      title: "Photo booth",
+      title: "Camera",
       type: windowTypes.PHOTO_BOOTH,
-      img: "/icons/film.png",
+      img: "/icons/camera2.png",
       payload: {},
     },
+    // {
+    //   title: "1-bitgram",
+    //   type: windowTypes.MOCKINGRAM,
+    //   img: "/icons/film.png",
+    // },
+    {
+      title: "Chat",
+      type: windowTypes.CHAT,
+      img: "/icons/chat.png",
+    },
+
     {
       title: "Trash",
       type: windowTypes.FOLDER,
@@ -258,3 +293,5 @@ export async function getStaticProps() {
     props: { initialWindows, icons, version },
   };
 }
+
+export default Index;

@@ -2,8 +2,7 @@ import { useState } from "react";
 import toggleFullscreen from "../utils/toggleFullscreen";
 import { windowTypes } from "../pages/index";
 import Button from "components/button";
-// import Login from "components/login";
-import { signin, signout } from "next-auth/client";
+import { signIn, signOut } from "next-auth/client";
 
 const MenuItem = ({ children, dropdown, left }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -45,7 +44,7 @@ const MenuItem = ({ children, dropdown, left }) => {
   );
 };
 
-export default ({ openWindow, zoom, setZoom, user }) => {
+const Menubar = ({ openWindow, zoom, setZoom, user }) => {
   return (
     <div className="corner-top bg-white px-2 h-5 border-b border-black flex items-stretch justify-between">
       <div className="flex items-stretch relative">
@@ -121,7 +120,7 @@ export default ({ openWindow, zoom, setZoom, user }) => {
                 </button> */}
                 <button
                   className="px-3 py-1 focus:outline-none whitespace-no-wrap font-chicago text-left block hover:bg-black hover:text-white"
-                  onClick={signout}
+                  onClick={signOut}
                 >
                   Sign Out
                 </button>
@@ -130,7 +129,7 @@ export default ({ openWindow, zoom, setZoom, user }) => {
               <button
                 className="px-3 pr-5 py-1 focus:outline-none group flex items-center whitespace-no-wrap font-chicago text-left hover:bg-black hover:text-white"
                 onClick={() => {
-                  signin("twitter");
+                  signIn("twitter");
                   closeDropdown();
                 }}
               >
@@ -157,3 +156,5 @@ export default ({ openWindow, zoom, setZoom, user }) => {
     </div>
   );
 };
+
+export default Menubar;
