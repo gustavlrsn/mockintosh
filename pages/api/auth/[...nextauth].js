@@ -57,8 +57,6 @@ const options = {
       session.id = user.id;
       session.token = encodedToken;
       session.user.id = user.id;
-      console.log({ user });
-      //session.user.username = user.username;
 
       return Promise.resolve(session);
     },
