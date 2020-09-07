@@ -267,7 +267,7 @@ export async function getStaticProps() {
     {
       title: "Camera",
       type: windowTypes.PHOTO_BOOTH,
-      img: "/icons/camera2.png",
+      img: "/icons/camera.png",
       payload: {},
     },
     // {
