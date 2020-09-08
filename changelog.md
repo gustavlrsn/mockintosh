@@ -1,3 +1,7 @@
+# 0.2.1
+
+- add autoscrolling to chat app
+
 # 0.2.0
 
 - add twitter login
