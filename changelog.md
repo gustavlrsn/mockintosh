@@ -1,3 +1,8 @@
+# 0.2.2
+
+- update dithering to Atkinson algorithm for the proper Macintosh look
+- disable login since the API is offline..
+
 # 0.2.1
 
 - add autoscrolling to chat app

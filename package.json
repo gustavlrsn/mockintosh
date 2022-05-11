@@ -1,6 +1,6 @@
 {
   "name": "mockintosh",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "scripts": {
     "dev": "next",
     "build": "next build",
@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "autoscroll-react": "^3.2.0",
+    "canvas-dither": "^1.0.1",
     "graphql": "^15.3.0",
     "graphql-request": "^2.0.0",
     "gray-matter": "^4.0.2",

@@ -91,8 +91,9 @@ const Index = ({ initialWindows, icons }) => {
       <WithGraphQL session={session}>
         <Head />
         {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
+
         <div className="flex justify-center items-center min-h-screen">
-          <Screen width={512} height={342} zoom={settings.zoom}>
+          <Screen width={512} height={346} zoom={settings.zoom}>
             {showingSplashscreen && (
               <Splashscreen onClick={() => setSplashScreen(false)} />
             )}
@@ -105,7 +106,7 @@ const Index = ({ initialWindows, icons }) => {
 
             <ChooseUsernamePopup currentUser={user} />
             {/* Windows */}
-            <div className="flex-grow relative">
+            <div className="flex-grow relative flex">
               {openWindows.map((window, i) => {
                 switch (window.type) {
                   case windowTypes.FOLDER:
@@ -200,7 +201,7 @@ const Index = ({ initialWindows, icons }) => {
                 }
               })}
 
-              <Desktop>
+              <Desktop openWindow={openWindow} openWindows={openWindows}>
                 {icons.map((icon) => (
                   <Icon
                     key={icon.title}
@@ -279,13 +280,6 @@ export async function getStaticProps() {
       title: "Chat",
       type: windowTypes.CHAT,
       img: "/icons/chat.png",
-    },
-
-    {
-      title: "Trash",
-      type: windowTypes.FOLDER,
-      img: "/icons/trash.png",
-      payload: {},
     },
   ];
 

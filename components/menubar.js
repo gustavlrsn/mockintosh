@@ -127,16 +127,19 @@ const Menubar = ({ openWindow, zoom, setZoom, user }) => {
               </>
             ) : (
               <button
-                className="px-3 pr-5 py-1 focus:outline-none group flex items-center whitespace-no-wrap font-chicago text-left hover:bg-black hover:text-white"
+                className="px-3 pr-5 py-1 focus:outline-none group flex items-center whitespace-no-wrap font-chicago text-left hover:bg-black hover:text-white relative"
                 onClick={() => {
-                  signIn("twitter");
-                  closeDropdown();
+                  //signIn("twitter");
+                  //closeDropdown();
                 }}
               >
+                <div className="absolute inset-0 disabled"></div>
                 <img
                   src="/twitter.png"
                   className="mr-2 group-hover:inverted"
-                  style={{ width: 13, height: 10 }}
+                  //style={{ width: 13, height: 10 }}
+                  width="13"
+                  height="10"
                 />
                 Sign In with Twitter
               </button>

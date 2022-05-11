@@ -12,7 +12,7 @@ const Icon = ({
       className={`col-start-7 flex-none flex items-center flex-col ${
         (open ? "cursor-default" : "cursor-pointer") +
         " " +
-        (title === "Trash" ? "row-start-6" : "")
+        (title === "Trash" ? "place-self-end" : "")
       }`}
       style={{ minWidth: 64 }}
       onClick={() =>

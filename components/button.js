@@ -1,9 +1,10 @@
-export default ({
+const Button = ({
   children,
   onClick,
   href,
   disabled,
   className = "",
+  type = "button",
   ...props
 }) => {
   const classes =
@@ -23,6 +24,7 @@ export default ({
             className={classes}
             onClick={onClick}
             disabled={disabled}
+            type={type}
             {...props}
           >
             <div className="relative button-inside block">
@@ -35,3 +37,5 @@ export default ({
     </div>
   );
 };
+
+export default Button;

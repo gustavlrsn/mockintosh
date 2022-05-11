@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import Button from "components/button";
+import Dither from "canvas-dither";
 
 export default ({}) => {
   const canvas = useRef(null);
@@ -48,7 +49,8 @@ export default ({}) => {
       } else {
         ctx.drawImage(video.current, 0, 0, width, height);
         let pixels = ctx.getImageData(0, 0, width, height);
-        pixels = floydSteinbergDithering(pixels, width, height);
+        pixels = Dither.atkinson(pixels);
+        //pixels = Dither.bayer(pixels, 135);
         ctx.putImageData(pixels, 0, 0);
       }
     }, 128);
@@ -80,7 +82,7 @@ export default ({}) => {
   }, []);
 
   return (
-    <div>
+    <div className="relative">
       <div className="relative" style={{ height }}>
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center cursor-loading font-chicago">
@@ -93,7 +95,7 @@ export default ({}) => {
             <h1 className="font-chicago">{errorText}</h1>
           </div>
         )}
-        <canvas ref={canvas} className="" />
+        <canvas ref={canvas} className="" style={{ transform: "scaleX(-1)" }} />
         {viewingPhoto !== null && (
           <div className="absolute inset-0 flex items-center justify-center">
             <img src={photos[viewingPhoto].full} />
@@ -145,58 +147,3 @@ export default ({}) => {
     </div>
   );
 };
-
-function floydSteinbergDithering(pixels, width, height) {
-  function index(x, y, width) {
-    return (x + y * width) * 4;
-  }
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const red = pixels.data[index(x, y, width)];
-      const green = pixels.data[index(x, y, width) + 1];
-      const blue = pixels.data[index(x, y, width) + 2];
-
-      const average = Math.round((red + green + blue) / 3);
-      const newValue = Math.round(average / 255) * 255;
-
-      pixels.data[index(x, y, width)] = newValue;
-      pixels.data[index(x, y, width) + 1] = newValue;
-      pixels.data[index(x, y, width) + 2] = newValue;
-
-      const avgError = average - newValue;
-
-      //todo: make this prettier :)
-
-      pixels.data[index(x + 1, y, width) + 0] =
-        pixels.data[index(x + 1, y, width) + 0] + avgError * (7 / 16);
-      pixels.data[index(x + 1, y, width) + 1] =
-        pixels.data[index(x + 1, y, width) + 1] + avgError * (7 / 16);
-      pixels.data[index(x + 1, y, width) + 2] =
-        pixels.data[index(x + 1, y, width) + 2] + avgError * (7 / 16);
-
-      pixels.data[index(x - 1, y + 1, width) + 0] =
-        pixels.data[index(x - 1, y + 1, width) + 0] + avgError * (3 / 16);
-      pixels.data[index(x - 1, y + 1, width) + 1] =
-        pixels.data[index(x - 1, y + 1, width) + 1] + avgError * (3 / 16);
-      pixels.data[index(x - 1, y + 1, width) + 2] =
-        pixels.data[index(x - 1, y + 1, width) + 2] + avgError * (3 / 16);
-
-      pixels.data[index(x, y + 1, width) + 0] =
-        pixels.data[index(x, y + 1, width) + 0] + avgError * (5 / 16);
-      pixels.data[index(x, y + 1, width) + 1] =
-        pixels.data[index(x, y + 1, width) + 1] + avgError * (5 / 16);
-      pixels.data[index(x, y + 1, width) + 2] =
-        pixels.data[index(x, y + 1, width) + 2] + avgError * (5 / 16);
-
-      pixels.data[index(x + 1, y + 1, width) + 0] =
-        pixels.data[index(x + 1, y + 1, width) + 0] + avgError * (1 / 16);
-      pixels.data[index(x + 1, y + 1, width) + 1] =
-        pixels.data[index(x + 1, y + 1, width) + 1] + avgError * (1 / 16);
-      pixels.data[index(x + 1, y + 1, width) + 2] =
-        pixels.data[index(x + 1, y + 1, width) + 2] + avgError * (1 / 16);
-    }
-  }
-
-  return pixels;
-}
