@@ -44,9 +44,9 @@ const MenuItem = ({ children, dropdown, left }) => {
   );
 };
 
-const Menubar = ({ openWindow, zoom, setZoom, user }) => {
+const Menubar = ({ openWindow, zoom, setZoom, user, showMac, setShowMac }) => {
   return (
-    <div className="corner-top bg-white px-2 h-5 border-b border-black flex items-stretch justify-between">
+    <div className="bg-white px-2 h-5 border-b border-black flex items-stretch justify-between z-30">
       <div className="flex items-stretch relative">
         <MenuItem
           dropdown={({ closeDropdown }) => (
@@ -75,6 +75,12 @@ const Menubar = ({ openWindow, zoom, setZoom, user }) => {
                 onClick={() => setZoom(zoom === 1 ? 2 : 1)}
               >
                 {zoom === 1 ? "Zoom In" : "Zoom Out"}
+              </button>
+              <button
+                className="px-3 py-1 focus:outline-none font-chicago text-left block hover:bg-black hover:text-white"
+                onClick={() => setShowMac(!showMac)}
+              >
+                {showMac ? "Hide Macintosh SE" : "Show Macintosh SE"}
               </button>
               <a
                 className="px-3 py-1 block font-chicago hover:bg-black hover:text-white"

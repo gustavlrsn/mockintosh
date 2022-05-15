@@ -1,3 +1,7 @@
+# 0.2.3
+
+- add Macintosh SE illustration made by Motohiko Narita (from now defunct Vintage Mac Museum website)
+
 # 0.2.2
 
 - update dithering to Atkinson algorithm for the proper Macintosh look

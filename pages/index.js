@@ -34,7 +34,7 @@ export const windowTypes = {
 
 const Index = ({ initialWindows, icons }) => {
   const [showingSplashscreen, setSplashScreen] = useState(true);
-  const [settings, setSettings] = useState({ zoom: 1 });
+  const [settings, setSettings] = useState({ zoom: 1, showMac: true });
 
   const [session, loading] = useSession();
   const user = session?.user;
@@ -93,7 +93,12 @@ const Index = ({ initialWindows, icons }) => {
         {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
 
         <div className="flex justify-center items-center min-h-screen">
-          <Screen width={512} height={346} zoom={settings.zoom}>
+          <Screen
+            width={512}
+            height={346}
+            zoom={settings.zoom}
+            showMac={settings.showMac}
+          >
             {showingSplashscreen && (
               <Splashscreen onClick={() => setSplashScreen(false)} />
             )}
@@ -101,6 +106,8 @@ const Index = ({ initialWindows, icons }) => {
               openWindow={openWindow}
               zoom={settings.zoom}
               setZoom={(zoom) => setSetting("zoom", zoom)}
+              showMac={settings.showMac}
+              setShowMac={(showMac) => setSetting("showMac", showMac)}
               user={user}
             />
 
@@ -266,7 +273,7 @@ export async function getStaticProps() {
       },
     },
     {
-      title: "Camera",
+      title: "Photo Booth",
       type: windowTypes.PHOTO_BOOTH,
       img: "/icons/camera.png",
       payload: {},

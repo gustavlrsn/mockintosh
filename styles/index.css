@@ -62,9 +62,15 @@ body {
 
 .corner {
   background-image: url("/corner-lt.png"), url("/corner-rt.png"),
-    url("/corner-lb.png"), url("/corner-rb.png"), url("/bg.png");
+    url("/corner-lb.png"), url("/corner-rb.png");
   background-position: left top, right top, left bottom, right bottom, left top;
-  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
+}
+
+.bg {
+  background-image: url("/bg.png");
+  background-position: left top;
+  background-repeat: repeat;
 }
 
 .bg-checkers {

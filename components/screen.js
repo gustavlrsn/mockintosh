@@ -1,8 +1,39 @@
-export default ({ children, width = "100vw", height = "100vh", zoom }) => (
-  <div
-    style={{ width, height, transform: `scale(${zoom})` }}
-    className="flex corner flex-col relative"
-  >
-    {children}
-  </div>
-);
+export default ({
+  children,
+  width = "100vw",
+  height = "100vh",
+  zoom,
+  showMac,
+}) => {
+  if (showMac)
+    return (
+      <div
+        className="flex flex-shrink-0 flex-col m-6 origin-top"
+        style={{ transform: `scale(${zoom})` }}
+      >
+        <img src="/macse-t.png" />
+        <div className="flex">
+          <img src="/macse-l.png" />
+          <div
+            style={{ width, height }}
+            className="flex flex-col relative overflow-hidden bg"
+          >
+            <div className="absolute inset-0 corner z-50 pointer-events-none" />
+            {children}
+          </div>
+          <img src="/macse-r.png" />
+        </div>
+        <img src="/macse-b.png" />
+      </div>
+    );
+
+  return (
+    <div
+      style={{ width, height, transform: `scale(${zoom})` }}
+      className="flex flex-col relative overflow-hidden bg"
+    >
+      <div className="absolute inset-0 corner z-50 pointer-events-none" />
+      {children}
+    </div>
+  );
+};
