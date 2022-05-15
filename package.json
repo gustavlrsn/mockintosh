@@ -22,7 +22,7 @@
     "react-dom": "^16.12.0",
     "react-draggable": "^4.3.1",
     "remark": "^12.0.0",
-    "remark-html": "^11.0.1",
+    "remark-html": "^13.0.2",
     "store": "^2.0.12",
     "subscriptions-transport-ws": "^0.9.17",
     "urql": "^1.9.8",
