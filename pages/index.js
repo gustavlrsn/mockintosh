@@ -34,7 +34,7 @@ export const windowTypes = {
 
 const Index = ({ initialWindows, icons }) => {
   const [showingSplashscreen, setSplashScreen] = useState(true);
-  const [settings, setSettings] = useState({ zoom: 1, showMac: true });
+  const [settings, setSettings] = useState({ showMac: true });
 
   const [session, loading] = useSession();
   const user = session?.user;
@@ -93,19 +93,12 @@ const Index = ({ initialWindows, icons }) => {
         {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
 
         <div className="flex justify-center items-center min-h-screen">
-          <Screen
-            width={512}
-            height={346}
-            zoom={settings.zoom}
-            showMac={settings.showMac}
-          >
+          <Screen width={512} height={346} showMac={settings.showMac}>
             {showingSplashscreen && (
               <Splashscreen onClick={() => setSplashScreen(false)} />
             )}
             <Menubar
               openWindow={openWindow}
-              zoom={settings.zoom}
-              setZoom={(zoom) => setSetting("zoom", zoom)}
               showMac={settings.showMac}
               setShowMac={(showMac) => setSetting("showMac", showMac)}
               user={user}
@@ -124,7 +117,6 @@ const Index = ({ initialWindows, icons }) => {
                         closeWindow={closeWindow}
                         bringWindowToFront={bringWindowToFront}
                         active={i === openWindows.length - 1}
-                        scale={settings.zoom}
                         resizable
                       >
                         <Folder
@@ -142,7 +134,6 @@ const Index = ({ initialWindows, icons }) => {
                         closeWindow={closeWindow}
                         bringWindowToFront={bringWindowToFront}
                         active={i === openWindows.length - 1}
-                        scale={settings.zoom}
                         resizable
                         width={350}
                       >
@@ -158,7 +149,6 @@ const Index = ({ initialWindows, icons }) => {
                         bringWindowToFront={bringWindowToFront}
                         active={i === openWindows.length - 1}
                         width={320}
-                        scale={settings.zoom}
                       >
                         <PhotoBooth active={i === window.length - 1} />
                       </Window>
@@ -171,7 +161,6 @@ const Index = ({ initialWindows, icons }) => {
                         closeWindow={closeWindow}
                         bringWindowToFront={bringWindowToFront}
                         active={i === openWindows.length - 1}
-                        scale={settings.zoom}
                         width={350}
                       >
                         <AboutThisMockintosh />
@@ -185,7 +174,6 @@ const Index = ({ initialWindows, icons }) => {
                         closeWindow={closeWindow}
                         bringWindowToFront={bringWindowToFront}
                         active={i === openWindows.length - 1}
-                        scale={settings.zoom}
                         width={300}
                       >
                         <Chat currentUser={user} />

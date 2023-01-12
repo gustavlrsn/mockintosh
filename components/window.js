@@ -7,7 +7,6 @@ export default ({
   active,
   width,
   bringWindowToFront,
-  scale,
   resizable = false,
 }) => {
   return (
@@ -15,7 +14,6 @@ export default ({
       handle=".handle"
       defaultPosition={window.defaultPosition}
       onMouseDown={() => bringWindowToFront(window.title)}
-      scale={scale}
       // bounds="parent"
     >
       <div className="absolute text-sm border border-black shadow bg-white z-10">
