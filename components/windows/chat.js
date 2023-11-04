@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { useQuery, useMutation, useSubscription } from "urql";
-import autoscroll from "autoscroll-react";
-import Button from "components/button";
+import React, { useState } from "react";
+//import { useQuery, useMutation } from "urql";
+//import autoscroll from "autoscroll-react";
+import Button from "@/components/button";
 
 const CHAT_MESSAGES_QUERY = `query ChatMessages {
   chat_messages {
@@ -40,7 +40,7 @@ const INSERT_CHAT_MESSAGE_MUTATION = `mutation InsertChatMessage ($message: Stri
 `;
 
 const ChatInput = ({ currentUser }) => {
-  const [res, insertChatMessage] = useMutation(INSERT_CHAT_MESSAGE_MUTATION);
+  //const [res, insertChatMessage] = useMutation(INSERT_CHAT_MESSAGE_MUTATION);
   const [messageField, setMessageField] = useState("");
 
   const exp = /[^\u0000-\u024F\u1E00-\u1EFF\u2C60-\u2C7F\uA720-\uA7FF]/g;
@@ -94,7 +94,7 @@ class ChatMessages extends React.Component {
   }
 }
 
-const AutoScrollChat = autoscroll(ChatMessages);
+//const AutoScrollChat = autoscroll(ChatMessages);
 
 const Chat = ({ currentUser }) => {
   const [{ data, fetching, error }, executeQuery] = useQuery({
@@ -112,7 +112,7 @@ const Chat = ({ currentUser }) => {
 
   return (
     <div>
-      <AutoScrollChat
+      <ChatMessages
         messages={data?.chat_messages}
         // onScrolledTop={() => console.log("fetch more items")}
         // onScrolled={() => console.log("the list was scrolled")}

@@ -1,19 +1,25 @@
-import Icon from "components/icon";
-import { windowTypes } from "pages/index";
+import Icon from "@/components/icon";
+import { applicationTypes } from "@/pages/index";
+
 export default ({ children, openWindow, openWindows }) => (
-  <div className="flex-1 flex flex-col items-end justify-between">
-    <div className="flex flex-col gap-2 m-2">{children}</div>
-    <div className="gap-2 m-2">
-      <Icon
-        icon={{
-          title: "Trash",
-          type: windowTypes.FOLDER,
-          img: "/icons/trash.png",
-          payload: {},
-        }}
-        openWindow={openWindow}
-        openWindows={openWindows}
-      ></Icon>
-    </div>
+  <div
+    className="ml-auto grid grid-cols-[repeat(6,_84px)] grid-rows-[repeat(5,_64px)] grid-flow-col  "
+    style={{ direction: "rtl" }}
+  >
+    {children}
+    {/* <Icon
+      icon={{
+        title: "Trash",
+        type: applicationTypes.FOLDER,
+        img: "/icons/trash.png",
+        payload: {},
+      }}
+      openWindow={openWindow}
+      openWindows={openWindows}
+    /> */}
+    {/* <div className="flex flex-col gap-2 m-2"></div> */}
+    {/* <div className="gap-2 m-2">
+    
+    </div> */}
   </div>
 );

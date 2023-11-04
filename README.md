@@ -9,3 +9,11 @@ It is built with React and instructions on how to set up the development environ
 \- [@gustavlrsn](https://twitter.com/gustavlrsn)
 
 ![mockintosh 1-bit](https://mockintosh.com/mockintosh.png)
+
+### Development
+
+`esc-pos-encoder` needs some support canvas libraries to be able to be installed (ref: https://github.com/NielsLeenheer/EscPosEncoder/issues/73)
+
+add those with
+
+`brew install pkg-config cairo pango libpng jpeg giflib librsvg`

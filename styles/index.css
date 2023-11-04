@@ -9,6 +9,22 @@
 /* Write you own custom component styles here */
 
 @import "./scrollbars.css";
+@import "./cursors.css";
+
+/* @font-face {
+  font-family: Arial;
+  font-style: normal;
+  font-weight: 400;
+  src: url(/fonts/PixelArial11.woff2) format("woff2"),
+    url(/fonts/PixelArial11.woff) format("woff");
+} */
+/* @font-face {
+  font-family: Chicago;
+  font-style: normal;
+  font-weight: 400;
+  src: url(/fonts/chikarego2-webfont.woff2) format("woff2"),
+    url(/fonts/chikarego2-webfont.woff) format("woff");
+} */
 
 @font-face {
   font-family: "Chicago";
@@ -31,9 +47,16 @@
   font-style: normal;
 }
 
-@font-face {
+/* @font-face {
   font-family: "Geneva";
   src: url("/fonts/FindersKeepers.ttf");
+  font-weight: normal;
+  font-style: normal;
+} */
+
+@font-face {
+  font-family: "Geneva";
+  src: url("/fonts/geneva_9.woff");
   font-weight: normal;
   font-style: normal;
 }
@@ -68,6 +91,7 @@ body {
 }
 
 .bg {
+  /* background-color: white; */
   background-image: url("/bg.png");
   background-position: left top;
   background-repeat: repeat;
@@ -80,36 +104,56 @@ body {
   /* filter: invert(1); */
 }
 
+@variants data {
+  .disabled {
+    background-image: url("/disabled.png");
+    background-position: left top;
+    background-repeat: repeat;
+  }
+}
+
 .disabled {
   background-image: url("/disabled.png");
   background-position: left top;
   background-repeat: repeat;
 }
 
-.inverted {
+/* .inverted {
   filter: invert(1);
-}
+} */
 
 .cursor-loading {
   cursor: url("/icons/watch.png"), auto;
 }
 
 * {
-  @apply select-none;
+  @apply select-none focus:outline-none;
+  /* font-family: "Chicago"; */
+
   image-rendering: pixelated;
-  cursor: url("/cursor.png"), auto !important;
+  font-smooth: never;
+  -webkit-font-smoothing: none;
+  /* cursor: url("/cursor.png"), auto; */
+  /* cursor: image-set(url("/cursor.png") 1x) 0 0, auto; */
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
+  user-drag: none;
+}
+
+button {
+  cursor: inherit !important;
+}
+
+a {
+  cursor: inherit;
 }
 
 .font-chicago {
   font-family: "Chicago";
   font-size: 8px;
   line-height: 9px;
-
-  @apply tracking-widest;
-
-  /* filter: contrast(1);
-  font-smooth: never;
-  font-smoothing: none; */
 }
 
 .font-arial {
@@ -133,7 +177,7 @@ body {
 }
 
 .content a {
-  @apply border-b border-black select-text;
+  @apply border-b select-text;
 }
 
 .content h1,
@@ -153,7 +197,7 @@ h5 {
 }
 
 .content pre {
-  @apply p-1 -mt-1 border border-dashed border-black overflow-hidden overflow-x-scroll cursor-text select-text;
+  @apply p-1 -mt-1 border border-dashed overflow-hidden overflow-x-scroll cursor-text select-text;
 }
 
 .content code {
@@ -172,26 +216,21 @@ h5 {
 }
 
 .content hr {
-  @apply my-4 border-black border-dotted;
+  @apply my-4 border-dotted;
 }
 
 .bg-stripes {
   image-rendering: pixelated;
   background-image: url("/stripes.png");
 }
-.handle {
+/* .handle {
   cursor: grab;
 }
 .react-draggable-dragging .handle {
   cursor: grabbing !important;
-}
+} */
 
 /* Input: */
-@variants group-hover, hover, focus {
-  .inverted {
-    filter: invert(1);
-  }
-}
 
 /* Start purging... */
 @tailwind utilities;
