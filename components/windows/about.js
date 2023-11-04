@@ -1,5 +1,5 @@
-import { version } from "../../package.json";
-
+import pkg from "../../package.json";
+const version = pkg.version;
 // todo: fetch this from github api
 const contributors = [{ username: "gustavlrsn", commits: 74 }];
 

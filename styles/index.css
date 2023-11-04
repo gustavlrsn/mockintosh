@@ -11,12 +11,27 @@
 @import "./scrollbars.css";
 
 @font-face {
+  font-family: Arial;
+  font-style: normal;
+  font-weight: 400;
+  src: url(/fonts/PixelArial11.woff2) format("woff2"),
+    url(/fonts/PixelArial11.woff) format("woff");
+}
+/* @font-face {
+  font-family: Chicago;
+  font-style: normal;
+  font-weight: 400;
+  src: url(/fonts/chikarego2-webfont.woff2) format("woff2"),
+    url(/fonts/chikarego2-webfont.woff) format("woff");
+} */
+
+ @font-face {
   font-family: "Chicago";
   src: url("/pixChicago.woff");
   font-weight: normal;
   font-style: normal;
 }
-
+/*
 @font-face {
   font-family: "Arial";
   src: url("/arial.woff");
@@ -29,7 +44,7 @@
   src: url("/arial-bold.woff");
   font-weight: bold;
   font-style: normal;
-}
+} */
 
 @font-face {
   font-family: "Geneva";
@@ -68,6 +83,7 @@ body {
 }
 
 .bg {
+  /* background-color: white; */
   background-image: url("/bg.png");
   background-position: left top;
   background-repeat: repeat;
@@ -107,9 +123,8 @@ body {
 
   @apply tracking-widest;
 
-  /* filter: contrast(1);
+  /* filter: contrast(1); */
   font-smooth: never;
-  font-smoothing: none; */
 }
 
 .font-arial {
@@ -121,6 +136,7 @@ body {
   font-family: "Geneva";
   font-size: 16px;
   line-height: 0.75;
+  font-smooth: never;
 }
 
 ::selection {
