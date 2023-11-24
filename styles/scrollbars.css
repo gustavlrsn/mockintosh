@@ -95,6 +95,12 @@
   background-repeat: repeat;
 }
 
+.bg-scroll {
+  background-image: url("/scrollbar-bg.png");
+  background-position: left top;
+  background-repeat: repeat;
+}
+
 .scroll.inactive::-webkit-scrollbar-track {
   background: white;
 }

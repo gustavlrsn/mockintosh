@@ -14,7 +14,7 @@ const Button = ({
 
   return (
     <div className="flex justify-start">
-      <div className={"relative button-outside " + className}>
+      <div className={"relative button-outside bg-white " + className}>
         {href ? (
           <a className={classes} href={href} {...props}>
             <div className="relative block button-inside">{children}</div>
