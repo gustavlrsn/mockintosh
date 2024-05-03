@@ -1,7 +1,7 @@
 import { useState } from "react";
-import Popup from "components/popup";
-import Button from "components/button";
-import { useMutation, useQuery } from "urql";
+import Popup from "@/components/popup";
+import Button from "@/components/button";
+// import { useMutation, useQuery } from "urql";
 
 const UPDATE_USER_MUTATION = `
   mutation UpdateUser($username: String!, $userId: Int!) {
