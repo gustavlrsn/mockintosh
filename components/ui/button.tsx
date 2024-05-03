@@ -1,7 +1,17 @@
 import { cn } from "@/lib/utils";
 import React from "react";
 
-export const Button = ({ children, disabled, onClick, className }) => (
+interface ButtonProps extends React.HTMLProps<HTMLButtonElement> {
+  children: React.ReactNode;
+  disabled?: boolean;
+}
+
+export const Button: React.FC<ButtonProps> = ({
+  children,
+  disabled,
+  onClick,
+  className,
+}) => (
   <div className="relative">
     <button
       disabled={disabled}

@@ -9,7 +9,21 @@ export const WindowContext = React.createContext({
   defaultPosition: { x: 0, y: 0 },
 });
 
-export function Window({ id, i, title, children, width, defaultPosition }) {
+interface WindowProps {
+  i: number;
+  title: string;
+  children: React.ReactNode;
+  width: number;
+  defaultPosition: { x: number; y: number };
+}
+
+export function Window({
+  i,
+  title,
+  children,
+  width,
+  defaultPosition,
+}: WindowProps) {
   const { closeWindow, bringWindowToFront, openWindows, zoom } =
     React.useContext(SystemContext);
   const active = i === openWindows.length - 1;

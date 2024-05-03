@@ -6,7 +6,6 @@ import {
   printClickHandler,
   printPanorama,
 } from "@/lib/print";
-import { asciiDither } from "@/lib/ascii-dither";
 import { Window } from "@/components/ui/window";
 import { Dialog, DialogContent } from "../ui/dialog";
 import { Input } from "../ui/input";
@@ -281,7 +280,7 @@ export default function Photobooth({ i, window }) {
                 <>
                   <Button
                     onClick={startCountdown}
-                    disabled={loading || errorText}
+                    disabled={loading || !!errorText}
                     className="p-0 h-10 w-10 flex items-center justify-center"
                   >
                     {countdown ? (

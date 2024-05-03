@@ -88,21 +88,21 @@ export default function Screen({ children, width, height }) {
   );
 }
 
-async function getScaledImage(url, scale = 1, zoom) {
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    throw "network error";
-  }
-  const blob = await resp.blob();
-  const bmp = await createImageBitmap(blob);
-  const { width, height } = bmp;
-  const canvas = new OffscreenCanvas(bmp.width, bmp.height);
-  canvas.width = width * scale * zoom;
-  canvas.height = height * scale * zoom;
-  const ctx = canvas.getContext("2d");
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(bmp, 0, 0, width * scale * zoom, height * scale * zoom);
-  bmp.close();
-  const output = await canvas.convertToBlob();
-  return `url(${URL.createObjectURL(output)}) ${scale}x`;
-}
+// async function getScaledImage(url, scale = 1, zoom) {
+//   const resp = await fetch(url);
+//   if (!resp.ok) {
+//     throw "network error";
+//   }
+//   const blob = await resp.blob();
+//   const bmp = await createImageBitmap(blob);
+//   const { width, height } = bmp;
+//   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+//   canvas.width = width * scale * zoom;
+//   canvas.height = height * scale * zoom;
+//   const ctx = canvas.getContext("2d");
+//   ctx.imageSmoothingEnabled = false;
+//   ctx.drawImage(bmp, 0, 0, width * scale * zoom, height * scale * zoom);
+//   bmp.close();
+//   const output = await canvas.convertToBlob();
+//   return `url(${URL.createObjectURL(output)}) ${scale}x`;
+// }
