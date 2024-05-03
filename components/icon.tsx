@@ -4,8 +4,9 @@ import { useOutsideClick } from "../lib/hooks/useOutsideClick";
 import EvenWidth from "./even-width";
 import useEvenWidth from "../lib/hooks/useEvenWidth";
 import { SystemContext } from "@/pages";
+import { isNil, omitBy } from "lodash";
 const Icon = ({
-  icon: { title, img, type, payload, droppable, menubar },
+  icon: { title, img, type, payload, droppable, menubar, defaultPosition },
   // path,
   openWindow,
 }) => {
@@ -33,13 +34,18 @@ const Icon = ({
       ref={ref}
       onClick={() => setIsSelected(true)}
       onDoubleClick={() => {
-        openWindow({
-          title,
-          type,
-          payload,
-          // path,
-          menubar,
-        });
+        openWindow(
+          omitBy(
+            {
+              title,
+              type,
+              payload,
+              menubar,
+              defaultPosition,
+            },
+            isNil
+          )
+        );
       }}
     >
       {/* {isWindowOpen ? (

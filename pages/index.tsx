@@ -125,13 +125,12 @@ const Index = ({ initialApplications, files }) => {
         }),
       ]);
   };
-
+  const isDevelopment = process.env.NODE_ENV === "development";
   return (
     <>
       <Head />
       {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
-      <FPSStats />
-
+      {isDevelopment && <FPSStats />}
       <SystemContext.Provider
         value={{
           closeWindow,
@@ -303,6 +302,10 @@ export async function getStaticProps() {
       type: applicationTypes.PHOTO_BOOTH,
       img: "/icons/photobooth-smr-32.png",
       payload: {},
+      defaultPosition: {
+        y: 5,
+        x: 45,
+      },
       menubar: [
         {
           label: "File",
