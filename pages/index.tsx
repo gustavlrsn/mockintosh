@@ -138,6 +138,8 @@ const Index = ({ initialApplications, files }) => {
           bringWindowToFront,
           openWindows: openApplications,
           zoom,
+          width,
+          height,
         }}
       >
         <div

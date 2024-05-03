@@ -6,7 +6,7 @@ import useEvenWidth from "../lib/hooks/useEvenWidth";
 import { SystemContext } from "@/pages";
 const Icon = ({
   icon: { title, img, type, payload, droppable, menubar },
-  path,
+  // path,
   openWindow,
 }) => {
   const [isSelected, setIsSelected] = useState(false);
@@ -17,10 +17,10 @@ const Icon = ({
   const open = false;
   const evenWidthRef = useEvenWidth();
 
-  const { isOver, setNodeRef } = useDroppable({
-    id: path,
-    disabled: !droppable,
-  });
+  // const { isOver, setNodeRef } = useDroppable({
+  //   id: path,
+  //   disabled: !droppable,
+  // });
   const handleClickOutside = () => {
     setIsSelected(false);
   };
@@ -37,7 +37,7 @@ const Icon = ({
           title,
           type,
           payload,
-          path,
+          // path,
           menubar,
         });
       }}

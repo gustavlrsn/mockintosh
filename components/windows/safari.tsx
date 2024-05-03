@@ -204,7 +204,7 @@ export default function Safari({ i, window }) {
         </div>
       </WindowHeader>
 
-      <WindowScrollArea resizable active className="w-96 h-52">
+      <WindowScrollArea resizable className="w-96 h-52">
         {currentSite.Site ? <currentSite.Site /> : <div>404</div>}
       </WindowScrollArea>
     </Window>

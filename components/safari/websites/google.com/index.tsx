@@ -14,7 +14,7 @@ export default function Google() {
         <div className="font-chicago flex gap-2">
           <Button className="border p-1 cursor-pointer">Google-Search</Button>
           <Button className="border p-1 cursor-pointer">
-            I'm Feeling Lucky
+            I&apos;m Feeling Lucky
           </Button>
         </div>
       </div>

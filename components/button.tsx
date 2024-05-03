@@ -1,3 +1,11 @@
+import React from "react";
+
+interface ButtonProps extends React.HTMLProps<HTMLButtonElement> {
+  children: React.ReactNode;
+  disabled?: boolean;
+  type?: "button" | "submit" | "reset";
+}
+
 const Button = ({
   children,
   onClick,
@@ -6,7 +14,7 @@ const Button = ({
   className = "",
   type = "button",
   ...props
-}) => {
+}: ButtonProps) => {
   const classes =
     "block focus:outline-none font-chicago" +
     " " +
@@ -16,7 +24,7 @@ const Button = ({
     <div className="flex justify-start">
       <div className={"relative button-outside bg-white " + className}>
         {href ? (
-          <a className={classes} href={href} {...props}>
+          <a className={classes} href={href}>
             <div className="relative block button-inside">{children}</div>
           </a>
         ) : (

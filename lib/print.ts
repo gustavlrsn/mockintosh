@@ -1,7 +1,11 @@
 import EscPosEncoder from "esc-pos-encoder";
 import PixelFontCanvas from "@/lib/PixelFontCanvas";
+declare global {
+  interface Window {
+    device: USBDevice; // Replace 'any' with the correct type for your 'device' property
+  }
+}
 
-import Encoder from "./esc-pos-encoder";
 // OUT endpoint of interface for the printer
 const ENDPOINT = 3;
 
@@ -69,8 +73,8 @@ function charToByte(char) {
 }
 
 // helper function that turns strings into their byte representation
-function stringToBytes(str) {
-  return Array.from(str).reduce((prev, char) => {
+function stringToBytes(str: string) {
+  return Array.from(str).reduce((prev: any[], char) => {
     prev.push(charToByte(char));
     return prev;
   }, []);
@@ -203,18 +207,18 @@ function verticalSliceImageSimple(img, imageWidth, yOffset = 0, dpi = 8) {
 
 let device = null;
 
-async function connect() {
-  if (device === null) {
-    // get all connected usb devices
-    rawdevice = await navigator.usb.requestDevice({ filters: [] });
-    // do the setup procedure on the connected device
-    device = await setup(rawdevice);
-    // display the device stats
-    // displayDeviceStats(device)
-    // changeConnectedHeadline()
-  }
-  return device;
-}
+// async function connect() {
+//   if (device === null) {
+//     // get all connected usb devices
+//     rawdevice = await navigator.usb.requestDevice({ filters: [] });
+//     // do the setup procedure on the connected device
+//     device = await setup(rawdevice);
+//     // display the device stats
+//     // displayDeviceStats(device)
+//     // changeConnectedHeadline()
+//   }
+//   return device;
+// }
 
 export const connectClickHandler = async function (event) {
   // const device = await connect();
