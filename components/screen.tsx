@@ -1,19 +1,16 @@
 import useWindowSize from "@/lib/hooks/useWindowSize";
 import { SystemContext } from "@/pages";
 import React from "react";
+import CanvasImage from "@/components/image";
+import { Background } from "./background";
+
 export default function Screen({ children, width, height }) {
   const { zoom } = React.useContext(SystemContext);
   const screenRef = React.useRef(null);
   const cursorRef = React.useRef(null);
 
   function getDimensions(e) {
-    console.log("mousemove");
-    // console.log(e.clientX, e.clientY);
     const screenPosition = screenRef.current.getBoundingClientRect();
-    // const cursorPosition = {
-    //   x: e.clientX / zoom - screenPosition.x,
-    //   y: e.clientY / zoom - screenPosition.y,
-    // };
     const cursorPosition = {
       x: (e.clientX - screenPosition.x) / zoom,
       y: (e.clientY - screenPosition.y) / zoom,
@@ -70,13 +67,19 @@ export default function Screen({ children, width, height }) {
   return (
     <div>
       <div
-        style={{ width, height, transform: `scale(${zoom})` }}
-        className="flex flex-col relative overflow-hidden bg !cursor-none"
+        style={{
+          width,
+          height,
+          transform: `scale(${zoom})`,
+        }}
+        className="flex flex-col relative overflow-hidden !cursor-none"
         ref={screenRef}
       >
+        <Background width={width} height={height} />
+
         <div className="absolute inset-0 corner z-50 pointer-events-none" />
         {children}
-        <img
+        <CanvasImage
           width={16}
           height={16}
           ref={cursorRef}
