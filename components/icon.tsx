@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { useOutsideClick } from "../lib/hooks/useOutsideClick";
-import EvenWidth from "./even-width";
-import useEvenWidth from "../lib/hooks/useEvenWidth";
 import { SystemContext } from "@/pages";
 import { isNil, omitBy } from "lodash";
+import { Text } from "./ui/text";
+import CanvasImage from "@/components/canvas-image";
+
 const Icon = ({
   icon: { title, img, type, payload, droppable, menubar, defaultPosition },
   // path,
@@ -16,7 +17,6 @@ const Icon = ({
     openWindows.length && openWindows[openWindows.length - 1]?.title === title;
   // const open = Boolean(openWindows.find((window) => window.title === title));
   const open = false;
-  const evenWidthRef = useEvenWidth();
 
   // const { isOver, setNodeRef } = useDroppable({
   //   id: path,
@@ -48,27 +48,22 @@ const Icon = ({
         );
       }}
     >
-      {/* {isWindowOpen ? (
-        <div className={`bg-checkers w-8 h-8  ${isSelected ? "invert" : ""}`} />
-      ) : (
-        <img src={img} className={`w-8 h-8 ${(isSelected || isWindowOpen) ? "invert" : ""}`} />
-      )} */}
-      <img
+      <CanvasImage
         src={img}
-        className={`w-8 h-8 ${isSelected || isWindowOpen ? "invert" : ""}`}
+        width={32}
+        height={32}
+        shadowOutline={isWindowOpen}
+        className={isSelected ? "invert" : ""}
       />
 
-      {/* <EvenWidth> */}
-      <div
-        className={`px-0.5 h-3 font-geneva whitespace-no-wrap ${
-          isSelected ? "bg-black text-white" : "bg-white"
-        }`}
-        // style={{ display: "inline-table" }}
-        // ref={evenWidthRef}
-      >
-        <span className="font-geneva">{title}</span>
-      </div>
-      {/* </EvenWidth> */}
+      <Text
+        text={title}
+        width={128}
+        align="center"
+        color="black"
+        bg="white"
+        className={isSelected ? "invert" : ""}
+      />
     </div>
   );
 };

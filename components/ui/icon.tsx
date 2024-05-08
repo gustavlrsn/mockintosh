@@ -1,7 +1,10 @@
 import React from "react";
+import { Text } from "@/components/ui/text";
+import CanvasImage from "../canvas-image";
 
 export function Icon({
   selected,
+  isOpen,
   img,
   label,
   onClick,
@@ -14,15 +17,22 @@ export function Icon({
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <img src={img} className={`w-8 h-8 ${selected ? "invert" : ""}`} />
+      <CanvasImage
+        src={img}
+        width={32}
+        height={32}
+        className={selected ? "invert" : ""}
+        shadowOutline={isOpen}
+      />
 
-      <div
-        className={`px-0.5 h-3 font-geneva whitespace-no-wrap ${
-          selected ? "bg-black text-white" : "bg-white"
-        }`}
-      >
-        <span className="font-geneva">{label}</span>
-      </div>
+      <Text
+        text={label}
+        width={128}
+        align="center"
+        color="black"
+        bg="white"
+        className={selected ? "invert" : ""}
+      />
     </button>
   );
 }
