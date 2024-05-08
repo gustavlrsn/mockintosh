@@ -70,7 +70,12 @@ const Index = ({ initialApplications, files }) => {
   const zoom = getZoomLevel({ width, height });
 
   useEffect(() => {
+    Promise.all([
+      PixelFontCanvas.loadFont("/fonts/", "Geneva9.fnt"),
+      PixelFontCanvas.loadFont("/fonts/", "ChiKareGo.fnt"),
+    ]).then(([geneva, chikarego]) => {
     setTimeout(() => setSplashScreen(false), simulatedBootTime);
+    });
 
     const settingsInLocalStorage = store.get("settings");
     if (settingsInLocalStorage) {
@@ -148,10 +153,11 @@ const Index = ({ initialApplications, files }) => {
           )}
         >
           <Screen width={resolution.width} height={resolution.height}>
-            {showingSplashscreen && (
+            {showingSplashscreen ? (
               <Splashscreen onClick={() => setSplashScreen(false)} />
-            )}
-            <SystemMenubar openWindow={openWindow} />
+            ) : (
+              <React.Fragment>
+                <SystemMenubar />
 
             {/* <DndContext> */}
             {/* Windows */}
@@ -203,7 +209,10 @@ const Index = ({ initialApplications, files }) => {
                 }
               })}
 
-              <Desktop openWindow={openWindow} openWindows={openApplications}>
+                  <Desktop
+                    openWindow={openWindow}
+                    openWindows={openApplications}
+                  >
                 {files.map((file) => (
                   <Icon
                     //path={`/${file.title}`}
@@ -215,6 +224,8 @@ const Index = ({ initialApplications, files }) => {
               </Desktop>
             </div>
             {/* </DndContext> */}
+              </React.Fragment>
+            )}
           </Screen>
         </div>
       </SystemContext.Provider>
