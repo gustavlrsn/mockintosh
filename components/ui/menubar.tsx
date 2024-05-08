@@ -22,7 +22,7 @@ const Menubar = React.forwardRef<
   <MenubarPrimitive.Root
     ref={ref}
     className={cn(
-      "flex h-[20px] items-stretch border-b bg-white px-[10px] font-chicago",
+      "flex h-[20px] pt-px items-stretch border-b bg-white px-[9px] font-chicago",
       className
     )}
     {...props}
@@ -37,7 +37,7 @@ const MenubarTrigger = React.forwardRef<
   <MenubarPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex border-t border-white select-none items-center data-[state=open]:border-black data-[state=open]:invert bg-white px-2 font-medium outline-none",
+      "flex  select-none items-center data-[state=open]:bg-white data-[state=open]:invert pl-[9px] pr-[5px] data-[state=open]:drop-shadow-r-5 font-medium outline-none",
       className
     )}
     {...props}
@@ -110,7 +110,7 @@ const MenubarItem = React.forwardRef<
   <MenubarPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex select-none items-center px-2 h-4 outline-none focus:bg-black focus:text-white data-[disabled]:disabled data-[disabled]:pointer-events-none",
+      "relative flex select-none items-center px-3 h-4 outline-none focus:invert focus:bg-white data-[disabled]:disabled data-[disabled]:pointer-events-none",
       inset && "pl-8",
       className
     )}
@@ -155,14 +155,14 @@ const MenubarRadioItem = React.forwardRef<
   <MenubarPrimitive.RadioItem
     ref={ref}
     className={cn(
-      "relative flex  select-none items-center py-1.5 pl-8 pr-2 outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex  select-none items-center py-1.5 pl-8 pr-2 outline-none focus:bg-black focus:text-white data-[disabled]:pointer-events-none ",
       className
     )}
     {...props}
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <MenubarPrimitive.ItemIndicator>
-        {/* <Circle className="h-2 w-2 fill-current" /> */}
+        <div className="h-2 w-2 bg-black" />
       </MenubarPrimitive.ItemIndicator>
     </span>
     {children}

@@ -9,6 +9,7 @@ module.exports = {
     },
     dropShadow: {
       default: "1px 1px 0 black",
+      "r-5": "5px 0 0 black",
       none: "0 0 #0000",
     },
     borderColor: { black: "black", white: "white", transparent: "transparent" },

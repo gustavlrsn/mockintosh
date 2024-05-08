@@ -3,7 +3,7 @@ import Draggable from "react-draggable"; // The default
 import { SystemContext } from "../../pages/index";
 import clsx from "clsx";
 import { cn } from "@/lib/utils";
-
+import { Text } from "@/components/ui/text";
 export const WindowContext = React.createContext({
   active: false,
   defaultPosition: { x: 0, y: 0 },
@@ -67,7 +67,9 @@ export function Window({
                 active && "bg-stripes"
               )}
             ></div>
-            <span className="font-chicago ml-[5px] mr-[5px]">{title}</span>
+            <span className="font-chicago ml-[5px] mr-[5px]">
+              <Text font="ChiKareGo" text={title} />
+            </span>
             <div
               className={clsx(
                 "flex-grow h-[11px] w-4 ml-px mr-px",

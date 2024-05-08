@@ -11,7 +11,7 @@ interface TextProps {
   align?: string;
   color?: string;
   bg?: string;
-  className: string;
+  className?: string;
 }
 
 const getLineHeight = (font: Font) => {

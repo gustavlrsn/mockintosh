@@ -1,7 +1,7 @@
 import useWindowSize from "@/lib/hooks/useWindowSize";
 import { SystemContext } from "@/pages";
 import React from "react";
-import CanvasImage from "@/components/image";
+import CanvasImage from "@/components/canvas-image";
 import { Background } from "./background";
 
 export default function Screen({ children, width, height }) {
@@ -78,14 +78,14 @@ export default function Screen({ children, width, height }) {
         <Background width={width} height={height} />
 
         <div className="absolute inset-0 corner z-50 pointer-events-none" />
-        {children}
         <CanvasImage
           width={16}
           height={16}
           ref={cursorRef}
           src="/cursors/default-1x.png"
-          className="absolute z-40 pointer-events-none"
+          className="absolute z-50 pointer-events-none"
         />
+        {children}
       </div>
     </div>
   );
