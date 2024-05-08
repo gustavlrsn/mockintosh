@@ -341,7 +341,7 @@ async function loadImage(src) {
 
 export const printClickHandler = async (
   ogImageData,
-  { width, height, caption, format = "polaroid" }
+  { width = undefined, height = undefined, caption = "", format = "polaroid" }
 ) => {
   const scaledImageData = scaleImage(ogImageData, 2);
   const newHeight = scaledImageData.height + 296;

@@ -93,9 +93,9 @@ type MenubarRadioGroup = {
   items: MenubarRadioItemProps[];
 };
 
-type MenubarType = {
+export type MenubarType = {
   label: string;
-  items: MenubarRadioGroup | MenubarItemProps[];
+  items: (MenubarRadioGroup | MenubarItemProps)[];
 }[];
 
 const finderMenubar: MenubarType = [

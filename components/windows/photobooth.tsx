@@ -13,19 +13,22 @@ import { Dialog, DialogContent } from "../ui/dialog";
 import { Input } from "../ui/input";
 import SystemButton from "@/components/button";
 import PixelFontCanvas from "@/lib/PixelFontCanvas";
-import { SystemContext } from "@/pages";
+import { MenubarType, SystemContext } from "@/pages";
 import { write } from "opfs-tools";
 import dayjs from "dayjs";
 import { Photoroll } from "../photobooth/photoroll";
 
-const getMenubar = ({ ditheringAlgorithm, setDitheringAlgorithm }) => {
+const getMenubar = ({
+  ditheringAlgorithm,
+  setDitheringAlgorithm,
+}): MenubarType => {
   return [
     {
       label: "File",
       items: [
-        { label: "Take Photo", action: "TAKE_PHOTO" },
-        { label: "Start Recording", action: "START_RECORDING" },
-        { label: "Stop Recording", action: "STOP_RECORDING" },
+        { label: "Take Photo" },
+        { label: "Start Recording" },
+        { label: "Stop Recording" },
       ],
     },
     {
@@ -33,7 +36,14 @@ const getMenubar = ({ ditheringAlgorithm, setDitheringAlgorithm }) => {
       items: [
         {
           type: "radiogroup",
-          items: [{ label: "288x288" }, { label: "320x320" }],
+          value: "288x288",
+          onValueChange: (value) => {
+            console.log("value", value);
+          },
+          items: [
+            { label: "288x288", value: "288x288" },
+            { label: "320x320", value: "320x320" },
+          ],
         },
       ],
     },

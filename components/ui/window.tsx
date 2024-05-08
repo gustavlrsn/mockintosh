@@ -94,7 +94,11 @@ export function WindowHeader({ children }) {
   );
 }
 
-export function WindowScrollArea({ children, resizable, className }) {
+export function WindowScrollArea({
+  children,
+  resizable,
+  className = undefined,
+}) {
   const { active, defaultPosition } = React.useContext(WindowContext);
   const ref = React.useRef<HTMLDivElement>(null);
 

@@ -2,6 +2,14 @@ import React from "react";
 import { Text } from "@/components/ui/text";
 import CanvasImage from "../canvas-image";
 
+interface IconProps {
+  selected?: boolean;
+  isOpen?: boolean;
+  img: string;
+  label: string;
+  onClick?: () => void;
+  onDoubleClick?: () => void;
+}
 export function Icon({
   selected,
   isOpen,
@@ -9,7 +17,7 @@ export function Icon({
   label,
   onClick,
   onDoubleClick = undefined,
-}) {
+}: IconProps) {
   return (
     <button
       className={`flex-none flex items-center flex-col focus:outline-none`}
