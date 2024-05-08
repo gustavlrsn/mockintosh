@@ -22,18 +22,18 @@ const CanvasImage = React.forwardRef(
     useEffect(() => {
       const canvas = canvasRef.current;
       const context = canvas.getContext("2d");
-
       context.webkitImageSmoothingEnabled = false;
-      const testCanvas = document.createElement("canvas");
-      const testCtx = testCanvas.getContext("2d");
+
+      const offscreenCanvas = new OffscreenCanvas(width, height);
+      const offscreenCtx = offscreenCanvas.getContext("2d");
 
       const image = new Image();
       image.src = src;
-      image.onload = () => {
-        testCtx.drawImage(image, 0, 0, width, height);
-        const imageData = testCtx.getImageData(0, 0, width, height);
-
+      image.onload = async () => {
         if (shadowOutline) {
+          offscreenCtx.drawImage(image, 0, 0, width, height);
+          const imageData = offscreenCtx.getImageData(0, 0, width, height);
+
           // replace all non-transparent pixels with a checkered pattern
           // const imageData = context.getImageData(0, 0, width, height);
           const data = imageData.data;
