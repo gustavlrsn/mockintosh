@@ -343,32 +343,14 @@ export const printClickHandler = async (
   ogImageData,
   { width, height, caption, format = "polaroid" }
 ) => {
-  // take canvasData and rotate it 90 degrees
-  // const rotatedCanvasData = rotateCanvasData(canvasData, width, height);
-  // console.log({ rotatedCanvasData });
-  console.log({ ogImageData });
-  // const newImageData = canvasContext.createImageData(
-  //   imageData.height,
-  //   imageData.width
-  // );
-
-  // double size
-  //let newImageData = scaleImage(imageData, 2);
-  // rotate 90 degrees
-  //imageData = rotateImage(imageData);
   const scaledImageData = scaleImage(ogImageData, 2);
   const newHeight = scaledImageData.height + 296;
   const newWidth = 576;
-  // console.log();
-
-  // logo
 
   const canvasImage = document.createElement("canvas");
   canvasImage.width = newWidth;
   canvasImage.height = newHeight;
   const ctx = canvasImage.getContext("2d");
-  // const img = await loadImage("/photobooth/react-conf-2x.png"); // Replace with your image path
-  // ctx.drawImage(img, 0, 0);
 
   ctx?.putImageData(scaledImageData, 0, 0);
   PixelFontCanvas.drawText(canvasImage, `${caption}`, {
@@ -380,198 +362,29 @@ export const printClickHandler = async (
     align: "center",
     tint: "black",
   });
-  console.log({ cheight: canvasImage.height, cwidth: canvasImage.width });
-  console.log({ scaledImageData, ctx });
 
-  const printImageData = ctx.getImageData(0, 0, newWidth, newHeight);
-  console.log({ printImageData });
-  // console.log({ printImageData, scaledImageData });
-  // const encoder = new Encoder({
-  //   width: 640, //576,
-  //   imageMode: "raster",
-  // });
-
-  const encoda = new EscPosEncoder({
-    // width: 300, //576,
+  const encoder = new EscPosEncoder({
     imageMode: "raster",
   });
 
-  //192x512
-  // // [0x1d, 0x7c, 0x05]
-  // await sendBytes(
-  //   window.device,
-  //   encoder
-  //     .raw(new Uint8Array([0x1b, 0x40]))
-  //     //.raw(new Uint8Array([0x1b, 0x37, 0x09, 0x50, 0x02]))
-  //     // .raw(new Uint8Array([0x12, 0x54]))
-  //     .encode()
-  // );
-  // // // [0x1d, 0x7c, 0x05]
-  // await sendBytes(
-  //   window.device,
-  //   encoder
-  //     // .raw(new Uint8Array([0x1b, 0x40]))
-  //     .raw(new Uint8Array([0x1b, 0x37, 0x09, 0x50, 0x02]))
-  //     // .raw(new Uint8Array([0x12, 0x54]))
-  //     .encode()
-  // );
-
-  // Print density setting hexadecimal instruction 13 74 44 66 n (range of n 70-200), concentration parameter 100:13 74 44 66 64, concentration parameter 150:13 74 44 66 96
-  // try {
-  //   await sendBytes(
-  //     window.device,
-  //     encoder.raw(new Uint8Array([0x13, 0x74, 0x44, 0x66, 0x96])).encode()
-  //   );
-  // } catch (err) {
-  //   console.log({ err });
-  // }
-
-  // const dang = encoder
-  // .initialize()
-  // .raw(new Uint8Array([0x1b, 0x40]))
-  // .raw(new Uint8Array([0x1b, 0x37, 0x09, 0x50, 0x02]))
-  // .raw(new Uint8Array([0x12, 0x54]))
-  //.line("hello world")
-  // 0x1D, 0x78, 0x44, 0x02
-  //.raw(new Uint8Array([0x13, 0x74, 0x44, 0x66, 0x96]))
-  //  .raw(new Uint8Array([0x1d, 0x78, 0x44, 0x02]))
-  // .raw(new Uint8Array([0x1d, 0x7c, 0x02]))
-  //.raw(new Uint8Array([0x1d, 0x28, 0x4b, 0x02, 0x00, 0x30, 0x32, 0x31]))
-  //.raw(new Uint8Array([0x1d, 0x48, 0x2c, 0x01, 0x2c, 0x0a])) // heating interval and what not
-  //.raw(new Uint8Array([0x1d, 0x7c, 0x00])) // setting print density
-  //.raw(new Uint8Array([0x1d, 0x28, 0x4c, 0x02, 0x00, 0x32, 0x4e])) // set print darkness 50 for primary and 78 for secondary
-  //  .raw(new Uint8Array([0x1d, 0x28, 0x4c, 0x02, 0xff, 0xff, 0x6f])) // full darkness
-  //.image(scaledImageData, newWidth, newHeight)
-  //.qrcode("https://mockintosh.com", 2, 8)
-  // .newline()
-  // .newline()
-  // .newline()
-  // .newline()
-  // .newline()
-  // .text("hey")
-
-  // .newline()
-  // .newline()
-  // .newline()
-  // .newline()
-  // .newline()
-  // .newline()
-
-  // .cut("full")
-  // .encode();
-  // await sendBytes(window.device, new Uint8Array([ESC, 0x0a, 0x0a, 0x0a]));
-
-  // await sendBytes(
-  //   window.device,
-  //   new Uint8Array([ESC, 0x13, 0x74, 0x44, 0x66, 0x96])
-  // );
-  // await sendText(window.device, "Hello World");
-  // await sendBytes(window.device, new Uint8Array([ESC, 0x0a, 0x0a, 0x0a]));
-  // await sendBytes(
-  //   window.device,
-  //   new Uint8Array([0x1d, 0x7c, 0x44, 0x66, 0x96])
-  // );
-  // await sendBytes(window.device, new Uint8Array([0x1d, 0x67, 0x66, 0x96]));
-  // const result = encoda
-  //   .initialize()
-  //   .raw([0x1b, 0x79, 0x03]) // enter EPOS mode
-  //   .raw([0x1d, 0x0c]) // Feed paper to print starting position (only used for black mark paper)
-  //   .raw([0x11, 0x21, 0x03]) // enter page mode
-  //   // .raw([0x11, 0x23, 0x01, 0x90, 0x00, 0xf0]) // /set page mode width&height width max72mm height max80mm
-  //   .raw([0x11, 0x23, 0x02, 0x80, 0x03, 0xc0]) // set page width to 640 dots (80mm) and height to 960 dots (120mm)
-  //   // .raw([0x11, 0x25, 0x02]) // rotate180°
-  //   .raw([0x11, 0x24, 0x00, 0x00, 0x00, 0x19]) //  //set print start position coordinates dot 0m
-
-  //   .raw([0x1d, 0x21, 0x01]) // Double height for "ABC"
-  //   .raw([0x41, 0x42, 0x43]) // Print "ABC"
-  //   .raw([0x1d, 0x21, 0x00]) // Cancel double height
-
-  //   .raw([0x11, 0x0c]) //exit papge mode
-  //   // .raw([0x1b, 0x64, 0x0a]) //feed 10 lines])
-  //   .raw([0x1b, 0x69]) // //full cut
-  //   .encode();
-
-  const feedToStartingPosition = encoda
+  const feedToStartingPosition = encoder
     .initialize()
-    // .raw([0x10, 0x04, 4])
-    // .raw([0x1b, 0x79, 0x03]) // enter EPOS mode
-    // .raw([0x1d, 0x0c]) // Feed paper to print starting position (only used for black mark paper)
-
     .image(canvasImage, newWidth, newHeight)
-    // .raw([0x1b, 0x4a, 0x08])
-    // .raw([0x1b, 0x79, 0x03]) // enter EPOS mode
-    // .raw([0x1d, 0x0c]) // Feed paper to print starting position (only used for black mark paper)
     .raw([0x1b, 0x4a, 0x7c]) // 80: 128 dots, 7e: 126 dots, (x) 7c: 124 dots, 7a: 122
-    // .raw([0x0a]) // Feed paper to print starting position (only used for black mark paper)
-    // .raw([0x0a]) // Feed paper to print starting position (only used for black mark paper)
-    // .raw([0x0a]) // Feed paper to print starting position (only used for black mark paper)
-    // .raw([0x0a]) // Feed paper to print starting position (only used for black mark paper)
-    // .raw([0x0a]) // Feed paper to print starting position (only used for black mark paper)
-
     .cut("full")
-    // .raw([0x1d, 0x0c]) // Feed paper to print starting position (only used for black mark paper)
-
     .encode();
 
-  // .cut("full")
-  // .raw([0x1b, 0x79, 0x03]) // enter EPOS mode
-  // .raw([0x1d, 0x0c]) // Feed paper to print starting position (only used for black mark paper)
-  // .raw([0x11, 0x0c]) //exit papge mode
-
-  // const feedToStartingPosition = encoda
-  //   .raw([0x1b, 0x79, 0x03]) // enter EPOS mode
-  //   .raw([0x1d, 0x0c]) // Feed paper to print starting position (only used for black mark paper)
-  //   // .raw([0x11, 0x21, 0x03]) // enter page mode
-  //   // .raw([0x11, 0x23, 0x01, 0x90, 0x00, 0xf0]) // /set page mode width&height width max72mm height max80mm
-  //   // .raw([0x11, 0x23, 0x02, 0x80, 0x03, 0xc0]) // set page width to 640 dots (80mm) and height to 960 dots (120mm)
-  //   // .raw([0x11, 0x25, 0x02]) // rotate180°
-  //   // .raw([0x11, 0x24, 0x00, 0x00, 0x00, 0x19]) //  //set print start position coordinates dot 0m
-
-  //   .raw([0x1d, 0x21, 0x01]) // Double height for "ABC"
-  //   .raw([0x41, 0x42, 0x43]) // Print "ABC"
-  //   .raw([0x1d, 0x21, 0x00]) // Cancel double height
-
-  //   // .raw([0x11, 0x0c]) //exit papge mode
-  //   // .raw([0x1b, 0x64, 0x0a]) //feed 10 lines])
-  //   .raw([0x1d, 0x0c]) // Feed paper to print starting position (only used for black mark paper)
-  //   .raw([0x1b, 0x69]) // //full cut
-  //   .encode();
-  const res = await sendBytes(window.device, feedToStartingPosition);
-  console.log({ res });
-  // // collect the bitmap data from the canvas
-  // for (let y = 0; y < height; y++) {
-  //   imageData.push([]);
-  //   for (let x = 0; x < width; x++) {
-  //     imageData[y][x] = canvasData.data[y * (width * 4) + x * 4] === 0 ? 1 : 0;
-  //   } // /////////////// 1 * ( 384 * 4 ) + 0 * 4 + 3
-  // } /////// /           1536 + 3
-
-  // console.log({ imageData });
-  // // print the image
-  //   await printImage(window.device, imageData, 8);
+  await sendBytes(window.device, feedToStartingPosition);
 };
 
 export const printPanorama = async (imageData) => {
-  // take canvasData and rotate it 90 degrees
-  // const rotatedCanvasData = rotateCanvasData(canvasData, width, height);
-  // console.log({ rotatedCanvasData });
   console.log({ imageData });
-  // const newImageData = canvasContext.createImageData(
-  //   imageData.height,
-  //   imageData.width
-  // );
 
-  // double size
-  //let newImageData = scaleImage(imageData, 2);
-  // rotate 90 degrees
   imageData = scaleImage(imageData, 2);
   imageData = rotateImage(imageData);
 
   const newHeight = 824;
   const newWidth = 576;
-  // console.log();
-
-  // logo
 
   const canvasImage = document.createElement("canvas");
   canvasImage.width = newWidth;
@@ -584,12 +397,95 @@ export const printPanorama = async (imageData) => {
     imageMode: "raster",
   });
 
-  const feedToStartingPosition = encoda
+  const printerCommands = encoda
     .initialize()
     .image(canvasImage, newWidth, newHeight)
     .raw([0x1b, 0x4a, 0xb0]) // 176 dots
     .cut("full")
     .encode();
 
-  await sendBytes(window.device, feedToStartingPosition);
+  await sendBytes(window.device, printerCommands);
+};
+
+export const printPortrait = async (imageData) => {
+  imageData = scaleImage(imageData, 2);
+
+  const newHeight = 824;
+  const newWidth = 576;
+
+  const canvasImage = document.createElement("canvas");
+  canvasImage.width = newWidth;
+  canvasImage.height = newHeight;
+  const ctx = canvasImage.getContext("2d");
+
+  ctx?.putImageData(imageData, 0, 0);
+
+  const encoda = new EscPosEncoder({
+    imageMode: "raster",
+  });
+
+  const printerCommands = encoda
+    .initialize()
+    .image(canvasImage, newWidth, newHeight)
+    .raw([0x1b, 0x4a, 0xb0]) // 176 dots
+    .cut("full")
+    .encode();
+
+  await sendBytes(window.device, printerCommands);
+};
+
+export const printFourPortrait = async (imageData) => {
+  imageData = scaleImage(imageData, 2);
+
+  const newHeight = 824;
+  const newWidth = 576;
+
+  const canvasImage = document.createElement("canvas");
+  canvasImage.width = newWidth;
+  canvasImage.height = newHeight;
+  const ctx = canvasImage.getContext("2d");
+
+  ctx?.putImageData(imageData, 0, 0);
+  ctx?.putImageData(imageData, 288, 0);
+  ctx?.putImageData(imageData, 0, 288);
+  ctx?.putImageData(imageData, 288, 288);
+
+  const encoda = new EscPosEncoder({
+    imageMode: "raster",
+  });
+
+  const printerCommands = encoda
+    .initialize()
+    .image(canvasImage, newWidth, newHeight)
+    .raw([0x1b, 0x4a, 0xb0]) // 176 dots
+    .cut("full")
+    .encode();
+
+  await sendBytes(window.device, printerCommands);
+};
+
+export const adjustPaper = async (adjustment) => {
+  const dots = 1000 + adjustment;
+  const rest = dots % 255;
+  const fullRounds = Math.floor(dots / 255);
+
+  const encoder = new EscPosEncoder({
+    imageMode: "raster",
+  });
+
+  const printerCommands = encoder.initialize();
+
+  // Add full rounds
+  for (let i = 0; i < fullRounds; i++) {
+    printerCommands.raw([0x1b, 0x4a, 0xff]);
+  }
+
+  // Add rest
+  if (rest > 0) {
+    printerCommands.raw([0x1b, 0x4a, rest]);
+  }
+
+  const encodedData = printerCommands.cut("full").encode();
+
+  await sendBytes(window.device, encodedData);
 };
