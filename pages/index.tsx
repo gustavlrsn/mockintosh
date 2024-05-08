@@ -24,7 +24,11 @@ import { getZoomLevel } from "@/lib/utils";
 import { resolution } from "@/lib/config";
 import clsx from "clsx";
 import FPSStats from "react-fps-stats";
-
+// import { ControlPanel, Settings } from "@/components/windows/control-panel";
+import Picture from "@/components/windows/picture";
+import PixelFontCanvas from "@/lib/PixelFontCanvas";
+import { ControlPanel } from "@/components/windows/control-panel";
+// import glyphs from "@/glyphs.json";
 const version = pkg.version;
 const simulatedBootTime = 1337;
 
@@ -41,11 +45,13 @@ export const applicationTypes = {
   PHOTO_BOOTH: "PHOTO_BOOTH",
   FILE: "FILE",
   FINDER: "FINDER",
-  ABOUT_THIS_MOCKINTOSH: "ABOUT_THIS_MOCKINTOSH", // borde bara vara definierat direkt någon
+  ABOUT_THIS_MOCKINTOSH: "ABOUT_THIS_MOCKINTOSH",
   // CHAT: "CHAT",
   VIDEO: "VIDEO",
   SAFARI: "SAFARI",
   DRAW: "DRAW",
+  CONTROL_PANEL: "CONTROL_PANEL",
+  PICTURE: "PICTURE",
   //MOCKINGRAM: "MOCKINGRAM",
 };
 
@@ -59,22 +65,183 @@ export const SystemContext = React.createContext({
   bringWindowToFront: (title: string) => null,
   zoom: 1,
   openWindows: [],
+  openWindow: (window: any) => null,
+  menubar: [],
+  setMenubar: (menubar: MenubarType) => null,
   width: resolution.width,
   height: resolution.height,
 });
+
+type MenubarItemProps = {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  shortcut?: string;
+};
+
+type MenubarRadioItemProps = {
+  label: string;
+  value: string;
+  onClick?: () => void;
+  disabled?: boolean;
+};
+
+type MenubarRadioGroup = {
+  type: "radiogroup";
+  value: string;
+  onValueChange: (value: string) => void;
+  items: MenubarRadioItemProps[];
+};
+
+type MenubarType = {
+  label: string;
+  items: MenubarRadioGroup | MenubarItemProps[];
+}[];
+
+const finderMenubar: MenubarType = [
+  {
+    label: "File",
+    items: [
+      {
+        label: "New Folder",
+        shortcut: "⌘N",
+        disabled: true,
+      },
+      {
+        label: "Open",
+        shortcut: "⌘O",
+        disabled: true,
+      },
+      {
+        label: "Print",
+        disabled: true,
+      },
+      {
+        label: "Close",
+        disabled: true,
+      },
+    ],
+  },
+  {
+    label: "Edit",
+    items: [
+      {
+        label: "Undo",
+        shortcut: "⌘Z",
+        disabled: true,
+      },
+      {
+        label: "Cut",
+        shortcut: "⌘X",
+        disabled: true,
+      },
+      {
+        label: "Copy",
+        shortcut: "⌘C",
+        disabled: true,
+      },
+      {
+        label: "Paste",
+        shortcut: "⌘V",
+        disabled: true,
+      },
+      {
+        label: "Clear",
+        disabled: true,
+      },
+      {
+        label: "Select All",
+        shortcut: "⌘A",
+        disabled: true,
+      },
+      {
+        label: "Show Clipboard",
+        disabled: true,
+      },
+    ],
+  },
+  {
+    label: "View",
+    items: [
+      {
+        label: "By Small Icon",
+        disabled: true,
+      },
+      {
+        label: "By Icon",
+        disabled: true,
+      },
+      {
+        label: "By Name",
+        disabled: true,
+      },
+      {
+        label: "By Date",
+        disabled: true,
+      },
+      {
+        label: "By Size",
+        disabled: true,
+      },
+      {
+        label: "By Kind",
+        disabled: true,
+      },
+    ],
+  },
+  {
+    label: "Special",
+    items: [
+      {
+        label: "Clean Up Desktop",
+        disabled: true,
+      },
+      {
+        label: "Empty Trash",
+        disabled: true,
+      },
+      {
+        label: "Erase Disk",
+        disabled: true,
+      },
+      {
+        label: "Set Startup...",
+        disabled: true,
+      },
+      {
+        label: "Restart",
+        disabled: true,
+      },
+      {
+        label: "Shut Down",
+        disabled: true,
+      },
+    ],
+  },
+];
 
 const Index = ({ initialApplications, files }) => {
   const [showingSplashscreen, setSplashScreen] = useState(true);
   const [settings, setSettings] = useState({ showMac: true });
   const { width, height } = useWindowSize();
-  const zoom = getZoomLevel({ width, height });
+  const [menubar, setMenubarState] = useState(finderMenubar);
+  const setMenubar = (menubar) => {
+    setMenubarState(menubar ?? finderMenubar);
+  };
 
+  // const charCodes = Object.keys(glyphs).map((key) => parseInt(key));
+  // // const charCodesRedaction = Object.keys(glyphsRed).map((key) => parseInt(key));
+
+  // const characters = charCodes.map((code) => String.fromCharCode(code));
+  // console.log({ str: characters.join("") });
+
+  const zoom = getZoomLevel({ width, height });
   useEffect(() => {
     Promise.all([
       PixelFontCanvas.loadFont("/fonts/", "Geneva9.fnt"),
       PixelFontCanvas.loadFont("/fonts/", "ChiKareGo.fnt"),
     ]).then(([geneva, chikarego]) => {
-    setTimeout(() => setSplashScreen(false), simulatedBootTime);
+      setTimeout(() => setSplashScreen(false), simulatedBootTime);
     });
 
     const settingsInLocalStorage = store.get("settings");
@@ -141,6 +308,9 @@ const Index = ({ initialApplications, files }) => {
           closeWindow,
           bringWindowToFront,
           openWindows: openApplications,
+          openWindow: openWindow,
+          setMenubar,
+          menubar,
           zoom,
           width,
           height,
@@ -159,71 +329,84 @@ const Index = ({ initialApplications, files }) => {
               <React.Fragment>
                 <SystemMenubar />
 
-            {/* <DndContext> */}
-            {/* Windows */}
-            <div className="flex-grow flex">
-              {openApplications.map((window, i) => {
-                switch (window.type) {
-                  case applicationTypes.FINDER:
-                    return (
-                      <Finder
-                        key={window.title}
-                        i={i}
-                        {...window.payload}
-                        path={window.path}
-                        openWindow={openWindow}
-                        window={window}
-                      />
-                    );
-                  case applicationTypes.FILE:
-                    return (
-                      <File
-                        key={window.title}
-                        {...window.payload}
-                        window={window}
-                        i={i}
-                      />
-                    );
-                  case applicationTypes.PHOTO_BOOTH:
-                    return (
-                      <PhotoBooth
-                        key={window.title}
-                        i={i}
-                        {...window.payload}
-                        window={window}
-                      />
-                    );
-                  case applicationTypes.ABOUT_THIS_MOCKINTOSH:
-                    return <AboutThisMockintosh window={window} i={i} />;
-                  case applicationTypes.VIDEO:
-                    return <Video {...window.payload} window={window} i={i} />;
-                  case applicationTypes.SAFARI:
-                    return (
-                      <Safari
-                        key={window.title}
-                        i={i}
-                        {...window.payload}
-                        window={window}
-                      />
-                    );
-                }
-              })}
+                {/* <DndContext> */}
+                {/* Windows */}
+                <div className="flex-grow flex">
+                  {openApplications.map((window, i) => {
+                    switch (window.type) {
+                      case applicationTypes.FINDER:
+                        return (
+                          <Finder
+                            key={window.title}
+                            i={i}
+                            {...window.payload}
+                            path={window.path}
+                            openWindow={openWindow}
+                            window={window}
+                          />
+                        );
+                      case applicationTypes.FILE:
+                        return (
+                          <File
+                            key={window.title}
+                            {...window.payload}
+                            window={window}
+                            i={i}
+                          />
+                        );
+                      case applicationTypes.PHOTO_BOOTH:
+                        return (
+                          <PhotoBooth
+                            key={window.title}
+                            i={i}
+                            {...window.payload}
+                            window={window}
+                          />
+                        );
+                      case applicationTypes.PICTURE:
+                        return (
+                          <Picture
+                            key={window.title}
+                            i={i}
+                            {...window.payload}
+                            window={window}
+                          />
+                        );
+                      case applicationTypes.ABOUT_THIS_MOCKINTOSH:
+                        return <AboutThisMockintosh window={window} i={i} />;
+                      case applicationTypes.CONTROL_PANEL:
+                        return <ControlPanel window={window} i={i} />;
+                      case applicationTypes.VIDEO:
+                        return (
+                          <Video {...window.payload} window={window} i={i} />
+                        );
+                      case applicationTypes.SAFARI:
+                        return (
+                          <Safari
+                            key={window.title}
+                            i={i}
+                            {...window.payload}
+                            window={window}
+                          />
+                        );
+                    }
+                  })}
 
                   <Desktop
                     openWindow={openWindow}
                     openWindows={openApplications}
                   >
-                {files.map((file) => (
-                  <Icon
-                    //path={`/${file.title}`}
-                    key={file.title}
-                    icon={file}
-                    openWindow={openWindow}
-                  />
-                ))}
-              </Desktop>
-            </div>
-            {/* </DndContext> */}
+                    {files.map((file) => (
+                      <Icon
+                        //path={`/${file.title}`}
+                        key={file.title}
+                        icon={file}
+                        openWindow={openWindow}
+                      />
+                    ))}
+                  </Desktop>
+                </div>
+                {/* </DndContext> */}
               </React.Fragment>
             )}
           </Screen>
@@ -317,25 +500,6 @@ export async function getStaticProps() {
         y: 5,
         x: 45,
       },
-      menubar: [
-        {
-          label: "File",
-          items: [
-            { label: "Take Photo", action: "TAKE_PHOTO" },
-            { label: "Start Recording", action: "START_RECORDING" },
-            { label: "Stop Recording", action: "STOP_RECORDING" },
-          ],
-        },
-        {
-          label: "View",
-          items: [
-            {
-              type: "radiogroup",
-              items: [{ label: "288x288" }, { label: "320x320" }],
-            },
-          ],
-        },
-      ],
     },
     // {
     //   title: "App Store",
@@ -348,6 +512,13 @@ export async function getStaticProps() {
       type: applicationTypes.VIDEO,
       img: "/icons/MacFlim.png",
       payload: {},
+    },
+
+    {
+      title: "pic.png",
+      type: applicationTypes.PICTURE,
+      img: "/icons/MacFlim.png",
+      payload: { width: 236, height: 235, src: "/images/mockintosh.png" },
     },
 
     {
