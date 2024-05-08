@@ -38,31 +38,32 @@ export function Photoroll({}) {
       });
   }, []);
   console.log({ photos });
-  return (
-    <Window width={87}>
-      <div className="flex flex-wrap gap-2 min-h-[70px]">
-        {photos.map(({ full, time }, i) => (
-          <button
-            key={time}
-            // onClick={() => setViewingPhoto(i)}
-            className={`flex-none relative w-full focus:outline-none border-black border `}
-            // style={
-            //   viewingPhoto === i
-            //     ? { outline: "2px solid black" }
-            //     : { outline: "0" }
-            // }
-          >
-            <img
-              src="/photobooth/frame.png"
-              className="w-[87px] h-[70px] absolute inset-0"
-            />
-            <img
-              className="size-16 my-[3px] mx-auto w-[64px] h-[64px]"
-              src={full}
-            />
-          </button>
-        ))}
-      </div>
-    </Window>
-  );
+  return null;
+  // return (
+  //   <Window width={87}>
+  //     <div className="flex flex-wrap gap-2 min-h-[70px]">
+  //       {photos.map(({ full, time }, i) => (
+  //         <button
+  //           key={time}
+  //           // onClick={() => setViewingPhoto(i)}
+  //           className={`flex-none relative w-full focus:outline-none border-black border `}
+  //           // style={
+  //           //   viewingPhoto === i
+  //           //     ? { outline: "2px solid black" }
+  //           //     : { outline: "0" }
+  //           // }
+  //         >
+  //           <img
+  //             src="/photobooth/frame.png"
+  //             className="w-[87px] h-[70px] absolute inset-0"
+  //           />
+  //           <img
+  //             className="size-16 my-[3px] mx-auto w-[64px] h-[64px]"
+  //             src={full}
+  //           />
+  //         </button>
+  //       ))}
+  //     </div>
+  //   </Window>
+  // );
 }
