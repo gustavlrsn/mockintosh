@@ -4,26 +4,80 @@ import Dither from "canvas-dither";
 import {
   connectClickHandler,
   printClickHandler,
+  printFourPortrait,
   printPanorama,
+  printPortrait,
 } from "@/lib/print";
 import { Window } from "@/components/ui/window";
 import { Dialog, DialogContent } from "../ui/dialog";
 import { Input } from "../ui/input";
 import SystemButton from "@/components/button";
 import PixelFontCanvas from "@/lib/PixelFontCanvas";
-import { min } from "lodash";
+import { SystemContext } from "@/pages";
+import { write } from "opfs-tools";
+import dayjs from "dayjs";
+import { Photoroll } from "../photobooth/photoroll";
+
+const getMenubar = ({ ditheringAlgorithm, setDitheringAlgorithm }) => {
+  return [
+    {
+      label: "File",
+      items: [
+        { label: "Take Photo", action: "TAKE_PHOTO" },
+        { label: "Start Recording", action: "START_RECORDING" },
+        { label: "Stop Recording", action: "STOP_RECORDING" },
+      ],
+    },
+    {
+      label: "View",
+      items: [
+        {
+          type: "radiogroup",
+          items: [{ label: "288x288" }, { label: "320x320" }],
+        },
+      ],
+    },
+    {
+      label: "Dithering",
+      items: [
+        {
+          type: "radiogroup",
+          value: ditheringAlgorithm,
+          onValueChange: (value) => {
+            setDitheringAlgorithm(value);
+          },
+          items: [
+            { label: "Atkinson", value: "atkinson" },
+            { label: "Bayer", value: "bayer" },
+          ],
+        },
+      ],
+    },
+  ];
+};
 
 export default function Photobooth({ i, window }) {
   const canvas = useRef(null);
   const video = useRef(null);
   const beep = new Audio("/sound/beep.wav");
   const click = new Audio("/sound/click.wav");
-
+  const { setMenubar } = React.useContext(SystemContext);
   const [photos, setPhotos] = useState([]);
   const [viewingPhoto, setViewingPhoto] = useState(null);
   const [flash, setFlash] = useState(false);
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
   const [caption, setCaption] = useState("");
+  const [ditheringAlgorithm, setDitheringAlgorithm] =
+    React.useState("atkinson");
+
+  useEffect(() => {
+    const menubar = getMenubar({
+      ditheringAlgorithm,
+      setDitheringAlgorithm,
+    });
+
+    setMenubar(menubar);
+  }, [ditheringAlgorithm]);
 
   useEffect(() => {
     // PixelFontCanvas.loadFont("/fonts/", "Redaction20-Regular.fnt", (data) => {
@@ -72,8 +126,8 @@ export default function Photobooth({ i, window }) {
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
 
-  const width = 412; //320 for new printer
-  const height = 288; //320
+  const width = 288; // 412; //320 for new printer
+  const height = 288; ///288; //320vg
 
   // const width = 360;
   // const height = 270;
@@ -128,6 +182,7 @@ export default function Photobooth({ i, window }) {
     const ctx = canvas.current.getContext("2d", {
       willReadFrequently: true,
     });
+    ctx.webkitImageSmoothingEnabled = false;
 
     const videoAspectRatio = originalVideoWidth / originalVideoHeight;
     const canvasAspectRatio = width / height;
@@ -183,8 +238,7 @@ export default function Photobooth({ i, window }) {
         );
 
         let pixels = ctx.getImageData(0, 0, width, height);
-        pixels = Dither.atkinson(pixels);
-        //pixels = Dither.bayer(pixels, 135);
+        pixels = Dither[ditheringAlgorithm](pixels, 120);
         ctx.putImageData(pixels, 0, 0);
       }
     }, 64);
@@ -201,7 +255,12 @@ export default function Photobooth({ i, window }) {
       //snap.currentTIme = 0;
       //snap.play();a
       const time = Date.now();
+      const date = dayjs(time).format("YYYY-MM-DD HH:mm:ss");
       const currentCanvas = canvas.current;
+      currentCanvas.toBlob(async (blob) => {
+        console.log({ time, blob });
+        await write(`Mockintosh HD/Photo Booth/${date}.png`, blob.stream()); // empty file
+      });
       const full = currentCanvas.toDataURL("image/png");
       const canvasContext = currentCanvas.getContext("2d");
       const imageData = canvasContext.getImageData(
@@ -211,13 +270,6 @@ export default function Photobooth({ i, window }) {
         currentCanvas.height
       );
 
-      console.log("take photo");
-      console.log({
-        canvasContext,
-        imageData,
-        width: currentCanvas.width,
-        height: currentCanvas.height,
-      });
       setPhotos([{ full, time, imageData, canvasContext }, ...photos]);
       setViewingPhoto(0);
     }, 300);
@@ -243,7 +295,7 @@ export default function Photobooth({ i, window }) {
     <React.Fragment>
       <Window
         i={i}
-        width={412}
+        width={width}
         title="Photo Booth"
         defaultPosition={window.defaultPosition}
       >
@@ -262,7 +314,7 @@ export default function Photobooth({ i, window }) {
             )}
             <canvas
               ref={canvas}
-              className="w-[412px]"
+              // className="w-[412px]"bqz
               style={{
                 transform: "scaleX(-1)",
                 //height: "300px",
@@ -354,14 +406,18 @@ export default function Photobooth({ i, window }) {
                   >
                     Save
                   </Button>
+                  <Button
+                    onClick={async () => {
+                      await write("/dir/file.txt", ""); // empty file
+                    }}
+                  >
+                    Local save
+                  </Button>
                 </>
               )}
             </div>
           </div>
-          <video
-            ref={video}
-            className="hidden object-cover object-center h-[288px] w-[412px]"
-          />
+          <video ref={video} className="hidden object-cover object-center " />
 
           {/* <div className="max-w-full overflow-x-scroll scroll border-t border-black">
         <div className="flex py-1 " style={{ height: "55px" }}>
@@ -384,31 +440,7 @@ export default function Photobooth({ i, window }) {
       </div> */}
         </div>
       </Window>
-      {/* <Window width={87}>
-        <div className="flex flex-wrap gap-2 min-h-[70px]">
-          {photos.map(({ full, time }, i) => (
-            <button
-              key={time}
-              onClick={() => setViewingPhoto(i)}
-              className={`flex-none relative w-full focus:outline-none border-black border `}
-              style={
-                viewingPhoto === i
-                  ? { outline: "2px solid black" }
-                  : { outline: "0" }
-              }
-            >
-              <img
-                src="/photobooth/frame.png"
-                className="w-[87px] h-[70px] absolute inset-0"
-              />
-              <img
-                className="size-16 my-[3px] mx-auto w-[64px] h-[64px]"
-                src={full}
-              />
-            </button>
-          ))}
-        </div>
-      </Window> */}
+      {/* <Photoroll /> */}
       {flash && <div className="absolute inset-0 bg-white z-40"></div>}
       <Dialog open={printDialogOpen} onOpenChange={setPrintDialogOpen}>
         <DialogContent>
@@ -429,7 +461,7 @@ export default function Photobooth({ i, window }) {
                   console.log("in click handler");
                   //console.log({ canvasData });
                   // printClickHandler(imageData, { caption });
-                  printPanorama(imageData);
+                  printClickHandler(imageData, { caption });
                 }}
               >
                 Print
