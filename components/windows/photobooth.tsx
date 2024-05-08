@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import Dither from "canvas-dither";
+// import { useWorker } from "@koale/useworker";
+
 import {
   connectClickHandler,
   printClickHandler,
@@ -16,7 +18,8 @@ import PixelFontCanvas from "@/lib/PixelFontCanvas";
 import { MenubarType, SystemContext } from "@/pages";
 import { write } from "opfs-tools";
 import dayjs from "dayjs";
-import { Photoroll } from "../photobooth/photoroll";
+// import { Photoroll } from "../photobooth/photoroll";
+// import { encode1bitImageData, encodeImageData } from "@/lib/image";
 
 const getMenubar = ({
   ditheringAlgorithm,
@@ -67,8 +70,8 @@ const getMenubar = ({
 };
 
 export default function Photobooth({ i, window }) {
-  const canvas = useRef(null);
-  const video = useRef(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const video = useRef<HTMLVideoElement>(null);
   const beep = new Audio("/sound/beep.wav");
   const click = new Audio("/sound/click.wav");
   const { setMenubar } = React.useContext(SystemContext);
@@ -176,6 +179,8 @@ export default function Photobooth({ i, window }) {
     //   videoHeight: video.current.videoHeight,
     //   videoWidth: video.current.videoWidth,
     // });
+    const offscreen = new OffscreenCanvas(width, height);
+    const offscreenCtx = offscreen.getContext("2d");
 
     const originalVideoHeight = video.current.videoHeight;
     const originalVideoWidth = video.current.videoWidth;
@@ -185,14 +190,16 @@ export default function Photobooth({ i, window }) {
     });
     // video.current.setAttribute("width", width);
     // video.current.setAttribute("height", width);
+    const useOffScreenCavanvas = "OffscreenCanvas" in window && false;
+    const canvasEl = useOffScreenCavanvas
+      ? canvas.current // .transferControlToOffscreen()
+      : canvas.current;
+    canvasEl.width = width;
+    canvasEl.height = height;
 
-    canvas.current.width = width;
-    canvas.current.height = height;
-
-    const ctx = canvas.current.getContext("2d", {
+    const ctx = canvasEl.getContext("2d", {
       willReadFrequently: true,
     });
-    ctx.webkitImageSmoothingEnabled = false;
 
     const videoAspectRatio = originalVideoWidth / originalVideoHeight;
     const canvasAspectRatio = width / height;
@@ -201,10 +208,6 @@ export default function Photobooth({ i, window }) {
     let sy = 0;
     let swidth = originalVideoWidth;
     let sheight = originalVideoHeight;
-    let dx = 0;
-    let dy = 0;
-    let dWidth = width;
-    let dHeight = height;
 
     if (videoAspectRatio > canvasAspectRatio) {
       // Video is wider than canvas
@@ -218,38 +221,32 @@ export default function Photobooth({ i, window }) {
       sheight = scaledHeight;
     }
 
-    console.log({
-      sx,
-      sy,
-      swidth,
-      height,
-      videoAspectRatio,
-      sheight,
-      dx,
-      dy,
-      dWidth,
-      dHeight,
-    });
+    const draw = async () => {
+      try {
+        console.time("wCreateImageBitmap");
+        const bitmap = await createImageBitmap(
+          video.current,
+          sx,
+          sy,
+          swidth,
+          sheight
+        );
+        offscreenCtx.drawImage(bitmap, 0, 0, width, height);
+        bitmap.close();
+        let pixels = offscreenCtx.getImageData(0, 0, width, height);
+        pixels = Dither[ditheringAlgorithm](pixels, 120);
+        ctx.putImageData(pixels, 0, 0);
+        console.timeEnd("wCreateImageBitmap");
+      } catch (err) {
+        console.error("Error creating ImageBitmap:", err);
+      }
+    };
 
     const interval = setInterval(() => {
       if (!video.current) {
         clearInterval(interval);
       } else {
-        ctx.drawImage(
-          video.current,
-          sx, // The x-axis coordinate of the top left corner of the sub-rectangle of the source image to draw into the destination context. Use the 3- or 5-argument syntax to omit this argument.
-          sy, // The y-axis coordinate of the top left corner of the sub-rectangle of the source image to draw into the destination context. Use the 3- or 5-argument syntax to omit this argument.
-          swidth, // The width of the sub-rectangle of the source image to draw into the destination context. If not specified, the entire rectangle from the coordinates specified by sx and sy to the bottom-right corner of the image is used. Use the 3- or 5-argument syntax to omit this argument. A negative value will flip the image.
-          sheight, // The height of the sub-rectangle of the source image to draw into the destination context. Use the 3- or 5-argument syntax to omit this argument. A negative value will flip the image.
-          dx, // The x-axis coordinate in the destination canvas at which to place the top-left corner of the source image.
-          dy, // The y-axis coordinate in the destination canvas at which to place the top-left corner of the source image.
-          dWidth, // The width to draw the image in the destination canvas. This allows scaling of the drawn image. If not specified, the image is not scaled in width when drawn. Note that this argument is not included in the 3-argument syntax.
-          dHeight // The height to draw the image in the destination canvas. This allows scaling of the drawn image. If not specified, the image is not scaled in height when drawn. Note that this argument is not included in the 3-argument syntax.
-        );
-
-        let pixels = ctx.getImageData(0, 0, width, height);
-        pixels = Dither[ditheringAlgorithm](pixels, 120);
-        ctx.putImageData(pixels, 0, 0);
+        draw();
       }
     }, 64);
   }
@@ -261,16 +258,16 @@ export default function Photobooth({ i, window }) {
     setFlash(true);
     setCountdown(undefined);
 
-    setTimeout(() => {
+    setTimeout(async () => {
       //snap.currentTIme = 0;
       //snap.play();a
       const time = Date.now();
       const date = dayjs(time).format("YYYY-MM-DD HH:mm:ss");
       const currentCanvas = canvas.current;
-      currentCanvas.toBlob(async (blob) => {
-        console.log({ time, blob });
-        await write(`Mockintosh HD/Photo Booth/${date}.png`, blob.stream()); // empty file
-      });
+      // currentCanvas.toBlob(async (blob) => {
+      //   console.log({ time, blob });
+      //   await write(`Mockintosh HD/Photo Booth/${date}.png`, blob.stream()); // empty file
+      // });
       const full = currentCanvas.toDataURL("image/png");
       const canvasContext = currentCanvas.getContext("2d");
       const imageData = canvasContext.getImageData(
@@ -279,7 +276,32 @@ export default function Photobooth({ i, window }) {
         currentCanvas.width,
         currentCanvas.height
       );
+      // const encodedData = encodeImageData(imageData);
+      // const encodedBlob = new Blob([encodedData], {
+      //   type: "application/octet-stream",
+      // });
 
+      // await write(
+      //   `Mockintosh HD/Photo Booth/${date}-2bit.pic`,
+      //   encodedBlob.stream()
+      // ); // empty file
+
+      // const encoded1bit = encode1bitImageData(imageData);
+      // const encoded1bitblob = new Blob([encoded1bit], {
+      //   type: "application/octet-stream",
+      // });
+
+      // await write(
+      //   `Mockintosh HD/Photo Booth/${date}-1bit.pic`,
+      //   encoded1bitblob.stream()
+      // ); // empty file
+
+      // const blobbyDataUrl = new Blob([full]);
+
+      // await write(
+      //   `Mockintosh HD/Photo Booth/${date}-dataurl.pic`,
+      //   blobbyDataUrl.stream()
+      // ); // empty file
       setPhotos([{ full, time, imageData, canvasContext }, ...photos]);
       setViewingPhoto(0);
     }, 300);
@@ -292,7 +314,7 @@ export default function Photobooth({ i, window }) {
     return () => {
       video.current?.removeEventListener("canplay", paintToCanvas);
       if (video.current?.srcObject) {
-        const tracks = video.current.srcObject.getTracks();
+        const tracks = (video.current.srcObject as MediaStream).getTracks();
         tracks.forEach(function (track) {
           track.stop();
         });
