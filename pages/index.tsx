@@ -1,34 +1,32 @@
 import React, { useState, useEffect } from "react";
 import store from "store";
-// import { DndContext } from "@dnd-kit/core";
-import { Window } from "@/components/ui/window";
+import clsx from "clsx";
+
 import Head from "@/components/head";
-import { getFileContent } from "@/lib/api";
 import PhotoBooth from "@/components/photobooth/photobooth";
 import Finder from "@/components/windows/folder";
 import File from "@/components/windows/file";
-// import Draw from "@/components/windows/draw";
 import AboutThisMockintosh from "@/components/windows/about";
 import { SystemMenubar } from "@/components/menubar";
 import Splashscreen from "@/components/splashscreen";
 import Desktop from "@/components/desktop";
 import Screen from "@/components/screen";
 import Icon from "@/components/icon";
-//import ChooseUsernamePopup from "@/components/chooseUsername";
 import Video from "@/components/windows/video";
-import getDefaultPosition from "@/utils/getDefaultPosition";
-import pkg from "@/package.json";
 import Safari from "@/components/windows/safari";
+import Picture from "@/components/windows/picture";
+import { ControlPanel } from "@/components/windows/control-panel";
+
+import { getFileContent } from "@/lib/api";
 import useWindowSize from "@/lib/hooks/useWindowSize";
 import { getZoomLevel } from "@/lib/utils";
 import { resolution } from "@/lib/config";
-import clsx from "clsx";
-import FPSStats from "react-fps-stats";
-// import { ControlPanel, Settings } from "@/components/windows/control-panel";
-import Picture from "@/components/windows/picture";
 import PixelFontCanvas from "@/lib/PixelFontCanvas";
-import { ControlPanel } from "@/components/windows/control-panel";
+import getDefaultPosition from "@/utils/getDefaultPosition";
+import pkg from "@/package.json";
+
 // import glyphs from "@/glyphs.json";
+
 const version = pkg.version;
 const simulatedBootTime = 1337;
 
@@ -513,12 +511,12 @@ export async function getStaticProps() {
       payload: {},
     },
 
-    {
-      title: "pic.png",
-      type: applicationTypes.PICTURE,
-      img: "/icons/MacFlim.png",
-      payload: { width: 236, height: 235, src: "/images/mockintosh.png" },
-    },
+    // {
+    //   title: "pic.png",
+    //   type: applicationTypes.PICTURE,
+    //   img: "/icons/MacFlim.png",
+    //   payload: { width: 236, height: 235, src: "/images/mockintosh.png" },
+    // },
 
     {
       title: "Safari",
