@@ -4,7 +4,7 @@ import store from "store";
 import { Window } from "@/components/ui/window";
 import Head from "@/components/head";
 import { getFileContent } from "@/lib/api";
-import PhotoBooth from "@/components/windows/photobooth";
+import PhotoBooth from "@/components/photobooth/photobooth";
 import Finder from "@/components/windows/folder";
 import File from "@/components/windows/file";
 // import Draw from "@/components/windows/draw";
@@ -302,7 +302,6 @@ const Index = ({ initialApplications, files }) => {
     <>
       <Head />
       {/* <audio ref={audio} src="sesound.mp3" preload="auto" /> */}
-      {isDevelopment && <FPSStats />}
       <SystemContext.Provider
         value={{
           closeWindow,

@@ -18,6 +18,7 @@ import PixelFontCanvas from "@/lib/PixelFontCanvas";
 import { MenubarType, SystemContext } from "@/pages";
 import { write } from "opfs-tools";
 import dayjs from "dayjs";
+import { Text } from "../ui/text";
 // import { Photoroll } from "../photobooth/photoroll";
 // import { encode1bitImageData, encodeImageData } from "@/lib/image";
 
@@ -70,8 +71,12 @@ const getMenubar = ({
 };
 
 export default function Photobooth({ i, window }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const video = useRef<HTMLVideoElement>(null);
+  const width = 288;
+  const height = 288;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const offscreenCanvas = new OffscreenCanvas(width, height);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
   const beep = new Audio("/sound/beep.wav");
   const click = new Audio("/sound/click.wav");
   const { setMenubar } = React.useContext(SystemContext);
@@ -80,32 +85,59 @@ export default function Photobooth({ i, window }) {
   const [flash, setFlash] = useState(false);
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
   const [caption, setCaption] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState("");
+
+  const imageBitmapIntermediary = useRef(null);
+
   const [ditheringAlgorithm, setDitheringAlgorithm] =
     React.useState("atkinson");
 
+  const workerRef = useRef<Worker>(null);
   useEffect(() => {
-    const menubar = getMenubar({
-      ditheringAlgorithm,
-      setDitheringAlgorithm,
-    });
-
-    setMenubar(menubar);
-  }, [ditheringAlgorithm]);
-
-  useEffect(() => {
-    // PixelFontCanvas.loadFont("/fonts/", "Redaction20-Regular.fnt", (data) => {
-    //   setFontLoaded(true);
-    // });
-    PixelFontCanvas.loadFont("/fonts/", "Redaction35-Regular.fnt", (data) =>
-      console.log("Font loaded", data)
+    workerRef.current = new Worker(
+      new URL("./dither.worker.ts", import.meta.url)
     );
+    workerRef.current.onmessage = (e) => {
+      const { imageBitmap } = e.data;
+      imageBitmapIntermediary.current?.close();
+      imageBitmapIntermediary.current = imageBitmap;
+      // console.timeEnd("process");
+
+      process();
+    };
+
+    return () => {
+      workerRef.current.terminate();
+    };
   }, []);
+
+  // useEffect(() => {
+  //   const menubar = getMenubar({
+  //     ditheringAlgorithm,
+  //     setDitheringAlgorithm,
+  //   });
+
+  //   setMenubar(menubar);
+  // }, [ditheringAlgorithm]);
+
+  // useEffect(() => {
+  //   // PixelFontCanvas.loadFont("/fonts/", "Redaction20-Regular.fnt", (data) => {
+  //   //   setFontLoaded(true);
+  //   // });
+  //   PixelFontCanvas.loadFont("/fonts/", "Redaction35-Regular.fnt", (data) =>
+  //     console.log("Font loaded", data)
+  //   );
+
+  //   return () => {
+  //     PixelFontCanvas.unloadFont("Redaction35-Regular");
+  //   };
+  // }, []);
   useEffect(() => {
     if (flash) {
       const timerId = setTimeout(() => {
         setFlash(false);
       }, 300);
-
       return () => clearTimeout(timerId); // This will clear the timeout if the component unmounts before the timeout finishes
     }
   }, [flash]);
@@ -136,35 +168,23 @@ export default function Photobooth({ i, window }) {
   function startCountdown() {
     setCountdown(3);
   }
-  const [loading, setLoading] = useState(true);
-  const [errorText, setErrorText] = useState("");
 
-  const width = 288; // 412; //320 for new printer
-  const height = 288; ///288; //320vg
-
-  // const width = 360;
-  // const height = 270;
   function getVideo() {
-    navigator.mediaDevices.enumerateDevices().then(function (devices) {
-      devices.forEach(function (device) {
-        console.log({
-          device,
-          id: device.deviceId,
-          json: device.toJSON(),
-          label: device.label,
-          kind: device.kind,
-        });
-      });
-    });
     navigator.mediaDevices
-      ?.getUserMedia({ video: true, audio: false })
+      ?.getUserMedia({
+        video: true,
+        audio: false,
+      })
       .then((localMediaStream) => {
-        video.current.srcObject = localMediaStream;
-        video.current.play();
-        console.log({
-          videoHeight: video.current.videoHeight,
-          videoWidth: video.current.videoWidth,
-        });
+        videoRef.current.srcObject = localMediaStream;
+        // videoRef.current.play();
+        console.log(
+          "videoRef.current.videoHeight",
+          videoRef.current.videoHeight
+        );
+        // draw();
+        // process();
+        setLoading(false);
       })
       .catch((err) => {
         setErrorText(err.message);
@@ -173,82 +193,54 @@ export default function Photobooth({ i, window }) {
       });
   }
 
-  function paintToCanvas() {
-    setLoading(false);
-    // console.log({
-    //   videoHeight: video.current.videoHeight,
-    //   videoWidth: video.current.videoWidth,
-    // });
-    const offscreen = new OffscreenCanvas(width, height);
-    const offscreenCtx = offscreen.getContext("2d");
+  function draw() {
+    if (imageBitmapIntermediary.current !== null && canvasRef.current) {
+      const ctx = canvasRef.current.getContext("2d");
 
-    const originalVideoHeight = video.current.videoHeight;
-    const originalVideoWidth = video.current.videoWidth;
-    console.log({
-      originalVideoHeight,
-      originalVideoWidth,
+      ctx.drawImage(imageBitmapIntermediary.current, 0, 0);
+    }
+
+    requestAnimationFrame(() => {
+      return draw();
     });
-    // video.current.setAttribute("width", width);
-    // video.current.setAttribute("height", width);
-    const useOffScreenCavanvas = "OffscreenCanvas" in window && false;
-    const canvasEl = useOffScreenCavanvas
-      ? canvas.current // .transferControlToOffscreen()
-      : canvas.current;
-    canvasEl.width = width;
-    canvasEl.height = height;
+  }
 
-    const ctx = canvasEl.getContext("2d", {
-      willReadFrequently: true,
-    });
-
-    const videoAspectRatio = originalVideoWidth / originalVideoHeight;
+  function process() {
+    const video = videoRef.current;
+    const { videoHeight, videoWidth } = video;
+    const videoAspectRatio = videoWidth / videoHeight;
     const canvasAspectRatio = width / height;
-
+    console.log({ videoHeight, videoWidth });
     let sx = 0;
     let sy = 0;
-    let swidth = originalVideoWidth;
-    let sheight = originalVideoHeight;
+    let swidth = video.videoWidth;
+    let sheight = video.videoHeight;
 
     if (videoAspectRatio > canvasAspectRatio) {
       // Video is wider than canvas
-      const scaledWidth = originalVideoHeight * canvasAspectRatio;
-      sx = (originalVideoWidth - scaledWidth) / 2;
+      const scaledWidth = video.videoHeight * canvasAspectRatio;
+      sx = (video.videoWidth - scaledWidth) / 2;
       swidth = scaledWidth;
     } else {
       // Video is taller than canvas
-      const scaledHeight = originalVideoWidth / canvasAspectRatio;
-      sy = (originalVideoHeight - scaledHeight) / 2;
+      const scaledHeight = video.videoWidth / canvasAspectRatio;
+      sy = (video.videoHeight - scaledHeight) / 2;
       sheight = scaledHeight;
     }
 
-    const draw = async () => {
-      try {
-        console.time("wCreateImageBitmap");
-        const bitmap = await createImageBitmap(
-          video.current,
-          sx,
-          sy,
-          swidth,
-          sheight
+    createImageBitmap(videoRef.current, sx, sy, swidth, sheight).then(
+      (bitmap) => {
+        workerRef.current.postMessage(
+          {
+            bitmap,
+            width,
+            height,
+            ditheringAlgorithm,
+          },
+          [bitmap]
         );
-        offscreenCtx.drawImage(bitmap, 0, 0, width, height);
-        bitmap.close();
-        let pixels = offscreenCtx.getImageData(0, 0, width, height);
-        pixels = Dither[ditheringAlgorithm](pixels, 120);
-        ctx.putImageData(pixels, 0, 0);
-        console.timeEnd("wCreateImageBitmap");
-      } catch (err) {
-        console.error("Error creating ImageBitmap:", err);
       }
-    };
-
-    const interval = setInterval(() => {
-      if (!video.current) {
-        clearInterval(interval);
-      } else {
-        draw();
-      }
-    }, 64);
+    );
   }
 
   function takePhoto() {
@@ -263,7 +255,7 @@ export default function Photobooth({ i, window }) {
       //snap.play();a
       const time = Date.now();
       const date = dayjs(time).format("YYYY-MM-DD HH:mm:ss");
-      const currentCanvas = canvas.current;
+      const currentCanvas = canvasRef.current;
       // currentCanvas.toBlob(async (blob) => {
       //   console.log({ time, blob });
       //   await write(`Mockintosh HD/Photo Booth/${date}.png`, blob.stream()); // empty file
@@ -307,18 +299,62 @@ export default function Photobooth({ i, window }) {
     }, 300);
   }
 
+  // useEffect(() => {
+  //   getVideo();
+
+  //   videoRef.current.addEventListener("canplay", () =>
+  //     requestAnimationFrame(paintToCanvas)
+  //   );
+  //   return () =>
+  //     videoRef.current?.removeEventListener("canplay", () =>
+  //       requestAnimationFrame(paintToCanvas)
+  //     );
+  // }, []);
+  function play() {
+    console.log("hello");
+    const video = videoRef.current;
+    const { videoHeight, videoWidth } = video;
+
+    const videoAspectRatio = videoWidth / videoHeight;
+    const canvasAspectRatio = width / height;
+
+    let sx = 0;
+    let sy = 0;
+    let swidth = video.videoWidth;
+    let sheight = video.videoHeight;
+    // let dx = 0;
+    // let dy = 0;
+
+    if (videoAspectRatio > canvasAspectRatio) {
+      // Video is wider than canvas
+      const scaledWidth = video.videoHeight * canvasAspectRatio;
+      sx = (video.videoWidth - scaledWidth) / 2;
+      swidth = scaledWidth;
+    } else {
+      // Video is taller than canvas
+      const scaledHeight = video.videoWidth / canvasAspectRatio;
+      sy = (video.videoHeight - scaledHeight) / 2;
+      sheight = scaledHeight;
+    }
+    video.setAttribute("width", width.toString());
+    video.setAttribute("height", height.toString());
+    videoRef.current.play();
+    console.log({ videoHeight, videoWidth });
+    process();
+    draw();
+  }
   useEffect(() => {
     getVideo();
 
-    video.current.addEventListener("canplay", paintToCanvas);
+    videoRef.current.addEventListener("canplay", play);
     return () => {
-      video.current?.removeEventListener("canplay", paintToCanvas);
-      if (video.current?.srcObject) {
-        const tracks = (video.current.srcObject as MediaStream).getTracks();
+      videoRef.current?.removeEventListener("canplay", play);
+      if (videoRef.current?.srcObject) {
+        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
         tracks.forEach(function (track) {
           track.stop();
         });
-        video.current.srcObject = null;
+        videoRef.current.srcObject = null;
       }
     };
   }, []);
@@ -336,7 +372,7 @@ export default function Photobooth({ i, window }) {
             {loading && (
               <div className="absolute inset-0 flex items-center justify-center cursor-loading font-chicago">
                 {/* <img src="/icons/watch.png" /> */}
-                Initializing camera...
+                <Text text="Initializing camera..." font="ChiKareGo" />
               </div>
             )}
             {errorText && (
@@ -345,13 +381,13 @@ export default function Photobooth({ i, window }) {
               </div>
             )}
             <canvas
-              ref={canvas}
+              ref={canvasRef}
               // className="w-[412px]"bqz
               style={{
                 transform: "scaleX(-1)",
-                //height: "300px",
-                // objectFit: "cover",
               }}
+              width={width}
+              height={height}
             />
 
             {viewingPhoto !== null && (
@@ -449,7 +485,12 @@ export default function Photobooth({ i, window }) {
               )}
             </div>
           </div>
-          <video ref={video} className="hidden object-cover object-center " />
+          <video
+            ref={videoRef}
+            height={height}
+            width={width}
+            className="hidden object-cover object-center "
+          />
 
           {/* <div className="max-w-full overflow-x-scroll scroll border-t border-black">
         <div className="flex py-1 " style={{ height: "55px" }}>
