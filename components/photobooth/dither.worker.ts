@@ -4,7 +4,7 @@ self.onmessage = async (e: MessageEvent) => {
   const { bitmap, width, height, ditheringAlgorithm } = e.data;
 
   const offscreen = new OffscreenCanvas(width, height);
-  const ctx = offscreen.getContext("2d");
+  const ctx = offscreen.getContext("2d") as OffscreenCanvasRenderingContext2D;
 
   ctx.drawImage(bitmap, 0, 0, width, height);
   bitmap.close();
