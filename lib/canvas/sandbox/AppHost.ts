@@ -42,6 +42,7 @@ const ALLOWED_OPS = new Set([
   "invert",
   "pixel",
   "dottedHLine",
+  "hitRegion",
 ]);
 
 export class AppHost {
@@ -233,6 +234,33 @@ export class AppHost {
           }
           break;
         }
+        case "hitRegion": {
+          if (cmd.regionId && cmd.handlers) {
+            const regionId = cmd.regionId;
+            const entry = this.running.get(windowId);
+            if (entry) {
+              const callbacks: Record<string, (x: number, y: number) => void> =
+                {};
+              for (const handler of cmd.handlers) {
+                callbacks[handler] = (x: number, y: number) => {
+                  this._dispatchHitRegionEvent(
+                    windowId,
+                    regionId,
+                    handler,
+                    x,
+                    y
+                  );
+                };
+              }
+              ctx.hitRegion(
+                `sandbox-${windowId}-${regionId}`,
+                { x: cmd.x ?? 0, y: cmd.y ?? 0, w: cmd.w ?? 0, h: cmd.h ?? 0 },
+                callbacks as any
+              );
+            }
+          }
+          break;
+        }
       }
     }
   }
@@ -264,6 +292,24 @@ export class AppHost {
         this._handleOSServiceRequest(windowId, msg as any);
         break;
     }
+  }
+
+  private _dispatchHitRegionEvent(
+    windowId: string,
+    regionId: string,
+    handler: string,
+    x: number,
+    y: number
+  ) {
+    const entry = this.running.get(windowId);
+    if (!entry) return;
+    entry.worker.postMessage({
+      type: "hitRegionEvent",
+      regionId,
+      handler,
+      x,
+      y,
+    } as MainToWorkerMessage);
   }
 
   private async _handleOSServiceRequest(

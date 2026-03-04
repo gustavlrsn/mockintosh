@@ -1,7 +1,6 @@
 import { BitCanvas, BLACK, WHITE, Sprite } from "../BitCanvas";
-import { drawBitmapText, measureText, getLineHeight } from "../fontAdapter";
-import { SpriteRegistry } from "../SpriteRegistry";
-import { OSEvent } from "../EventManager";
+import { drawBitmapText, measureText } from "../fontAdapter";
+import { HitRegionMap } from "../HitRegion";
 
 export interface MenubarDefinition {
   label: string;
@@ -39,16 +38,14 @@ const ITEM_HEIGHT = 16;
 const MENU_PADDING = 4;
 const SEPARATOR_HEIGHT = 8;
 
+const APPLE_MENU_WIDTH = 24;
+
 export function createMenubarState(menus: MenubarDefinition[]): MenubarState {
   return { menus, openMenuIndex: null, highlightedItem: null };
 }
 
-function getMenuX(state: MenubarState, index: number): number {
-  let x = 28; // after apple icon
-  for (let i = 0; i < index; i++) {
-    x += measureText(state.menus[i].label, "ChiKareGo") + 14;
-  }
-  return x;
+function isAppleMenu(label: string): boolean {
+  return label === "\uF8FF";
 }
 
 function getMenuWidth(menu: MenubarDefinition): number {
@@ -69,11 +66,21 @@ function getMenuWidth(menu: MenubarDefinition): number {
   return Math.max(maxW + MENU_PADDING * 2, 100);
 }
 
-function flattenItems(menu: MenubarDefinition): Array<{ label: string; disabled?: boolean; shortcut?: string; isRadio?: boolean; radioChecked?: boolean; isSeparator?: boolean; onClick?: () => void }> {
-  const flat: any[] = [];
+interface FlatItem {
+  label: string;
+  disabled?: boolean;
+  shortcut?: string;
+  isRadio?: boolean;
+  radioChecked?: boolean;
+  isSeparator?: boolean;
+  onClick?: () => void;
+}
+
+function flattenItems(menu: MenubarDefinition): FlatItem[] {
+  const flat: FlatItem[] = [];
   for (const item of menu.items) {
     if ("type" in item && item.type === "separator") {
-      flat.push({ isSeparator: true });
+      flat.push({ label: "", isSeparator: true });
     } else if ("type" in item && item.type === "radiogroup") {
       const rg = item as MenubarRadioGroupDef;
       for (const ri of rg.items) {
@@ -102,7 +109,9 @@ export function drawMenubar(
   canvas: BitCanvas,
   state: MenubarState,
   appleSprite: Sprite | undefined,
-  screenWidth: number
+  screenWidth: number,
+  hitRegions: HitRegionMap,
+  scheduleRender: () => void
 ) {
   // Background
   canvas.fillRect(0, 0, screenWidth, MENUBAR_HEIGHT, WHITE);
@@ -113,29 +122,131 @@ export function drawMenubar(
     canvas.blit(appleSprite, 10, 4);
   }
 
+  // Menubar background region (lowest z-order — catches clicks in empty menubar area)
+  hitRegions.add({
+    id: "menubar-bg",
+    x: 0,
+    y: 0,
+    w: screenWidth,
+    h: MENUBAR_HEIGHT,
+    onMouseDown: () => {
+      if (state.openMenuIndex !== null) {
+        state.openMenuIndex = null;
+        state.highlightedItem = null;
+        scheduleRender();
+      }
+    },
+    onMouseEnter: () => {
+      if (state.openMenuIndex !== null && state.highlightedItem !== null) {
+        state.highlightedItem = null;
+        scheduleRender();
+      }
+    },
+  });
+
   // Menu labels
-  let x = 28;
+  const hasAppleMenu =
+    state.menus.length > 0 && isAppleMenu(state.menus[0].label);
+  let x = APPLE_MENU_WIDTH + 8;
+
   for (let i = 0; i < state.menus.length; i++) {
+    const menuIndex = i;
     const menu = state.menus[i];
-    const textW = measureText(menu.label, "ChiKareGo");
     const isOpen = state.openMenuIndex === i;
 
-    if (isOpen) {
-      canvas.fillRect(x - 5, 0, textW + 14, MENUBAR_HEIGHT - 1, BLACK);
-      drawBitmapText(canvas, menu.label, x, 2, { font: "ChiKareGo", color: WHITE });
-    } else {
-      drawBitmapText(canvas, menu.label, x, 2, { font: "ChiKareGo", color: BLACK });
+    if (i === 0 && hasAppleMenu) {
+      if (isOpen) {
+        canvas.fillRect(4, 0, APPLE_MENU_WIDTH, MENUBAR_HEIGHT - 1, BLACK);
+        if (appleSprite) {
+          canvas.blitInverted(appleSprite, 10, 4);
+        }
+      }
+      hitRegions.add({
+        id: `menubar-label-${i}`,
+        x: 4,
+        y: 0,
+        w: APPLE_MENU_WIDTH,
+        h: MENUBAR_HEIGHT,
+        onMouseDown: () => {
+          if (state.openMenuIndex === menuIndex) {
+            state.openMenuIndex = null;
+            state.highlightedItem = null;
+          } else {
+            state.openMenuIndex = menuIndex;
+            state.highlightedItem = null;
+          }
+          scheduleRender();
+        },
+        onMouseEnter: () => {
+          if (
+            state.openMenuIndex !== null &&
+            state.openMenuIndex !== menuIndex
+          ) {
+            state.openMenuIndex = menuIndex;
+            state.highlightedItem = null;
+            scheduleRender();
+          }
+        },
+      });
+      continue;
     }
+
+    const textW = measureText(menu.label, "ChiKareGo");
+    const labelX = x - 5;
+    const labelW = textW + 14;
+
+    if (isOpen) {
+      canvas.fillRect(labelX, 0, labelW, MENUBAR_HEIGHT - 1, BLACK);
+      drawBitmapText(canvas, menu.label, x, 2, {
+        font: "ChiKareGo",
+        color: WHITE,
+      });
+    } else {
+      drawBitmapText(canvas, menu.label, x, 2, {
+        font: "ChiKareGo",
+        color: BLACK,
+      });
+    }
+
+    hitRegions.add({
+      id: `menubar-label-${i}`,
+      x: labelX,
+      y: 0,
+      w: labelW,
+      h: MENUBAR_HEIGHT,
+      onMouseDown: () => {
+        if (state.openMenuIndex === menuIndex) {
+          state.openMenuIndex = null;
+          state.highlightedItem = null;
+        } else {
+          state.openMenuIndex = menuIndex;
+          state.highlightedItem = null;
+        }
+        scheduleRender();
+      },
+      onMouseEnter: () => {
+        if (state.openMenuIndex !== null && state.openMenuIndex !== menuIndex) {
+          state.openMenuIndex = menuIndex;
+          state.highlightedItem = null;
+          scheduleRender();
+        }
+      },
+    });
+
     x += textW + 14;
   }
 
-  // Draw open dropdown
+  // Draw open dropdown and register item regions
   if (state.openMenuIndex !== null) {
     const menu = state.menus[state.openMenuIndex];
-    const mx = getMenuX(state, state.openMenuIndex);
+    const mx = _getMenuX(state, state.openMenuIndex, hasAppleMenu);
     const mw = getMenuWidth(menu);
     const items = flattenItems(menu);
-    const mh = items.reduce((h, it) => h + (it.isSeparator ? SEPARATOR_HEIGHT : ITEM_HEIGHT), 0) + 2;
+    const mh =
+      items.reduce(
+        (h, it) => h + (it.isSeparator ? SEPARATOR_HEIGHT : ITEM_HEIGHT),
+        0
+      ) + 2;
 
     // Shadow
     canvas.fillRect(mx + 1, MENUBAR_HEIGHT + mh, mw, 1, BLACK);
@@ -144,17 +255,32 @@ export function drawMenubar(
     // Background
     canvas.fillRect(mx, MENUBAR_HEIGHT, mw, mh, WHITE);
     canvas.drawRect(mx, MENUBAR_HEIGHT, mw, mh, BLACK);
-    canvas.drawHLine(mx, MENUBAR_HEIGHT, mw, WHITE); // erase top border to merge with menubar
+    canvas.drawHLine(mx, MENUBAR_HEIGHT, mw, WHITE);
+
+    // Dropdown background (lowest z-order within dropdown — registered before items)
+    hitRegions.add({
+      id: "menubar-dropdown-bg",
+      x: mx,
+      y: MENUBAR_HEIGHT,
+      w: mw,
+      h: mh,
+    });
 
     let iy = MENUBAR_HEIGHT + 1;
     for (let j = 0; j < items.length; j++) {
       const it = items[j];
       if (it.isSeparator) {
-        canvas.drawDottedHLine(mx + 1, iy + SEPARATOR_HEIGHT / 2, mw - 2, BLACK);
+        canvas.drawDottedHLine(
+          mx + 1,
+          iy + SEPARATOR_HEIGHT / 2,
+          mw - 2,
+          BLACK
+        );
         iy += SEPARATOR_HEIGHT;
         continue;
       }
 
+      const itemIndex = j;
       const highlighted = state.highlightedItem === j && !it.disabled;
       if (highlighted) {
         canvas.fillRect(mx + 1, iy, mw - 2, ITEM_HEIGHT, BLACK);
@@ -170,15 +296,20 @@ export function drawMenubar(
 
       if (it.shortcut) {
         const sw = measureText(it.shortcut, "ChiKareGo");
-        drawBitmapText(canvas, it.shortcut, mx + mw - MENU_PADDING - sw - 2, iy, {
-          font: "ChiKareGo",
-          color: textColor,
-          height: ITEM_HEIGHT,
-        });
+        drawBitmapText(
+          canvas,
+          it.shortcut,
+          mx + mw - MENU_PADDING - sw - 2,
+          iy,
+          {
+            font: "ChiKareGo",
+            color: textColor,
+            height: ITEM_HEIGHT,
+          }
+        );
       }
 
       if (it.isRadio && it.radioChecked) {
-        // Draw a bullet/diamond indicator
         const bx = mx + MENU_PADDING + 4;
         const by = iy + 6;
         canvas.setPixel(bx, by, textColor);
@@ -187,108 +318,50 @@ export function drawMenubar(
       }
 
       if (it.disabled && !highlighted) {
-        canvas.fillPattern(mx + 1, iy, mw - 2, ITEM_HEIGHT, "gray50");
+        canvas.maskPattern(mx + 1, iy, mw - 2, ITEM_HEIGHT, "gray50");
       }
+
+      hitRegions.add({
+        id: `menubar-item-${j}`,
+        x: mx,
+        y: iy,
+        w: mw,
+        h: ITEM_HEIGHT,
+        onMouseEnter: () => {
+          if (state.highlightedItem !== itemIndex) {
+            state.highlightedItem = itemIndex;
+            scheduleRender();
+          }
+        },
+        onMouseUp: () => {
+          if (!it.disabled && it.onClick) {
+            state.openMenuIndex = null;
+            state.highlightedItem = null;
+            it.onClick();
+            scheduleRender();
+          }
+        },
+      });
 
       iy += ITEM_HEIGHT;
     }
   }
 }
 
-export function menubarHitTest(
+function _getMenuX(
   state: MenubarState,
-  x: number,
-  y: number,
-  screenWidth: number
-): { type: "label"; index: number } | { type: "item"; index: number } | { type: "outside" } | { type: "menubar" } {
-  // In the menubar area
-  if (y < MENUBAR_HEIGHT) {
-    let lx = 28;
-    for (let i = 0; i < state.menus.length; i++) {
-      const w = measureText(state.menus[i].label, "ChiKareGo") + 14;
-      if (x >= lx - 5 && x < lx + w - 5) {
-        return { type: "label", index: i };
-      }
-      lx += w;
-    }
-    return { type: "menubar" };
+  index: number,
+  hasAppleMenu: boolean
+): number {
+  let x = APPLE_MENU_WIDTH + 8;
+  for (let i = 0; i < index; i++) {
+    if (i === 0 && hasAppleMenu) continue;
+    x += measureText(state.menus[i].label, "ChiKareGo") + 14;
   }
-
-  // In the dropdown area
-  if (state.openMenuIndex !== null) {
-    const menu = state.menus[state.openMenuIndex];
-    const mx = getMenuX(state, state.openMenuIndex);
-    const mw = getMenuWidth(menu);
-    const items = flattenItems(menu);
-    let iy = MENUBAR_HEIGHT + 1;
-    for (let j = 0; j < items.length; j++) {
-      const it = items[j];
-      const ih = it.isSeparator ? SEPARATOR_HEIGHT : ITEM_HEIGHT;
-      if (x >= mx && x < mx + mw && y >= iy && y < iy + ih) {
-        if (!it.isSeparator) return { type: "item", index: j };
-      }
-      iy += ih;
-    }
+  if (index === 0 && hasAppleMenu) {
+    return 6;
   }
-
-  return { type: "outside" };
-}
-
-export function handleMenubarEvent(
-  state: MenubarState,
-  event: OSEvent,
-  screenWidth: number
-): { handled: boolean; action?: () => void; stateChanged: boolean } {
-  if (event.type === "mouseDown" || event.type === "mouseMove") {
-    const hit = menubarHitTest(state, event.x!, event.y!, screenWidth);
-
-    if (hit.type === "label") {
-      const changed = state.openMenuIndex !== hit.index;
-      if (event.type === "mouseDown" && state.openMenuIndex === hit.index) {
-        state.openMenuIndex = null;
-        state.highlightedItem = null;
-        return { handled: true, stateChanged: true };
-      }
-      state.openMenuIndex = hit.index;
-      state.highlightedItem = null;
-      return { handled: true, stateChanged: changed };
-    }
-
-    if (hit.type === "item" && state.openMenuIndex !== null) {
-      const changed = state.highlightedItem !== hit.index;
-      state.highlightedItem = hit.index;
-      return { handled: true, stateChanged: changed };
-    }
-
-    if (event.type === "mouseDown" && hit.type === "outside") {
-      if (state.openMenuIndex !== null) {
-        state.openMenuIndex = null;
-        state.highlightedItem = null;
-        return { handled: true, stateChanged: true };
-      }
-    }
-
-    if (hit.type === "menubar") {
-      if (state.openMenuIndex !== null) {
-        state.highlightedItem = null;
-        return { handled: true, stateChanged: true };
-      }
-    }
-  }
-
-  if (event.type === "mouseUp" && state.openMenuIndex !== null && state.highlightedItem !== null) {
-    const menu = state.menus[state.openMenuIndex];
-    const items = flattenItems(menu);
-    const item = items[state.highlightedItem];
-    state.openMenuIndex = null;
-    state.highlightedItem = null;
-    if (item && !item.disabled && !item.isSeparator && item.onClick) {
-      return { handled: true, action: item.onClick, stateChanged: true };
-    }
-    return { handled: true, stateChanged: true };
-  }
-
-  return { handled: false, stateChanged: false };
+  return x;
 }
 
 export { MENUBAR_HEIGHT };

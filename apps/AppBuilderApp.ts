@@ -7,12 +7,9 @@ import {
   handleTextInputKey,
   TextInputState,
 } from "../lib/canvas/ui/TextInput";
-import { isInsideButton } from "../lib/canvas/ui/drawButton";
 import { getWrappedLines } from "../lib/canvas/ui/TextBlock";
 import { OSEvent } from "../lib/canvas/EventManager";
 import { saveApp } from "./AppStore";
-
-type ButtonRect = { x: number; y: number; w: number; h: number };
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -31,19 +28,13 @@ export const AppBuilderApp: NativeApp = {
   scrollable: false,
 
   render(app: AppBuilder, ctx: AppContext, props: any) {
-    const [messages, setMessages] = app.useState<ChatMessage[]>([
+    const [messages] = app.useState<ChatMessage[]>([
       { role: "assistant", text: "Hi! Describe the app you want to build." },
     ]);
-    const [input, setInput] = app.useState<TextInputState>(
-      createTextInputState("")
-    );
-    const [generatedCode, setGeneratedCode] = app.useState<string | null>(null);
-    const [isLoading, setIsLoading] = app.useState(false);
-    const [appTitle, setAppTitle] = app.useState("My App");
-    const buttonRectsRef = app.useRef<{
-      preview: ButtonRect | null;
-      publish: ButtonRect | null;
-    }>({ preview: null, publish: null });
+    const [input] = app.useState<TextInputState>(createTextInputState(""));
+    const [generatedCode] = app.useState<string | null>(null);
+    const [isLoading] = app.useState(false);
+    app.useState("My App"); // appTitle
 
     ctx.clear(WHITE);
 
@@ -90,7 +81,6 @@ export const AppBuilderApp: NativeApp = {
 
     ctx.popClip();
 
-    // Separator
     ctx.drawHLine(0, chatBottom, ctx.width, BLACK);
 
     // Input area
@@ -103,34 +93,53 @@ export const AppBuilderApp: NativeApp = {
     ctx.drawHLine(0, toolY, ctx.width, BLACK);
     ctx.fillRect(0, toolY + 1, ctx.width, TOOLBAR_HEIGHT - 1, WHITE);
 
-    const sendRect = ctx.drawButton({
+    ctx.drawButton({
       x: 4,
       y: toolY + 2,
       label: "Send",
       disabled: isLoading,
+      id: "send-btn",
     });
 
     if (generatedCode) {
-      const previewRect = ctx.drawButton({
+      ctx.drawButton({
         x: 56,
         y: toolY + 2,
         label: "Preview",
+        id: "preview-btn",
+        onClick: () => {
+          const openSandboxed = props._openSandboxedApp;
+          if (openSandboxed) {
+            openSandboxed({
+              id: "preview-" + Date.now(),
+              title: "Preview",
+              code: generatedCode,
+              description: "Preview app",
+            });
+          }
+        },
       });
 
-      const publishRect = ctx.drawButton({
+      ctx.drawButton({
         x: 120,
         y: toolY + 2,
         label: "Publish",
+        id: "publish-btn",
+        onClick: () => {
+          const id = "userapp-" + Date.now();
+          saveApp({
+            id,
+            title: "My App",
+            description: "Created with App Builder",
+            code: generatedCode,
+          });
+        },
       });
-
-      buttonRectsRef.current = { preview: previewRect, publish: publishRect };
 
       ctx.drawText("Code ready", 192, toolY + 6, {
         font: "Geneva9",
         color: BLACK,
       });
-    } else {
-      buttonRectsRef.current = { preview: null, publish: null };
     }
   },
 
@@ -143,15 +152,10 @@ export const AppBuilderApp: NativeApp = {
     );
     const [generatedCode, setGeneratedCode] = app.useState<string | null>(null);
     const [, setIsLoading] = app.useState(false);
-    app.useState("My App"); // appTitle — keep hook alignment
-    const buttonRectsRef = app.useRef<{
-      preview: ButtonRect | null;
-      publish: ButtonRect | null;
-    }>({ preview: null, publish: null });
+    app.useState("My App"); // appTitle
 
     if (event.type === "keyDown") {
       if (event.key === "Enter" && input.value.trim()) {
-        // Submit
         const userMessage = input.value.trim();
         setMessages([...messages, { role: "user", text: userMessage }]);
         setInput(createTextInputState(""));
@@ -220,38 +224,6 @@ export const AppBuilderApp: NativeApp = {
         )
       ) {
         setInput({ ...input });
-      }
-    }
-
-    if (event.type === "mouseDown") {
-      if (
-        generatedCode &&
-        buttonRectsRef.current.preview &&
-        isInsideButton(buttonRectsRef.current.preview, event.x!, event.y!)
-      ) {
-        const openSandboxed = props._openSandboxedApp;
-        if (openSandboxed) {
-          openSandboxed({
-            id: "preview-" + Date.now(),
-            title: "Preview",
-            code: generatedCode,
-            description: "Preview app",
-          });
-        }
-      }
-
-      if (
-        generatedCode &&
-        buttonRectsRef.current.publish &&
-        isInsideButton(buttonRectsRef.current.publish, event.x!, event.y!)
-      ) {
-        const id = "userapp-" + Date.now();
-        saveApp({
-          id,
-          title: "My App",
-          description: "Created with App Builder",
-          code: generatedCode,
-        });
       }
     }
   },

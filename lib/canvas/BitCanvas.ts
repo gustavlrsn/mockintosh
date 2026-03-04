@@ -44,7 +44,8 @@ export class BitCanvas {
       y < this.clip.y ||
       x >= this.clip.x + this.clip.w ||
       y >= this.clip.y + this.clip.h
-    ) return;
+    )
+      return;
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
     this.pixels[y * this.width + x] = color;
   }
@@ -154,12 +155,22 @@ export class BitCanvas {
     }
   }
 
-  fillPattern(x: number, y: number, w: number, h: number, pattern: PatternName | Uint8Array) {
+  fillPattern(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    pattern: PatternName | Uint8Array,
+    originX?: number,
+    originY?: number
+  ) {
     const pat = typeof pattern === "string" ? getPattern(pattern) : pattern;
     x = x | 0;
     y = y | 0;
     w = w | 0;
     h = h | 0;
+    const ox = (originX ?? x) | 0;
+    const oy = (originY ?? y) | 0;
     const x0 = Math.max(x, this.clip.x, 0);
     const y0 = Math.max(y, this.clip.y, 0);
     const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
@@ -167,7 +178,36 @@ export class BitCanvas {
     for (let py = y0; py < y1; py++) {
       const row = py * this.width;
       for (let px = x0; px < x1; px++) {
-        this.pixels[row + px] = samplePattern(pat, px, py);
+        this.pixels[row + px] = samplePattern(pat, px - ox, py - oy);
+      }
+    }
+  }
+
+  /** Erase black pixels where the pattern is white (AND mask). */
+  maskPattern(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    pattern: PatternName | Uint8Array,
+    originX?: number,
+    originY?: number
+  ) {
+    const pat = typeof pattern === "string" ? getPattern(pattern) : pattern;
+    x = x | 0;
+    y = y | 0;
+    w = w | 0;
+    h = h | 0;
+    const ox = (originX ?? x) | 0;
+    const oy = (originY ?? y) | 0;
+    const x0 = Math.max(x, this.clip.x, 0);
+    const y0 = Math.max(y, this.clip.y, 0);
+    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
+    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
+    for (let py = y0; py < y1; py++) {
+      const row = py * this.width;
+      for (let px = x0; px < x1; px++) {
+        this.pixels[row + px] &= samplePattern(pat, px - ox, py - oy);
       }
     }
   }
@@ -288,7 +328,11 @@ export class BitCanvas {
    * Expand the 1-bit buffer to RGBA ImageData and put it on a real canvas context.
    */
   flush(ctx: CanvasRenderingContext2D) {
-    if (!this.imageData || this.imageData.width !== this.width || this.imageData.height !== this.height) {
+    if (
+      !this.imageData ||
+      this.imageData.width !== this.width ||
+      this.imageData.height !== this.height
+    ) {
       this.imageData = ctx.createImageData(this.width, this.height);
     }
     const rgba = this.imageData.data;

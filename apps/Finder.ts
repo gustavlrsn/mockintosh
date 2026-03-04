@@ -14,8 +14,10 @@ export const FinderApp: NativeApp = {
   id: "finder",
   title: "Finder",
   icon: "/icons/folder.png",
-  defaultSize: { width: 256, height: 180 },
+  defaultSize: { width: 340, height: 180 },
   scrollable: true,
+  resizable: true,
+  minSize: { width: 160, height: 80 },
 
   render(app: AppBuilder, ctx: AppContext, props: any) {
     const icons: any[] = props.icons ?? [];
@@ -112,5 +114,15 @@ export const FinderApp: NativeApp = {
     const cols = Math.max(1, Math.floor((size.width - padding) / ICON_CELL_W));
     const rows = Math.ceil(icons.length / cols);
     return 16 + rows * ICON_CELL_H + 16;
+  },
+
+  getInfoBar(app: AppBuilder, props: any): string[] | null {
+    const icons: any[] = props.icons ?? [];
+    const count = icons.length;
+    return [
+      `${count} item${count !== 1 ? "s" : ""}`,
+      "2,427K in disk",
+      "7,648K available",
+    ];
   },
 };

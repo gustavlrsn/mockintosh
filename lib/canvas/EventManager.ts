@@ -31,6 +31,7 @@ export class EventManager {
   private lastClickTime = 0;
   private lastClickX = 0;
   private lastClickY = 0;
+  private _moveRafPending = false;
   private static DOUBLE_CLICK_MS = 500;
   private static DOUBLE_CLICK_DIST = 4;
 
@@ -90,8 +91,13 @@ export class EventManager {
     });
 
     this.canvasEl.addEventListener("mousemove", (e) => {
-      const { x, y } = this.toLocal(e);
-      this.emit({ type: "mouseMove", x, y });
+      if (this._moveRafPending) return;
+      this._moveRafPending = true;
+      requestAnimationFrame(() => {
+        this._moveRafPending = false;
+        const { x, y } = this.toLocal(e);
+        this.emit({ type: "mouseMove", x, y });
+      });
     });
 
     this.canvasEl.addEventListener(

@@ -11,7 +11,6 @@ import {
   handleTextInputDrag,
   TextInputState,
 } from "../lib/canvas/ui/TextInput";
-import { isInsideButton } from "../lib/canvas/ui/drawButton";
 import { OSEvent } from "../lib/canvas/EventManager";
 import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
 import {
@@ -314,43 +313,64 @@ export const SafariApp: NativeApp = {
     const [urlInput, setUrlInput] = app.useState<TextInputState>(
       createTextInputState("google.com")
     );
-    const [currentUrl] = app.useState("google.com");
-    const [history] = app.useState<string[]>(["google.com"]);
-    const [historyIdx] = app.useState(0);
+    const [currentUrl, setCurrentUrl] = app.useState("google.com");
+    const [history, setHistory] = app.useState<string[]>(["google.com"]);
+    const [historyIdx, setHistoryIdx] = app.useState(0);
     const [searchInput, setSearchInput] = app.useState<TextInputState>(
       createTextInputState("")
     );
     app.useState<"url" | "search" | null>(null); // dragging — not used in render
-    const [searchResults] = app.useState<SearchResult[]>([]);
-    const [currentCard] = app.useState("home");
+    const [searchResults, setSearchResults] = app.useState<SearchResult[]>([]);
+    const [currentCard, setCurrentCard] = app.useState("home");
     const linksRef = app.useRef<LinkRect[]>([]);
-    const navBtnRef = app.useRef<{
-      back: { x: number; y: number; w: number; h: number };
-      forward: { x: number; y: number; w: number; h: number };
-    } | null>(null);
 
     // --- Header bar ---
     ctx.clear(WHITE);
     ctx.fillRect(0, 0, ctx.width, HEADER_HEIGHT, WHITE);
     ctx.drawHLine(0, HEADER_HEIGHT - 1, ctx.width, BLACK);
 
-    const backRect = ctx.drawButton({
+    ctx.drawButton({
       x: 4,
       y: 4,
       width: 20,
       height: 20,
       label: "<",
       disabled: historyIdx <= 0,
+      id: "safari-back",
+      onClick: () => {
+        if (historyIdx > 0) {
+          const newIdx = historyIdx - 1;
+          setHistoryIdx(newIdx);
+          setCurrentUrl(history[newIdx]);
+          setCurrentCard("home");
+          setSearchInput(createTextInputState(""));
+          setSearchResults([]);
+          const newUrlState = createTextInputState(history[newIdx]);
+          setUrlInput(newUrlState);
+        }
+      },
     });
-    const fwdRect = ctx.drawButton({
+    ctx.drawButton({
       x: 24,
       y: 4,
       width: 20,
       height: 20,
       label: ">",
       disabled: historyIdx >= history.length - 1,
+      id: "safari-forward",
+      onClick: () => {
+        if (historyIdx < history.length - 1) {
+          const newIdx = historyIdx + 1;
+          setHistoryIdx(newIdx);
+          setCurrentUrl(history[newIdx]);
+          setCurrentCard("home");
+          setSearchInput(createTextInputState(""));
+          setSearchResults([]);
+          const newUrlState = createTextInputState(history[newIdx]);
+          setUrlInput(newUrlState);
+        }
+      },
     });
-    navBtnRef.current = { back: backRect, forward: fwdRect };
 
     ctx.drawTextInput(urlInput, 50, 6, ctx.width - 58, 16);
 
@@ -413,10 +433,6 @@ export const SafariApp: NativeApp = {
     const [searchResults, setSearchResults] = app.useState<SearchResult[]>([]);
     const [, setCurrentCard] = app.useState("home");
     const linksRef = app.useRef<LinkRect[]>([]);
-    const navBtnRef = app.useRef<{
-      back: { x: number; y: number; w: number; h: number };
-      forward: { x: number; y: number; w: number; h: number };
-    } | null>(null);
 
     // --- Keyboard ---
     if (event.type === "keyDown") {
@@ -493,33 +509,7 @@ export const SafariApp: NativeApp = {
         }
         setUrlInput({ ...urlInput, focused: true });
       } else if (event.y! < HEADER_HEIGHT) {
-        if (
-          navBtnRef.current &&
-          historyIdx > 0 &&
-          isInsideButton(navBtnRef.current.back, event.x!, event.y!)
-        ) {
-          const newIdx = historyIdx - 1;
-          setHistoryIdx(newIdx);
-          setCurrentUrl(history[newIdx]);
-          setCurrentCard("home");
-          setSearchInput(createTextInputState(""));
-          setSearchResults([]);
-          const newUrlState = createTextInputState(history[newIdx]);
-          setUrlInput(newUrlState);
-        } else if (
-          navBtnRef.current &&
-          historyIdx < history.length - 1 &&
-          isInsideButton(navBtnRef.current.forward, event.x!, event.y!)
-        ) {
-          const newIdx = historyIdx + 1;
-          setHistoryIdx(newIdx);
-          setCurrentUrl(history[newIdx]);
-          setCurrentCard("home");
-          setSearchInput(createTextInputState(""));
-          setSearchResults([]);
-          const newUrlState = createTextInputState(history[newIdx]);
-          setUrlInput(newUrlState);
-        }
+        // Nav buttons handled by hit regions
       } else {
         // Content area click — check links first
         const links = linksRef.current;
@@ -625,7 +615,6 @@ export const SafariApp: NativeApp = {
     const [searchResults] = app.useState<SearchResult[]>([]);
     const [currentCard] = app.useState("home");
     app.useRef<LinkRect[]>([]); // linksRef — keep hook alignment
-    app.useRef(null); // navBtnRef — keep hook alignment
 
     if (currentUrl === "google.com") {
       const baseH =

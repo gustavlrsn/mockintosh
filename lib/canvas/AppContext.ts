@@ -11,6 +11,7 @@ import {
   getWrappedLines,
   measureTextBlock as _measureTextBlock,
 } from "./ui/TextBlock";
+import { HitRegion, HitRegionMap } from "./HitRegion";
 
 /**
  * A scoped drawing context for an app, clipped and offset to the window's
@@ -23,6 +24,7 @@ export class AppContext {
   private w: number;
   private h: number;
   private scrollOffsetY: number;
+  private _hitRegions: HitRegionMap | undefined;
 
   constructor(
     canvas: BitCanvas,
@@ -30,7 +32,8 @@ export class AppContext {
     y: number,
     w: number,
     h: number,
-    scrollY: number = 0
+    scrollY: number = 0,
+    hitRegions?: HitRegionMap
   ) {
     this.canvas = canvas;
     this.ox = x;
@@ -38,6 +41,7 @@ export class AppContext {
     this.w = w;
     this.h = h;
     this.scrollOffsetY = scrollY;
+    this._hitRegions = hitRegions;
     canvas.pushClip(x, y, w, h);
   }
 
@@ -185,13 +189,30 @@ export class AppContext {
     );
   }
 
-  drawButton(btn: Omit<ButtonDef, "x" | "y"> & { x: number; y: number }) {
+  drawButton(
+    btn: Omit<ButtonDef, "x" | "y"> & {
+      x: number;
+      y: number;
+      id?: string;
+      onClick?: () => void;
+      onMouseDown?: () => void;
+    }
+  ) {
     const absRect = _drawButton(this.canvas, {
       ...btn,
       x: this.ox + btn.x,
       y: this.oy + btn.y - this.scrollOffsetY,
     });
-    return { x: btn.x, y: btn.y, w: absRect.w, h: absRect.h };
+    const localRect = { x: btn.x, y: btn.y, w: absRect.w, h: absRect.h };
+
+    if (this._hitRegions && (btn.onClick || btn.onMouseDown) && btn.id) {
+      this.hitRegion(btn.id, localRect, {
+        onClick: btn.onClick ? () => btn.onClick!() : undefined,
+        onMouseDown: btn.onMouseDown ? () => btn.onMouseDown!() : undefined,
+      });
+    }
+
+    return localRect;
   }
 
   drawTextInput(
@@ -263,5 +284,25 @@ export class AppContext {
   /** Direct access to the underlying BitCanvas (for native apps that need it). */
   getBitCanvas(): BitCanvas {
     return this.canvas;
+  }
+
+  /**
+   * Register a hit region in local (app-content) coordinates.
+   * Translates to screen coordinates internally.
+   */
+  hitRegion(
+    id: string,
+    rect: { x: number; y: number; w: number; h: number },
+    callbacks: Omit<HitRegion, "id" | "x" | "y" | "w" | "h">
+  ) {
+    if (!this._hitRegions) return;
+    this._hitRegions.add({
+      id,
+      x: this.ox + rect.x,
+      y: this.oy + rect.y - this.scrollOffsetY,
+      w: rect.w,
+      h: rect.h,
+      ...callbacks,
+    });
   }
 }

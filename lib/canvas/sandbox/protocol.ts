@@ -33,11 +33,20 @@ export interface OSServiceResponse {
   result: any;
 }
 
+export interface HitRegionEventMessage {
+  type: "hitRegionEvent";
+  regionId: string;
+  handler: string;
+  x?: number;
+  y?: number;
+}
+
 export type MainToWorkerMessage =
   | InitMessage
   | EventMessage
   | RenderRequest
-  | OSServiceResponse;
+  | OSServiceResponse
+  | HitRegionEventMessage;
 
 // --- Messages from Worker to Main Thread ---
 
@@ -54,7 +63,8 @@ export interface DrawCommand {
     | "img"
     | "invert"
     | "pixel"
-    | "dottedHLine";
+    | "dottedHLine"
+    | "hitRegion";
   x?: number;
   y?: number;
   w?: number;
@@ -67,6 +77,8 @@ export interface DrawCommand {
   src?: string;
   maxWidth?: number;
   lineSpacing?: number;
+  regionId?: string;
+  handlers?: string[];
 }
 
 export interface RenderResponse {

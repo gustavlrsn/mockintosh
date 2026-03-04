@@ -76,6 +76,25 @@ Register event handlers each render (they are cleared between renders):
 
 Coordinates are local to your content area.
 
+## Hit Regions
+
+Instead of manually checking coordinates in event handlers, you can declare interactive regions during rendering. The OS automatically dispatches events to the correct handler.
+
+- \`api.hitRegion(id, x, y, w, h, callbacks)\`
+  - id: unique string identifying this region
+  - x, y, w, h: bounding rectangle in local coordinates
+  - callbacks: object with optional handlers:
+    - \`onClick(x, y)\` — fired when region is clicked (mouseDown + mouseUp in same region)
+    - \`onMouseDown(x, y)\` — fired on mouse press inside region
+    - \`onMouseUp(x, y)\` — fired on mouse release inside region
+    - \`onMouseEnter()\` — fired when cursor enters region
+    - \`onMouseLeave()\` — fired when cursor leaves region
+    - \`onDoubleClick(x, y)\` — fired on double click inside region
+
+Regions are cleared each render frame and rebuilt. Later-registered regions take priority (matching paint order — what's drawn on top gets the event first).
+
+This is the preferred approach for buttons, icons, and other interactive elements.
+
 ## OS Services
 
 - \`await api.os.showDialog({ message, buttons?, showInput? })\`
@@ -87,8 +106,8 @@ Coordinates are local to your content area.
 
 - The app function runs on every re-render. Keep it fast.
 - Use api.useState for any mutable state.
-- Hit testing: check if a click is inside a rectangle with simple comparisons.
-- For buttons: drawRect + bitmapText + hit test in onMouseDown.
+- Use api.hitRegion for buttons and clickable areas — no manual coordinate checking needed.
+- For buttons: drawRect + bitmapText + hitRegion with onClick.
 - The 1-bit aesthetic means: thick outlines, dithered patterns for shading, no gradients.
 - Think like Susan Kare: clarity at small sizes, every pixel intentional.
 
@@ -109,14 +128,15 @@ function app(api) {
   // Minus button
   api.drawRect(20, 70, 40, 24);
   api.bitmapText("-", 40, 74, { font: "ChiKareGo", align: "center" });
+  api.hitRegion("minus-btn", 20, 70, 40, 24, {
+    onClick: () => setCount(count - 1)
+  });
 
   // Plus button
   api.drawRect(api.width - 60, 70, 40, 24);
   api.bitmapText("+", api.width - 40, 74, { font: "ChiKareGo", align: "center" });
-
-  api.onMouseDown((x, y) => {
-    if (x >= 20 && x < 60 && y >= 70 && y < 94) setCount(count - 1);
-    if (x >= api.width - 60 && x < api.width - 20 && y >= 70 && y < 94) setCount(count + 1);
+  api.hitRegion("plus-btn", api.width - 60, 70, 40, 24, {
+    onClick: () => setCount(count + 1)
   });
 }
 \`\`\`

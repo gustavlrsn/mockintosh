@@ -37,7 +37,8 @@ The frontend is built with **Vite** (no framework — pure TypeScript). All rend
 ```
 lib/canvas/                 Core OS engine
   BitCanvas.ts              1-bit pixel buffer and drawing primitives
-  AppContext.ts             Scoped drawing context (per-window clipping)
+  HitRegion.ts              Hit region map — retained interactive areas for event dispatch
+  AppContext.ts             Scoped drawing context (per-window clipping + hit regions)
   AppBuilder.ts            Hook-based state management (useState, useEffect, etc.)
   AppRegistry.ts           Native app registration and lifecycle
   EventManager.ts          DOM event → OS event translation
@@ -129,6 +130,8 @@ A scoped drawing proxy given to each app. Wraps `BitCanvas` with:
 
 - **Coordinate offset** — (0,0) in the app maps to the window's content area origin
 - **Automatic clipping** — drawing outside the window bounds is silently dropped
+- **Hit region registration** — `hitRegion(id, rect, callbacks)` translates local coordinates to screen coordinates and registers on the global `HitRegionMap`
+- **Button auto-registration** — `drawButton()` accepts optional `onClick`/`onMouseDown` callbacks and auto-registers a hit region
 
 Apps never see screen coordinates or other windows. They draw in their own local coordinate space.
 
@@ -210,13 +213,32 @@ function app(api) {
   api.clear();
   api.drawRect(10, 10, 80, 30);
   api.bitmapText(String(count), 50, 18, { font: "ChiKareGo", align: "center" });
-  api.onMouseDown((x, y) => {
-    if (x >= 10 && x < 90 && y >= 10 && y < 40) setCount(count + 1);
+  api.hitRegion("counter-btn", 10, 10, 80, 30, {
+    onClick: () => setCount(count + 1),
   });
 }
 ```
 
-The draw calls collect into a command array, which is sent to the main thread via `postMessage` and executed on a clipped `AppContext`.
+The draw calls collect into a command array, which is sent to the main thread via `postMessage` and executed on a clipped `AppContext`. Hit region commands are also collected and registered on the global `HitRegionMap` — events matching a sandbox hit region are dispatched back to the worker with the region ID.
+
+## Hit Regions
+
+Interactive areas are declared during rendering via a `HitRegionMap`. Each frame, the map is cleared and rebuilt as components draw themselves. This eliminates the need to duplicate layout math between draw and hit-test code.
+
+```
+render() frame
+  ├── hitRegions.clear()
+  ├── drawDesktop() ── registers icon regions (on top of background region)
+  ├── drawWindowChrome() ── registers close box, title bar, scrollbar, content regions
+  ├── app.render() ── may register button/link regions via AppContext.hitRegion()
+  └── drawMenubar() ── registers label + dropdown item regions (topmost layer)
+```
+
+`HitRegionMap.hitTest(x, y)` scans in reverse insertion order — the last-registered region wins, matching the painter's algorithm. Background/catchall regions are registered first (lowest z-order), and specific interactive elements are registered after.
+
+Each region has an ID and optional callbacks: `onMouseDown`, `onMouseUp`, `onClick`, `onDoubleClick`, `onMouseEnter`, `onMouseLeave`. The map tracks a `hoveredId` to automatically fire enter/leave events as the cursor moves.
+
+Native apps register hit regions via `AppContext.hitRegion(id, rect, callbacks)` or by passing `onClick`/`onMouseDown` to `drawButton()`. Sandboxed apps use `api.hitRegion(id, x, y, w, h, callbacks)` — the commands are collected by `AppHost` and registered on the map with coordinate translation.
 
 ## Event Flow
 
@@ -230,20 +252,21 @@ EventManager (translates to OS coordinates, detects double-clicks)
 Is dialog open? ──yes──► Dialog handles it
     │ no
     ▼
-Is menubar area or menu open? ──yes──► Menubar handles it
+Is dragging/resizing? ──yes──► WindowManager continuous tracking
     │ no
     ▼
-WindowManager.hitTest (which window was clicked?)
+hitRegions.handle*(x, y)
     │
-    ├── Title bar ──► Start drag
-    ├── Close box ──► Close window
-    ├── Scrollbar ──► Scroll content
-    └── Content area ──► Translate to local coords, dispatch to app
+    ├── Finds topmost region at (x, y)
+    ├── Fires onMouseDown/onMouseUp/onClick/onDoubleClick
+    ├── Tracks enter/leave for onMouseEnter/onMouseLeave
+    └── Returns whether a region was hit
     │
-    │ no window hit
-    ▼
-Desktop icon hit test ──► Select / double-click to open
+    │ For mouseMove: also dispatches to active window for app hover effects
+    │ For keyboard events: dispatches to active window's app
 ```
+
+The manual cascade (menubar → window manager → desktop) has been replaced by a single flat hit region lookup. Z-order is implicit from render order.
 
 ## Fonts
 
@@ -312,7 +335,6 @@ To sample a pattern at any coordinate: `pattern[(y & 7) * 8 + (x & 7)]`. The `& 
 | ---------------------------------------- | ---------------------------------------------------- |
 | `vite`                                   | Frontend build tool and dev server                   |
 | `canvas-dither`                          | Atkinson/Bayer dithering for camera and video frames |
-| `opfs-tools`                             | Origin Private File System access                    |
 | `dayjs`                                  | Date formatting (photo timestamps)                   |
 | `esc-pos-encoder` / `codepage-encoder`   | Thermal printer support                              |
 | `gray-matter` / `remark` / `remark-html` | Markdown file processing at build time               |

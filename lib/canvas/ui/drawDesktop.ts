@@ -1,6 +1,7 @@
-import { BitCanvas, BLACK, WHITE, Sprite } from "../BitCanvas";
+import { BitCanvas, BLACK, WHITE } from "../BitCanvas";
 import { drawBitmapText, measureText } from "../fontAdapter";
 import { SpriteRegistry } from "../SpriteRegistry";
+import { HitRegionMap } from "../HitRegion";
 
 export interface DesktopIcon {
   title: string;
@@ -14,7 +15,6 @@ export interface DesktopIcon {
 export interface DesktopState {
   icons: DesktopIcon[];
   selectedIndex: number | null;
-  /** Set of window IDs that are currently open, used for shadow-outline on icons */
   openWindowTitles: Set<string>;
 }
 
@@ -22,7 +22,6 @@ const ICON_CELL_W = 84;
 const ICON_CELL_H = 64;
 const ICON_SIZE = 32;
 const GRID_COLS = 6;
-const GRID_ROWS = 5;
 
 export function createDesktopState(icons: DesktopIcon[]): DesktopState {
   return {
@@ -32,34 +31,52 @@ export function createDesktopState(icons: DesktopIcon[]): DesktopState {
   };
 }
 
-/**
- * Draw the desktop background (checkerboard) and icons.
- */
 export function drawDesktop(
   canvas: BitCanvas,
   state: DesktopState,
   sprites: SpriteRegistry,
   screenWidth: number,
   screenHeight: number,
-  menubarHeight: number
+  menubarHeight: number,
+  hitRegions: HitRegionMap,
+  callbacks: {
+    onIconClick: (index: number) => void;
+    onIconDoubleClick: (index: number) => void;
+    onBackgroundClick: () => void;
+  }
 ) {
   // Checkerboard background
-  canvas.fillPattern(0, menubarHeight, screenWidth, screenHeight - menubarHeight, "checkers");
+  canvas.fillPattern(
+    0,
+    menubarHeight,
+    screenWidth,
+    screenHeight - menubarHeight,
+    "checkers",
+    0,
+    0
+  );
 
-  // Draw icons right-to-left, top-to-bottom (RTL grid like the original Mac)
+  // Desktop background: deselect on click (registered first = lowest z-order)
+  hitRegions.add({
+    id: "desktop-bg",
+    x: 0,
+    y: menubarHeight,
+    w: screenWidth,
+    h: screenHeight - menubarHeight,
+    onMouseDown: () => callbacks.onBackgroundClick(),
+  });
+
   for (let i = 0; i < state.icons.length; i++) {
     const icon = state.icons[i];
     const col = i % GRID_COLS;
     const row = Math.floor(i / GRID_COLS);
 
-    // RTL: rightmost column first
     const cellX = screenWidth - (col + 1) * ICON_CELL_W;
     const cellY = menubarHeight + row * ICON_CELL_H + 8;
 
     const selected = state.selectedIndex === i;
     const isOpen = state.openWindowTitles.has(icon.title);
 
-    // Icon sprite
     const sprite = sprites.get(icon.img);
     if (sprite) {
       const ix = cellX + Math.floor((ICON_CELL_W - ICON_SIZE) / 2);
@@ -74,13 +91,11 @@ export function drawDesktop(
       }
     }
 
-    // Label
     const textW = measureText(icon.title, "Geneva9");
     const labelX = cellX + Math.floor((ICON_CELL_W - textW) / 2) - 2;
     const labelY = cellY + ICON_SIZE + 2;
 
     if (selected) {
-      // Inverted label
       drawBitmapText(canvas, icon.title, labelX, labelY, {
         font: "Geneva9",
         color: WHITE,
@@ -97,31 +112,16 @@ export function drawDesktop(
         align: "center",
       });
     }
-  }
-}
 
-/**
- * Hit-test desktop icons. Returns the icon index or -1.
- */
-export function desktopHitTest(
-  state: DesktopState,
-  x: number,
-  y: number,
-  screenWidth: number,
-  menubarHeight: number
-): number {
-  for (let i = 0; i < state.icons.length; i++) {
-    const col = i % GRID_COLS;
-    const row = Math.floor(i / GRID_COLS);
-    const cellX = screenWidth - (col + 1) * ICON_CELL_W;
-    const cellY = menubarHeight + row * ICON_CELL_H + 8;
-
-    if (
-      x >= cellX && x < cellX + ICON_CELL_W &&
-      y >= cellY && y < cellY + ICON_CELL_H
-    ) {
-      return i;
-    }
+    const iconIndex = i;
+    hitRegions.add({
+      id: `desktop-icon-${i}`,
+      x: cellX,
+      y: cellY,
+      w: ICON_CELL_W,
+      h: ICON_CELL_H,
+      onMouseDown: () => callbacks.onIconClick(iconIndex),
+      onDoubleClick: () => callbacks.onIconDoubleClick(iconIndex),
+    });
   }
-  return -1;
 }

@@ -29,6 +29,7 @@ let _commands = [];
 let _size = { width: 200, height: 150 };
 let _pendingOSRequests = {};
 let _reqIdCounter = 0;
+let _hitRegionHandlers = {};
 
 // --- API exposed to user apps ---
 const api = {
@@ -58,6 +59,16 @@ const api = {
     });
   },
   drawImage(src, x, y, w, h) { _commands.push({ op: "img", src, x, y, w, h }); },
+
+  // Hit regions
+  hitRegion(id, x, y, w, h, callbacks) {
+    const handlerNames = [];
+    _hitRegionHandlers[id] = callbacks || {};
+    for (const key of ["onClick", "onMouseDown", "onMouseUp", "onMouseEnter", "onMouseLeave", "onDoubleClick"]) {
+      if (callbacks && callbacks[key]) handlerNames.push(key);
+    }
+    _commands.push({ op: "hitRegion", regionId: id, x, y, w, h, handlers: handlerNames });
+  },
 
   // Hooks
   useState(initial) {
@@ -138,6 +149,7 @@ function _resetForRender() {
   _hookIndex = 0;
   _effectIndex = 0;
   _commands = [];
+  _hitRegionHandlers = {};
   _eventHandlers.mouseDown = [];
   _eventHandlers.mouseUp = [];
   _eventHandlers.mouseMove = [];
@@ -181,6 +193,13 @@ self.onmessage = function(e) {
     if (resolve) {
       resolve(msg.result);
       delete _pendingOSRequests[msg.requestId];
+    }
+  }
+
+  if (msg.type === "hitRegionEvent") {
+    const handlers = _hitRegionHandlers[msg.regionId];
+    if (handlers && handlers[msg.handler]) {
+      try { handlers[msg.handler](msg.x, msg.y); } catch(err) { console.error(err); }
     }
   }
 };

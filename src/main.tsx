@@ -5,20 +5,19 @@ import { AppRegistry } from "../lib/canvas/AppRegistry";
 import { EventManager, OSEvent } from "../lib/canvas/EventManager";
 import { WindowManager, TITLE_BAR_HEIGHT } from "../lib/canvas/WindowManager";
 import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
+import { HitRegionMap } from "../lib/canvas/HitRegion";
 import { loadFonts } from "../lib/canvas/fontAdapter";
 import { createOSServices } from "../lib/canvas/OSServices";
 import {
   MenubarDefinition,
   createMenubarState,
   drawMenubar,
-  handleMenubarEvent,
   MENUBAR_HEIGHT,
 } from "../lib/canvas/ui/drawMenubar";
 import {
   DesktopIcon,
   createDesktopState,
   drawDesktop,
-  desktopHitTest,
 } from "../lib/canvas/ui/drawDesktop";
 import { createDialogState, drawDialog } from "../lib/canvas/ui/drawDialog";
 import { TEXT_CURSOR_BLINK_MS } from "../lib/canvas/ui/TextInput";
@@ -171,7 +170,6 @@ async function buildDesktopFiles(): Promise<DesktopIcon[]> {
 }
 
 async function main() {
-  // Create DOM elements
   const canvas = document.createElement("canvas");
   canvas.width = resolution.width;
   canvas.height = resolution.height;
@@ -186,6 +184,7 @@ async function main() {
   const bitCanvas = new BitCanvas(resolution.width, resolution.height);
   const sprites = new SpriteRegistry();
   const appRegistry = new AppRegistry();
+  const hitRegions = new HitRegionMap();
   const windowManager = new WindowManager({
     screenWidth: resolution.width,
     screenHeight: resolution.height,
@@ -208,7 +207,7 @@ async function main() {
 
   setSplashSpriteRegistry(sprites);
 
-  let menubarState = createMenubarState(finderMenubar);
+  let menubarState = createMenubarState([]);
   let desktopState = createDesktopState([]);
   let dialogState = createDialogState();
   let showingSplashscreen = true;
@@ -299,9 +298,13 @@ async function main() {
           width: app.defaultSize?.width ?? 200,
           height: app.defaultSize?.height ?? 150,
           contentHeight: app.defaultSize?.height ?? 150,
+          contentWidth: app.defaultSize?.width ?? 200,
           appId: "__sandboxed__",
           props: {},
           scrollable: false,
+          resizable: false,
+          minWidth: 100,
+          minHeight: 60,
         });
         appHost.spawn(winId, app);
         scheduleRender();
@@ -320,9 +323,13 @@ async function main() {
       width: appDef.defaultSize.width,
       height: appDef.defaultSize.height,
       contentHeight: appDef.defaultSize.height,
+      contentWidth: appDef.defaultSize.width,
       appId,
       props: props ?? {},
       scrollable: appDef.scrollable ?? false,
+      resizable: appDef.resizable ?? false,
+      minWidth: appDef.minSize?.width ?? 100,
+      minHeight: appDef.minSize?.height ?? 60,
     });
 
     updateMenubar();
@@ -330,22 +337,16 @@ async function main() {
   }
 
   function updateMenubar() {
+    const sysMenus = getSystemMenubar();
     const active = windowManager.getActiveWindow();
+    let appMenus: MenubarDefinition[] = finderMenubar;
     if (active) {
       const instance = appRegistry.getInstance(active.id);
       if (instance?.app.getMenubar) {
-        const appMenus = instance.app.getMenubar(
-          instance.builder,
-          instance.props
-        );
-        menubarState = createMenubarState([
-          ...finderMenubar.slice(0, 1),
-          ...appMenus,
-        ]);
-        return;
+        appMenus = instance.app.getMenubar(instance.builder, instance.props);
       }
     }
-    menubarState = createMenubarState(finderMenubar);
+    menubarState.menus = [...sysMenus, ...appMenus];
   }
 
   function getSystemMenubar(): MenubarDefinition[] {
@@ -366,6 +367,50 @@ async function main() {
       },
     ];
   }
+
+  updateMenubar();
+
+  function dispatchToApp(windowId: string, event: OSEvent) {
+    if (appHost.isRunning(windowId)) {
+      appHost.sendEvent(windowId, {
+        kind: event.type,
+        x: event.x,
+        y: event.y,
+        key: event.key,
+        code: event.code,
+      });
+      return;
+    }
+    const instance = appRegistry.getInstance(windowId);
+    if (instance?.app.onEvent) {
+      const win = windowManager.windows.find((w) => w.id === windowId);
+      const size = win
+        ? { width: win.width, height: win.height }
+        : instance.app.defaultSize;
+      instance.builder.resetForRender();
+      instance.app.onEvent(instance.builder, event, instance.props, size);
+    }
+  }
+
+  // Window chrome callbacks (shared with hit regions registered during render)
+  const windowCallbacks = {
+    onClose: (id: string) => {
+      windowManager.closeWindow(id);
+      appRegistry.destroyInstance(id);
+      updateMenubar();
+      scheduleRender();
+    },
+    onBringToFront: (id: string) => {
+      windowManager.bringToFront(id);
+      updateMenubar();
+      scheduleRender();
+    },
+    onContentEvent: (id: string, event: OSEvent) => {
+      dispatchToApp(id, event);
+      scheduleRender();
+    },
+    scheduleRender: () => scheduleRender(),
+  };
 
   // --- Events ---
   const eventManager = new EventManager(canvas);
@@ -395,97 +440,102 @@ async function main() {
       return;
     }
 
-    if (
-      event.type === "mouseDown" ||
-      event.type === "mouseMove" ||
-      event.type === "mouseUp"
-    ) {
-      if (event.y! < MENUBAR_HEIGHT || menubarState.openMenuIndex !== null) {
-        const result = handleMenubarEvent(
-          menubarState,
-          event,
-          resolution.width
-        );
-        if (result.handled) {
-          if (result.action) result.action();
-          if (result.stateChanged) scheduleRender();
-          return;
-        }
-      }
-    }
-
-    if (event.type === "mouseDown") {
-      const result = windowManager.handleMouseDown(event.x!, event.y!);
-      if (result.consumed) {
-        updateMenubar();
-        if (result.contentEvent && result.windowId)
-          dispatchToApp(result.windowId, result.contentEvent);
+    // Drag/resize handling takes priority (continuous mouse tracking)
+    if (windowManager.isDraggingOrResizing()) {
+      if (event.type === "mouseMove") {
+        windowManager.handleMouseMove(event.x!, event.y!);
         scheduleRender();
         return;
       }
-      const iconIdx = desktopHitTest(
-        desktopState,
-        event.x!,
-        event.y!,
-        resolution.width,
-        MENUBAR_HEIGHT
-      );
-      desktopState.selectedIndex = iconIdx >= 0 ? iconIdx : null;
+      if (event.type === "mouseUp") {
+        windowManager.handleMouseUp();
+        scheduleRender();
+        return;
+      }
+    }
+
+    // All other events dispatch through hit regions
+    if (event.type === "mouseMove") {
+      hitRegions.handleMouseMove(event.x!, event.y!);
+
+      // Also dispatch mouseMove to active window content for hover effects
+      const active = windowManager.getActiveWindow();
+      if (active) {
+        const contentRect = windowManager.getContentRect(active);
+        if (
+          event.x! >= contentRect.x &&
+          event.x! < contentRect.x + contentRect.w &&
+          event.y! >= contentRect.y &&
+          event.y! < contentRect.y + contentRect.h
+        ) {
+          const local = windowManager.toContentLocal(
+            active,
+            event.x!,
+            event.y!
+          );
+          dispatchToApp(active.id, {
+            type: "mouseMove",
+            x: local.x,
+            y: local.y,
+          });
+        }
+      }
+      scheduleRender();
+      return;
+    }
+
+    if (event.type === "mouseDown") {
+      // Close open menu if clicking outside menubar/dropdown
+      if (menubarState.openMenuIndex !== null) {
+        // Check if click is on a menubar or dropdown region
+        const hit = hitRegions.hitTest(event.x!, event.y!);
+        const isMenubarHit =
+          hit !== null &&
+          (hit.id.startsWith("menubar-") || hit.id === "menubar-bg");
+        if (!isMenubarHit) {
+          menubarState.openMenuIndex = null;
+          menubarState.highlightedItem = null;
+          scheduleRender();
+          return;
+        }
+      }
+
+      hitRegions.handleMouseDown(event.x!, event.y!);
       scheduleRender();
       return;
     }
 
     if (event.type === "mouseUp") {
-      const result = windowManager.handleMouseUp(event.x!, event.y!);
-      if (result.consumed && result.contentEvent && result.windowId)
-        dispatchToApp(result.windowId, result.contentEvent);
-      scheduleRender();
-      return;
-    }
-
-    if (event.type === "mouseMove") {
-      const result = windowManager.handleMouseMove(event.x!, event.y!);
-      if (result.consumed && result.contentEvent && result.windowId)
-        dispatchToApp(result.windowId, result.contentEvent);
+      // If a menu is open and an item is highlighted, handle it via hit regions
+      hitRegions.handleMouseUp(event.x!, event.y!);
       scheduleRender();
       return;
     }
 
     if (event.type === "doubleClick") {
-      const result = windowManager.handleDoubleClick(event.x!, event.y!);
-      if (result.consumed && result.contentEvent && result.windowId) {
-        dispatchToApp(result.windowId, result.contentEvent);
-        scheduleRender();
-        return;
-      }
-      const iconIdx = desktopHitTest(
-        desktopState,
-        event.x!,
-        event.y!,
-        resolution.width,
-        MENUBAR_HEIGHT
-      );
-      if (iconIdx >= 0) {
-        const icon = desktopState.icons[iconIdx];
-        const mappedId = appTypeMap[icon.type] ?? icon.type;
-        openWindow(mappedId, icon.title, icon.payload, icon.defaultPosition);
-      }
+      hitRegions.handleDoubleClick(event.x!, event.y!);
       scheduleRender();
       return;
     }
 
     if (event.type === "scroll") {
-      const id = windowManager.hitTest(event.x!, event.y!);
-      if (id) {
-        const win = windowManager.windows.find((w) => w.id === id);
-        if (win && win.scrollable) {
-          const maxScroll = Math.max(0, win.contentHeight - win.height);
-          win.scrollY = Math.max(
-            0,
-            Math.min(maxScroll, win.scrollY + (event.deltaY ?? 0))
+      const id = windowManager.windows
+        .slice()
+        .reverse()
+        .find((w) => {
+          const headerH = TITLE_BAR_HEIGHT + (w.infoBar ? 20 : 0);
+          const totalW = w.width + 1;
+          const totalH = headerH + w.height + 1;
+          return (
+            event.x! >= w.x &&
+            event.x! < w.x + totalW &&
+            event.y! >= w.y &&
+            event.y! < w.y + totalH
           );
-          scheduleRender();
-        }
+        });
+      if (id && id.scrollable) {
+        windowManager.handleScroll(id, event.deltaY ?? 0);
+        scheduleRender();
       }
       return;
     }
@@ -496,28 +546,6 @@ async function main() {
       scheduleRender();
     }
   });
-
-  function dispatchToApp(windowId: string, event: OSEvent) {
-    if (appHost.isRunning(windowId)) {
-      appHost.sendEvent(windowId, {
-        kind: event.type,
-        x: event.x,
-        y: event.y,
-        key: event.key,
-        code: event.code,
-      });
-      return;
-    }
-    const instance = appRegistry.getInstance(windowId);
-    if (instance?.app.onEvent) {
-      const win = windowManager.windows.find((w) => w.id === windowId);
-      const size = win
-        ? { width: win.width, height: win.height }
-        : instance.app.defaultSize;
-      instance.builder.resetForRender();
-      instance.app.onEvent(instance.builder, event, instance.props, size);
-    }
-  }
 
   // --- Render ---
   let renderScheduled = false;
@@ -531,6 +559,9 @@ async function main() {
   function render() {
     renderScheduled = false;
     bitCanvas.clear(WHITE);
+
+    // Rebuild hit regions each frame
+    hitRegions.clear();
 
     if (showingSplashscreen) {
       bitCanvas.fillPattern(
@@ -562,7 +593,23 @@ async function main() {
       sprites,
       resolution.width,
       resolution.height,
-      MENUBAR_HEIGHT
+      MENUBAR_HEIGHT,
+      hitRegions,
+      {
+        onIconClick: (index) => {
+          desktopState.selectedIndex = index;
+          scheduleRender();
+        },
+        onIconDoubleClick: (index) => {
+          const icon = desktopState.icons[index];
+          const mappedId = appTypeMap[icon.type] ?? icon.type;
+          openWindow(mappedId, icon.title, icon.payload, icon.defaultPosition);
+        },
+        onBackgroundClick: () => {
+          desktopState.selectedIndex = null;
+          scheduleRender();
+        },
+      }
     );
 
     for (const win of windowManager.windows) {
@@ -575,12 +622,36 @@ async function main() {
           { width: win.width, height: win.height }
         );
       }
+      if (instance?.app.getContentWidth) {
+        instance.builder.resetForRender();
+        win.contentWidth = instance.app.getContentWidth(
+          instance.builder,
+          instance.props,
+          { width: win.width, height: win.height }
+        );
+      }
+      if (instance?.app.getInfoBar) {
+        instance.builder.resetForRender();
+        win.infoBar =
+          instance.app.getInfoBar(instance.builder, instance.props) ??
+          undefined;
+      }
     }
 
     for (const win of windowManager.windows) {
-      windowManager.drawWindowChrome(bitCanvas, win, sprites);
+      windowManager.drawWindowChrome(
+        bitCanvas,
+        win,
+        sprites,
+        hitRegions,
+        windowCallbacks
+      );
 
-      const contentCtx = windowManager.createAppContext(bitCanvas, win);
+      const contentCtx = windowManager.createAppContext(
+        bitCanvas,
+        win,
+        hitRegions
+      );
 
       if (appHost.isRunning(win.id)) {
         appHost.executeCommands(win.id, contentCtx);
@@ -596,20 +667,13 @@ async function main() {
       contentCtx.release();
     }
 
-    const sysMenus = getSystemMenubar();
-    const activeWin = windowManager.getActiveWindow();
-    let appMenus: MenubarDefinition[] = finderMenubar;
-    if (activeWin) {
-      const inst = appRegistry.getInstance(activeWin.id);
-      if (inst?.app.getMenubar)
-        appMenus = inst.app.getMenubar(inst.builder, inst.props);
-    }
-    menubarState.menus = [...sysMenus, ...appMenus];
     drawMenubar(
       bitCanvas,
       menubarState,
       sprites.get("/eaten_apple.png"),
-      resolution.width
+      resolution.width,
+      hitRegions,
+      scheduleRender
     );
 
     if (dialogState.def)
@@ -628,8 +692,6 @@ async function main() {
   const files = await buildDesktopFiles();
   desktopState = createDesktopState(files);
 
-  // Global cursor blink: re-renders at the blink cadence so focused
-  // text inputs animate without any per-app timer setup.
   setInterval(scheduleRender, TEXT_CURSOR_BLINK_MS);
 
   scheduleRender();

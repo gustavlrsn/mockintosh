@@ -27,11 +27,12 @@ for (let y = 0; y < 8; y++) {
     P.darkCheckers[i] = (x + y) % 2 === 0 ? 0 : 1;
     P.gray50[i] = (x + y) % 2 === 0 ? 1 : 0;
     P.gray25[i] =
-      (x % 4 === 0 && y % 2 === 0) || (x % 2 === 0 && x % 4 !== 0 && y % 2 !== 0)
+      (x % 4 === 0 && y % 2 === 0) ||
+      (x % 2 === 0 && x % 4 !== 0 && y % 2 !== 0)
         ? 1
         : 0;
     P.gray75[i] = P.gray25[i] === 1 ? 0 : 1;
-    // Classic Mac title bar stripes: horizontal lines with 1px gaps
+    // Classic Mac title bar stripes: 1px black lines with 1px white gaps
     P.stripes[i] = y % 2 === 0 ? 1 : 0;
   }
 }
@@ -42,6 +43,10 @@ export function getPattern(name: PatternName): Uint8Array {
   return P[name];
 }
 
-export function samplePattern(pattern: Uint8Array, x: number, y: number): number {
+export function samplePattern(
+  pattern: Uint8Array,
+  x: number,
+  y: number
+): number {
   return pattern[(y & 7) * 8 + (x & 7)];
 }
