@@ -1,4 +1,8 @@
 import { defineConfig } from "vite";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   resolve: {
@@ -8,6 +12,12 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        "3d": resolve(__dirname, "3d.html"),
+      },
+    },
   },
   server: {
     proxy: {
