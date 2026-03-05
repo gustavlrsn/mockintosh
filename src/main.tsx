@@ -470,6 +470,7 @@ async function main() {
       } else {
         const instance = appRegistry.getInstance(active.id);
         if (instance?.app.getMenubar) {
+          instance.builder.resetForRender();
           appMenus = instance.app.getMenubar(instance.builder, instance.props);
         }
       }

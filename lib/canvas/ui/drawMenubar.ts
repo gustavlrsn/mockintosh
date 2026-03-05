@@ -88,8 +88,8 @@ function flattenItems(menu: MenubarDefinition): FlatItem[] {
           label: ri.label,
           disabled: ri.disabled,
           isRadio: true,
-          radioChecked: rg.value === ri.label,
-          onClick: () => rg.onValueChange(ri.label),
+          radioChecked: rg.value === ri.value,
+          onClick: () => rg.onValueChange(ri.value),
         });
       }
     } else {
