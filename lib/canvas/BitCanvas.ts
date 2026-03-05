@@ -300,6 +300,41 @@ export class BitCanvas {
   }
 
   /**
+   * Blit only the outline (contour) of a sprite's opaque region.
+   * A pixel is drawn if it is opaque and at least one 4-connected neighbor
+   * is transparent or outside the sprite bounds.
+   */
+  blitOutline(sprite: Sprite, dx: number, dy: number, color: number = BLACK) {
+    dx = dx | 0;
+    dy = dy | 0;
+    const { width: sw, height: sh, mask } = sprite;
+    if (!mask) return;
+    for (let sy = 0; sy < sh; sy++) {
+      const ty = dy + sy;
+      if (ty < this.clip.y || ty >= this.clip.y + this.clip.h) continue;
+      if (ty < 0 || ty >= this.height) continue;
+      for (let sx = 0; sx < sw; sx++) {
+        const si = sy * sw + sx;
+        if (!mask[si]) continue;
+        const hasTransparentNeighbor =
+          sx === 0 ||
+          !mask[si - 1] ||
+          sx === sw - 1 ||
+          !mask[si + 1] ||
+          sy === 0 ||
+          !mask[(sy - 1) * sw + sx] ||
+          sy === sh - 1 ||
+          !mask[(sy + 1) * sw + sx];
+        if (!hasTransparentNeighbor) continue;
+        const tx = dx + sx;
+        if (tx < this.clip.x || tx >= this.clip.x + this.clip.w) continue;
+        if (tx < 0 || tx >= this.width) continue;
+        this.pixels[ty * this.width + tx] = color;
+      }
+    }
+  }
+
+  /**
    * Copy raw RGBA ImageData into the BitCanvas, thresholding to 1-bit.
    * Useful for blitting dithered camera/video frames.
    */

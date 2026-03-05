@@ -10,6 +10,7 @@ import {
 import { getWrappedLines } from "../lib/canvas/ui/TextBlock";
 import { OSEvent } from "../lib/canvas/EventManager";
 import { saveApp } from "./AppStore";
+import { MockFS } from "../lib/canvas/fs/MockFS";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -23,7 +24,7 @@ const LINE_H = 12;
 export const AppBuilderApp: NativeApp = {
   id: "appbuilder",
   title: "App Builder",
-  icon: "/icons/computer.png",
+  icon: "icon/computer",
   defaultSize: { width: 350, height: 280 },
   scrollable: false,
 
@@ -127,12 +128,18 @@ export const AppBuilderApp: NativeApp = {
         id: "publish-btn",
         onClick: () => {
           const id = "userapp-" + Date.now();
-          saveApp({
-            id,
-            title: "My App",
-            description: "Created with App Builder",
-            code: generatedCode,
-          });
+          const fs: MockFS | undefined = props._fs;
+          if (fs) {
+            saveApp(
+              {
+                id,
+                title: "My App",
+                description: "Created with App Builder",
+                code: generatedCode,
+              },
+              fs
+            );
+          }
         },
       });
 

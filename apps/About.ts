@@ -12,7 +12,7 @@ const contributors = [{ username: "gustavlrsn", commits: 74 }];
 export const AboutApp: NativeApp = {
   id: "about",
   title: "About This Mockintosh",
-  icon: "/icons/computer.png",
+  icon: "icon/computer",
   defaultSize: { width: 343, height: 160 },
   scrollable: false,
 
@@ -20,7 +20,7 @@ export const AboutApp: NativeApp = {
     const sprites: SpriteRegistry = props._sprites;
     ctx.clear(WHITE);
 
-    const computerSprite = sprites?.get("/icons/computer.png");
+    const computerSprite = sprites?.get("icon/computer");
     if (computerSprite) {
       ctx.blit(computerSprite, 16, 8);
     }
@@ -44,7 +44,7 @@ export const AboutApp: NativeApp = {
 
     let y = 56;
     for (const contributor of contributors) {
-      const userSprite = sprites?.get("/user2.png");
+      const userSprite = sprites?.get("user2");
       if (userSprite) {
         ctx.blit(userSprite, 16, y);
       }

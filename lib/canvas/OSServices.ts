@@ -1,3 +1,5 @@
+import { MockFS } from "./fs/MockFS";
+
 /**
  * OS-level services exposed to both native and sandboxed apps.
  */
@@ -12,6 +14,7 @@ export interface OSServices {
   camera: {
     requestAccess(): Promise<boolean>;
     getFrame(): ImageData | null;
+    getVideoElement(): HTMLVideoElement | null;
     release(): void;
   };
   audio: {
@@ -22,6 +25,7 @@ export interface OSServices {
     write(key: string, value: string): Promise<void>;
     list(): Promise<string[]>;
   };
+  fs: MockFS | null;
 }
 
 export interface DialogOptions {
@@ -51,10 +55,15 @@ export function createOSServices(dependencies: {
     openWindow: dependencies.openWindow,
     closeWindow: dependencies.closeWindow,
     showDialog: dependencies.showDialog,
+    fs: null,
 
     clipboard: {
-      read() { return clipboardData; },
-      write(text: string) { clipboardData = text; },
+      read() {
+        return clipboardData;
+      },
+      write(text: string) {
+        clipboardData = text;
+      },
     },
 
     camera: {
@@ -82,13 +91,24 @@ export function createOSServices(dependencies: {
         const h = video.videoHeight;
         if (!w || !h) return null;
 
-        if (!cameraCanvas || cameraCanvas.width !== w || cameraCanvas.height !== h) {
+        if (
+          !cameraCanvas ||
+          cameraCanvas.width !== w ||
+          cameraCanvas.height !== h
+        ) {
           cameraCanvas = new OffscreenCanvas(w, h);
-          cameraCtx = cameraCanvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
+          cameraCtx = cameraCanvas.getContext(
+            "2d"
+          ) as OffscreenCanvasRenderingContext2D;
         }
 
         cameraCtx!.drawImage(video, 0, 0);
         return cameraCtx!.getImageData(0, 0, w, h);
+      },
+
+      getVideoElement(): HTMLVideoElement | null {
+        if (!cameraStream || !dependencies.videoElement) return null;
+        return dependencies.videoElement;
       },
 
       release() {

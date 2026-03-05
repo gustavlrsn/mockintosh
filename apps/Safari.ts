@@ -41,7 +41,7 @@ const siteRegistry: SiteEntry[] = [
     body: `
 <card id="home">
 <h1 align="center">Mockintosh</h1>
-<img src="/microdesktop-disk.png" align="center">
+<img src="microdesktop-disk" align="center">
 <spacer height="8">
 <p align="center">A mock operating system in the style of an early Macintosh.</p>
 <hr>
@@ -302,7 +302,7 @@ const CONTENT_MARGIN = 8;
 export const SafariApp: NativeApp = {
   id: "safari",
   title: "Safari",
-  icon: "/icons/safari.png",
+  icon: "icon/safari",
   defaultSize: { width: 384, height: 220 },
   scrollable: true,
 

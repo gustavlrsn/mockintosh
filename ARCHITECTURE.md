@@ -40,19 +40,28 @@ lib/canvas/                 Core OS engine
   HitRegion.ts              Hit region map — retained interactive areas for event dispatch
   AppContext.ts             Scoped drawing context (per-window clipping + hit regions)
   AppBuilder.ts            Hook-based state management (useState, useEffect, etc.)
-  AppRegistry.ts           Native app registration and lifecycle
+  AppRegistry.ts           App registration and lifecycle (single-window + multi-window)
   EventManager.ts          DOM event → OS event translation
   WindowManager.ts         Window list, z-order, dragging, focus, chrome rendering
-  SpriteRegistry.ts        Image preloading and 1-bit conversion
-  OSServices.ts            System services (camera, audio, storage, clipboard)
+  SpriteRegistry.ts        Sprite cache, PNG loading, and 2bpp format decoder
+  OSServices.ts            System services (camera, audio, storage, clipboard, file system)
   fontAdapter.ts           Bridge between PixelFontCanvas and BitCanvas
   patterns.ts              8×8 fill patterns (checkers, stripes, grays)
+
+  fs/                      Virtual file system
+    MockFS.ts              Hierarchical FS with types, metadata, change subscriptions
+    OPFSBackend.ts         OPFS persistence layer (metadata sidecar + content blobs)
+
+  sprites/                 Inline sprite data (2bpp packed, base64-encoded)
+    icons.ts               Desktop and app icons (32×32)
+    cursors.ts             Mouse cursor sprites at multiple sizes
+    ui.ts                  Miscellaneous UI sprites (apple logo, floppy disk, etc.)
+    index.ts               Registers all inline sprites into a SpriteRegistry
 
   ui/                      OS chrome drawing functions
     drawMenubar.ts         Menubar with dropdowns, radio groups, shortcuts
     drawButton.ts          Classic Mac buttons
     drawDialog.ts          Modal dialogs
-    drawDesktop.ts         Desktop background and icon grid
     drawScrollbar.ts       (handled within WindowManager.ts)
     TextInput.ts           Text input with cursor and keyboard handling
 
@@ -64,19 +73,19 @@ lib/canvas/                 Core OS engine
 
 apps/                      Application implementations
   Splashscreen.ts          Boot screen with happy Mac icon
-  Finder.ts                Folder browser with icon grid
-  FileViewer.ts            Plaintext/markdown file viewer
+  Finder.ts                Desktop + folder browser (multi-window app, owns desktop surface)
+  FileViewer.ts            Plaintext/markdown file viewer — loads content from MockFS
   About.ts                 "About This Mockintosh" dialog
   ControlPanel.ts          System settings with pattern editor
   PhotoBooth.ts            Camera app with dithering
   VideoPlayer.ts           1-bit video player
   Safari.ts                Web browser with URL bar and site registry
   Picture.ts               Image viewer with print support
-  AppStore.ts              Browse/install/uninstall user-created apps
+  AppStore.ts              Browse/install/uninstall user-created apps (backed by MockFS)
   AppBuilderApp.ts         AI-powered app generator (chat with LLM, streaming)
 
 src/
-  main.tsx                 Entry point — mounts canvas, boots OS, runs render loop
+  main.tsx                 Entry point — mounts canvas, boots OS, initializes MockFS, runs render loop
 
 api/
   generate-app.ts          Vercel Edge Function — LLM proxy with SSE streaming
@@ -95,16 +104,17 @@ lib/
 Every frame follows this exact order, painting from back to front:
 
 1. **Clear** — fill the pixel buffer with white
-2. **Desktop** — checkerboard pattern background + icon grid
-3. **Windows** — iterate bottom-to-top through the window stack:
+2. **Desktop** — the Finder's desktop window (first in window stack): checkerboard background + volume icons + Desktop Folder icons
+3. **Windows** — iterate bottom-to-top through the remaining window stack:
    - Draw window chrome (border, title bar, close box, scrollbar)
    - Create a clipped `AppContext` for the content area
-   - Call the app's `render()` function (or execute sandboxed draw commands)
+   - Call the app's `render()` / `renderWindow()` function (or execute sandboxed draw commands)
    - Release the clip
-4. **Menubar** — white bar at top with menu labels and open dropdown
-5. **Dialog** — modal dialog if active (blocks everything behind it)
-6. **Cursor** — 16×16 sprite at current mouse position
-7. **Flush** — expand the 1-bit buffer to RGBA `ImageData` and `putImageData` to the real canvas
+4. **Drag ghost** — if the Finder has an active icon drag, draw the ghost outline on top of all windows
+5. **Menubar** — white bar at top with menu labels and open dropdown
+6. **Dialog** — modal dialog if active (blocks everything behind it)
+7. **Cursor** — 16×16 sprite at current mouse position
+8. **Flush** — expand the 1-bit buffer to RGBA `ImageData` and `putImageData` to the real canvas
 
 The entire buffer is 512×342 = ~175K pixels. Flushing converts each pixel: `1` → RGB(0,0,0), `0` → RGB(255,255,255).
 
@@ -161,7 +171,7 @@ Hook state is stored in a slot array indexed by call order (same pattern as Reac
 
 ## App Types
 
-### Native Apps
+### Native Apps (Single-Window)
 
 Trusted apps that run on the main thread with full browser API access. Defined as objects implementing the `NativeApp` interface:
 
@@ -179,7 +189,46 @@ interface NativeApp {
 }
 ```
 
-Native apps can access `OSServices` (camera, audio, storage) and hidden DOM elements (for video decoding, etc.).
+Each single-window app gets one `AppBuilder` instance per window. The `AppBuilder` is created when the window opens and destroyed when it closes.
+
+### Multi-Window Apps
+
+Apps that own multiple windows and/or special surfaces like the desktop. Modeled after the original Macintosh architecture where the Finder was one application managing the desktop and all folder windows simultaneously.
+
+```typescript
+interface MultiWindowApp {
+  id: string;
+  title: string;
+  icon: string;
+
+  onStart?(app: AppBuilder): void;
+  onStop?(app: AppBuilder): void;
+
+  renderWindow(app: AppBuilder, win: AppBuilder, ctx: AppContext,
+               windowId: string, props: any): void;
+  onWindowEvent?(app: AppBuilder, win: AppBuilder, event: OSEvent,
+                 windowId: string, props: any, size: WindowSize): void;
+  getMenubar?(app: AppBuilder, win: AppBuilder, windowId: string,
+              props: any): MenubarDefinition[];
+}
+```
+
+Multi-window apps have a **two-level state model** matching the original Mac:
+
+| Original Mac concept | Our equivalent |
+| --- | --- |
+| App's global variables | App-level `AppBuilder` (one per app, lives from start to stop) |
+| `WindowRecord` | `WindowState` in `WindowManager` (unchanged) |
+| Document record via `SetWRefCon` | Per-window `AppBuilder` (one per window, lives from open to close) |
+
+Every method receives both `app` (shared app-level state) and `win` (per-window state). This means a text editor can have different font sizes per window while the Finder shares drag state across all its windows.
+
+Both levels use the same `AppBuilder` class — the difference is purely lifecycle. The app-level builder is created by `AppRegistry.startApp()` and lives until `stopApp()`. Per-window builders are created/destroyed with their windows.
+
+The Finder is currently the only multi-window app. It owns:
+- A **desktop window** (`__desktop__`) — chromeless, fullscreen behind all other windows, renders the checkerboard background, volume icons, and Desktop Folder contents
+- **Folder windows** — standard windows showing directory contents, with title bars, scrollbars, and close boxes
+- A **unified drag state** stored in the app-level builder, enabling seamless drag-and-drop across the desktop and all folder windows with no handover
 
 ### Sandboxed Apps (User-Created)
 
@@ -228,9 +277,9 @@ Interactive areas are declared during rendering via a `HitRegionMap`. Each frame
 ```
 render() frame
   ├── hitRegions.clear()
-  ├── drawDesktop() ── registers icon regions (on top of background region)
+  ├── Finder.renderWindow(__desktop__) ── registers desktop icon regions (on top of background)
   ├── drawWindowChrome() ── registers close box, title bar, scrollbar, content regions
-  ├── app.render() ── may register button/link regions via AppContext.hitRegion()
+  ├── app.render() / renderWindow() ── may register button/link regions via AppContext
   └── drawMenubar() ── registers label + dropdown item regions (topmost layer)
 ```
 
@@ -252,7 +301,10 @@ EventManager (translates to OS coordinates, detects double-clicks)
 Is dialog open? ──yes──► Dialog handles it
     │ no
     ▼
-Is dragging/resizing? ──yes──► WindowManager continuous tracking
+Is dragging/resizing window? ──yes──► WindowManager continuous tracking
+    │ no
+    ▼
+Is Finder dragging an icon? ──yes──► Finder drag state machine (screen coords)
     │ no
     ▼
 hitRegions.handle*(x, y)
@@ -279,15 +331,177 @@ Text is rendered by `PixelFontCanvas` onto a temporary canvas, then the pixels a
 
 ## Sprites
 
-Images are preloaded by `SpriteRegistry`, which:
+Sprites are small bitmaps with transparency, used for icons, cursors, and UI elements. The runtime type is:
 
-1. Fetches the image
-2. Draws it to an `OffscreenCanvas`
-3. Reads the pixel data
-4. Converts to 1-bit: alpha < 128 → transparent, average RGB < 128 → black, else → white
-5. Stores as a `Sprite` object: `{ width, height, data: Uint8Array, mask: Uint8Array }`
+```typescript
+interface Sprite {
+  width: number;
+  height: number;
+  data: Uint8Array; // 1 byte per pixel, 0=white, 1=black
+  mask?: Uint8Array; // 1=opaque, 0=transparent
+}
+```
 
-Sprites support transparency via the `mask` array (1 = opaque, 0 = transparent).
+Each pixel has one of 3 states: **transparent**, **white**, or **black**.
+
+### Inline Sprite Format (2bpp)
+
+Most sprites are defined inline in TypeScript using a compact 2-bits-per-pixel encoding:
+
+| Bits | Meaning     |
+| ---- | ----------- |
+| `00` | transparent |
+| `01` | white       |
+| `10` | black       |
+| `11` | reserved    |
+
+4 pixels pack into 1 byte, MSB-first. The packed bytes are stored as a base64 string. A 32×32 icon = 1024 pixels = 256 bytes = ~344 characters of base64.
+
+```typescript
+const ICON_FOLDER = defineSprite(32, 32, "AAAAAAAAAA...");
+```
+
+`defineSprite(width, height, b64)` decodes the base64 string into a `Sprite` at module load time. All built-in sprites are registered synchronously at boot via `registerAllSprites()` — no network requests needed.
+
+Sprite data lives in `lib/canvas/sprites/` (icons, cursors, UI elements). A conversion script (`scripts/convert-sprites.ts`) can regenerate these files from PNG sources.
+
+### Runtime PNG Loading
+
+`SpriteRegistry.load()` can still fetch and convert PNGs at runtime (used for user-uploaded images, Safari inline images, etc.). The pipeline: fetch → decode to RGBA → threshold to 1-bit `Sprite`.
+
+## File System (MockFS)
+
+Mockintosh has a virtual hierarchical file system that stores text files, images, user-created apps, and directory structure. All data persists locally via the browser's Origin Private File System (OPFS).
+
+### Architecture
+
+The FS is split into two layers:
+
+```
+┌────────────────────────────────────────────────┐
+│  MockFS (lib/canvas/fs/MockFS.ts)              │
+│  In-memory metadata tree + high-level API      │
+├────────────────────────────────────────────────┤
+│  OPFSBackend (lib/canvas/fs/OPFSBackend.ts)    │
+│  OPFS read/write for meta.json + content blobs │
+└────────────────────────────────────────────────┘
+```
+
+On disk (within OPFS), the layout is:
+
+```
+mockintosh-fs/
+  meta.json              ← full directory tree + file metadata (JSON)
+  files/
+    <id1>                ← content blob for file id1
+    <id2>                ← content blob for file id2
+    ...
+```
+
+Content blobs are keyed by a unique ID (not by filename), so renaming and moving files only touches `meta.json`. This also makes future sync straightforward — the metadata is a single compact manifest, and content blobs are immutable by ID.
+
+### Node Types
+
+Every entry in the FS is an `FSNode`:
+
+```typescript
+interface FSNode {
+  id: string; // unique ID, used as OPFS filename for content
+  name: string; // display name (e.g. "README.md")
+  kind: "file" | "directory";
+  parentId: string | null; // null = root
+  createdAt: number;
+  modifiedAt: number;
+  icon?: string; // sprite registry key override (e.g. "icon/hd")
+  position?: { x: number; y: number }; // custom icon position in parent container
+}
+```
+
+Files extend this with a type discriminator:
+
+```typescript
+interface FSFile extends FSNode {
+  kind: "file";
+  fileType: "text" | "image" | "app" | "app-shortcut" | "binary";
+  size: number;
+}
+```
+
+| `fileType`     | Content format                                | Opened by       |
+| -------------- | --------------------------------------------- | --------------- |
+| `text`         | Plain text string                             | FileViewer      |
+| `image`        | JSON: `{ width, height, data }` (2bpp base64) | Picture         |
+| `app`          | JSON: `{ id, title, description, code }`      | Sandbox Worker  |
+| `app-shortcut` | JSON: `{ appId }` — points to a native app    | (direct launch) |
+| `binary`       | Arbitrary string data                         | —               |
+
+### Icons and the Sprite Registry
+
+Each `FSNode` can have an `icon` field containing a sprite registry key. If not set, `getIconForNode()` returns a default based on the node's kind and file type:
+
+- Directories → `"icon/folder"`
+- Text files → `"icon/file"`
+- Apps → `"icon/appstore-smr-32x32"`
+- App shortcuts → the shortcut's own icon (e.g. `"icon/safari"`)
+- Images → `"icon/camera"`
+
+Image files stored in the FS use the same 2bpp sprite format as built-in sprites. When loaded, they are decoded via `defineSprite()` and registered in `SpriteRegistry` under the key `"fs:{fileId}"`. This means sandboxed apps can reference FS-stored images via `api.drawImage("fs:{fileId}", x, y)` without any protocol changes.
+
+### API
+
+`MockFS` exposes:
+
+- `readDir(dirId)` — list children sorted by kind then name
+- `readFile(fileId)` — read content string from OPFS
+- `writeFile(parentId, name, content, fileType, opts?)` — create or update a file
+- `writeImage(parentId, name, spriteData)` — write a 2bpp image + register as sprite
+- `loadSprite(fileId)` — decode an image file into a `Sprite` and register it
+- `mkdir(parentId, name)` — create a directory (idempotent)
+- `rename(nodeId, newName)`, `move(nodeId, newParentId)`, `remove(nodeId)`
+- `setPosition(nodeId, position)` — set or clear the custom icon position for a node
+- `clearPositions(parentId)` — clear custom positions for all children of a directory
+- `resolvePath(path)` — walk a `/`-separated path from root
+- `findByName(parentId, name)` — find a child by name
+- `onChange(callback)` — subscribe to mutations (used to refresh desktop icons and Finder views)
+- `flush()` — force-write pending metadata to OPFS
+
+Metadata is persisted with a 500ms debounce — multiple rapid mutations batch into a single OPFS write.
+
+### Default File Tree
+
+On first boot (no `meta.json` exists), `populateDefaultFS()` creates:
+
+```
+/ (root)
+└── Mockintosh HD/              icon: "icon/hd"        (the volume)
+    ├── Desktop Folder/         (loose desktop items live here)
+    │   ├── Photo Booth         (app-shortcut → "photobooth")
+    │   ├── 1984.mp4            (app-shortcut → "video")
+    │   ├── Safari              (app-shortcut → "safari")
+    │   ├── App Store           (app-shortcut → "appstore")
+    │   └── App Builder         (app-shortcut → "appbuilder")
+    ├── Development/
+    │   ├── README.md           (text, loaded from /content/)
+    │   └── CONTRIBUTING.md     (text, loaded from /content/)
+    └── Applications/           (user-installed apps land here)
+```
+
+### Integration with the OS
+
+- **Finder** — a multi-window app (the only one currently) that owns the desktop and all folder windows, matching the original Macintosh architecture. The Finder is started at boot and never stopped. It manages a special `__desktop__` window (chromeless, fullscreen, behind all other windows) that renders volume icons and Desktop Folder contents on a checkerboard background, plus normal folder windows opened by double-clicking directories. Drag-and-drop uses a unified drag state in the Finder's app-level `AppBuilder`, so icons can be seamlessly dragged between the desktop and any folder window without handover logic. Dragging onto a folder or volume icon moves the item into that directory via `MockFS.move()`. The Finder's menubar includes "New Folder", "New Text File", and "Clean Up" actions. `mockFS.onChange()` triggers a re-render so FS changes appear immediately.
+- **FileViewer** — accepts a `fileId` prop and loads content asynchronously from MockFS.
+- **App Store** — reads installed apps from the `/Mockintosh HD/Applications` directory. `saveApp()` and `removeApp()` write through MockFS.
+- **App Builder** — "Publish" saves the generated app to MockFS via `saveApp()`.
+- **OSServices** — exposes `fs: MockFS` so any native app can access the file system.
+
+### Sync-Ready Design
+
+The metadata/content split is designed for a future cloud sync layer:
+
+- **Metadata** is a single JSON blob that can be diffed and merged
+- **Content** blobs are keyed by UUID — a sync engine only needs to upload/download changed IDs
+- `onChange()` provides a hook for a sync engine to observe mutations
+- `modifiedAt` timestamps enable conflict detection
 
 ## AI App Builder
 
@@ -299,7 +513,7 @@ The App Builder is a native app that lets users describe apps in natural languag
 4. The LLM system prompt includes the full Mockintosh App API reference from `API_REFERENCE.ts`
 5. Responses are **streamed** via Server-Sent Events — tokens appear in the chat as they arrive
 6. The generated code is returned and can be previewed (spawned in a sandboxed Worker)
-7. If the user clicks "Publish", the app is saved to OPFS and appears in the App Store
+7. If the user clicks "Publish", the app is saved to MockFS (under `/Mockintosh HD/Applications`) and appears in the App Store
 
 If no LLM API key is configured, the endpoint returns a sample counter app as a fallback.
 

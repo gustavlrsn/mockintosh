@@ -10,7 +10,7 @@ const VIDEO_WIDTH = 340;
 export const VideoPlayerApp: NativeApp = {
   id: "video",
   title: "1984.mp4",
-  icon: "/icons/MacFlim.png",
+  icon: "icon/MacFlim",
   defaultSize: { width: VIDEO_WIDTH, height: 260 },
   scrollable: false,
 

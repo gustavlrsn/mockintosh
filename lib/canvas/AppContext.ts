@@ -171,6 +171,44 @@ export class AppContext {
     );
   }
 
+  /**
+   * Bulk-copy a pre-dithered 1-bit pixel buffer (0=white, 1=black) into the
+   * BitCanvas using row-level Uint8Array.set(). Much faster than blitImageData
+   * for cases where the source is already in the native pixel format.
+   */
+  blit1bitPixels(
+    src: Uint8Array,
+    srcW: number,
+    srcH: number,
+    x: number,
+    y: number
+  ) {
+    const pixels = this.canvas.pixels;
+    const dstW = this.canvas.width;
+    const dstH = this.canvas.height;
+    const dx = this.ox + x;
+    const dy = this.oy + y - this.scrollOffsetY;
+
+    const clip = this.canvas.getClip();
+    const clipR = clip.x + clip.w;
+    const clipB = clip.y + clip.h;
+
+    const sx0 = Math.max(0, clip.x - dx, -dx);
+    const sy0 = Math.max(0, clip.y - dy, -dy);
+    const sx1 = Math.min(srcW, clipR - dx, dstW - dx);
+    const sy1 = Math.min(srcH, clipB - dy, dstH - dy);
+
+    if (sx0 >= sx1 || sy0 >= sy1) return;
+    const copyW = sx1 - sx0;
+
+    for (let sy = sy0; sy < sy1; sy++) {
+      pixels.set(
+        src.subarray(sy * srcW + sx0, sy * srcW + sx0 + copyW),
+        (dy + sy) * dstW + dx + sx0
+      );
+    }
+  }
+
   pushClip(x: number, y: number, w: number, h: number) {
     this.canvas.pushClip(this.ox + x, this.oy + y, w, h);
   }

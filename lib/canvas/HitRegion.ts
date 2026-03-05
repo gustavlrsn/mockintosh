@@ -105,6 +105,10 @@ export class HitRegionMap {
     }
   }
 
+  clearPressed(): void {
+    this.pressedId = null;
+  }
+
   private findById(id: string): HitRegion | undefined {
     for (let i = this.regions.length - 1; i >= 0; i--) {
       if (this.regions[i].id === id) return this.regions[i];

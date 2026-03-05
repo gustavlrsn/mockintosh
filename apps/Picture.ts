@@ -8,7 +8,7 @@ import { OSEvent } from "../lib/canvas/EventManager";
 export const PictureApp: NativeApp = {
   id: "picture",
   title: "Picture",
-  icon: "/icons/MacFlim.png",
+  icon: "icon/MacFlim",
   defaultSize: { width: 256, height: 256 },
   scrollable: true,
 

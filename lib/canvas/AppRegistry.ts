@@ -6,7 +6,13 @@ import { MenubarDefinition } from "./ui/drawMenubar";
 export interface WindowSize {
   width: number;
   height: number;
+  contentOriginX?: number;
+  contentOriginY?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Single-window app (existing interface, unchanged)
+// ---------------------------------------------------------------------------
 
 export interface NativeApp {
   id: string;
@@ -26,11 +32,8 @@ export interface NativeApp {
   onOpen?: (app: AppBuilder, props: any) => void;
   onClose?: (app: AppBuilder) => void;
   getMenubar?: (app: AppBuilder, props: any) => MenubarDefinition[];
-  /** For apps that need to report their content height for scrolling */
   getContentHeight?: (app: AppBuilder, props: any, size: WindowSize) => number;
-  /** For apps that need to report their content width for horizontal scrolling */
   getContentWidth?: (app: AppBuilder, props: any, size: WindowSize) => number;
-  /** Return an array of strings displayed in the info bar below the title bar */
   getInfoBar?: (app: AppBuilder, props: any) => string[] | null;
 }
 
@@ -41,12 +44,100 @@ export interface AppInstance {
   props: any;
 }
 
-/**
- * Registry for native (trusted) apps.
- */
+// ---------------------------------------------------------------------------
+// Multi-window app — one app instance can own many windows + background layers
+// ---------------------------------------------------------------------------
+
+export interface MultiWindowApp {
+  id: string;
+  title: string;
+  icon: string;
+
+  onStart?(app: AppBuilder): void;
+  onStop?(app: AppBuilder): void;
+
+  renderWindow(
+    app: AppBuilder,
+    win: AppBuilder,
+    ctx: AppContext,
+    windowId: string,
+    props: any
+  ): void;
+
+  onWindowEvent?(
+    app: AppBuilder,
+    win: AppBuilder,
+    event: OSEvent,
+    windowId: string,
+    props: any,
+    size: WindowSize
+  ): void;
+
+  onWindowOpen?(
+    app: AppBuilder,
+    win: AppBuilder,
+    windowId: string,
+    props: any
+  ): void;
+
+  onWindowClose?(app: AppBuilder, win: AppBuilder, windowId: string): void;
+
+  getMenubar?(
+    app: AppBuilder,
+    win: AppBuilder,
+    windowId: string,
+    props: any
+  ): MenubarDefinition[];
+
+  getContentHeight?(
+    app: AppBuilder,
+    win: AppBuilder,
+    windowId: string,
+    props: any,
+    size: WindowSize
+  ): number;
+
+  getContentWidth?(
+    app: AppBuilder,
+    win: AppBuilder,
+    windowId: string,
+    props: any,
+    size: WindowSize
+  ): number;
+
+  getInfoBar?(
+    app: AppBuilder,
+    win: AppBuilder,
+    windowId: string,
+    props: any
+  ): string[] | null;
+}
+
+interface MultiWindowAppState {
+  app: MultiWindowApp;
+  appBuilder: AppBuilder;
+  windowBuilders: Map<string, { builder: AppBuilder; props: any }>;
+}
+
+export interface MultiWindowInstance {
+  app: MultiWindowApp;
+  appBuilder: AppBuilder;
+  winBuilder: AppBuilder;
+  props: any;
+}
+
+// ---------------------------------------------------------------------------
+// Registry
+// ---------------------------------------------------------------------------
+
 export class AppRegistry {
   private apps: Map<string, NativeApp> = new Map();
   private instances: Map<string, AppInstance> = new Map();
+
+  private multiApps: Map<string, MultiWindowApp> = new Map();
+  private multiStates: Map<string, MultiWindowAppState> = new Map();
+
+  // --- Single-window apps (unchanged) ---
 
   register(app: NativeApp) {
     this.apps.set(app.id, app);
@@ -60,9 +151,6 @@ export class AppRegistry {
     return Array.from(this.apps.values());
   }
 
-  /**
-   * Create an app instance (when a window is opened).
-   */
   createInstance(
     appId: string,
     windowId: string,
@@ -86,9 +174,6 @@ export class AppRegistry {
     return this.instances.get(windowId);
   }
 
-  /**
-   * Destroy an app instance (when a window is closed).
-   */
   destroyInstance(windowId: string) {
     const instance = this.instances.get(windowId);
     if (instance) {
@@ -98,5 +183,125 @@ export class AppRegistry {
       instance.builder.destroy();
       this.instances.delete(windowId);
     }
+  }
+
+  // --- Multi-window apps ---
+
+  registerMultiWindow(app: MultiWindowApp) {
+    this.multiApps.set(app.id, app);
+  }
+
+  startApp(appId: string): AppBuilder | null {
+    const app = this.multiApps.get(appId);
+    if (!app) return null;
+    if (this.multiStates.has(appId)) {
+      return this.multiStates.get(appId)!.appBuilder;
+    }
+
+    const appBuilder = new AppBuilder();
+    const state: MultiWindowAppState = {
+      app,
+      appBuilder,
+      windowBuilders: new Map(),
+    };
+    this.multiStates.set(appId, state);
+
+    if (app.onStart) {
+      app.onStart(appBuilder);
+    }
+
+    return appBuilder;
+  }
+
+  stopApp(appId: string) {
+    const state = this.multiStates.get(appId);
+    if (!state) return;
+
+    for (const [winId, entry] of state.windowBuilders) {
+      if (state.app.onWindowClose) {
+        state.app.onWindowClose(state.appBuilder, entry.builder, winId);
+      }
+      entry.builder.destroy();
+    }
+    state.windowBuilders.clear();
+
+    if (state.app.onStop) {
+      state.app.onStop(state.appBuilder);
+    }
+    state.appBuilder.destroy();
+    this.multiStates.delete(appId);
+  }
+
+  createWindowForApp(
+    appId: string,
+    windowId: string,
+    props: any = {}
+  ): MultiWindowInstance | null {
+    const state = this.multiStates.get(appId);
+    if (!state) return null;
+
+    const existing = state.windowBuilders.get(windowId);
+    if (existing) {
+      return {
+        app: state.app,
+        appBuilder: state.appBuilder,
+        winBuilder: existing.builder,
+        props: existing.props,
+      };
+    }
+
+    const winBuilder = new AppBuilder();
+    state.windowBuilders.set(windowId, { builder: winBuilder, props });
+
+    if (state.app.onWindowOpen) {
+      state.app.onWindowOpen(state.appBuilder, winBuilder, windowId, props);
+    }
+
+    return {
+      app: state.app,
+      appBuilder: state.appBuilder,
+      winBuilder,
+      props,
+    };
+  }
+
+  destroyWindowForApp(appId: string, windowId: string) {
+    const state = this.multiStates.get(appId);
+    if (!state) return;
+
+    const entry = state.windowBuilders.get(windowId);
+    if (!entry) return;
+
+    if (state.app.onWindowClose) {
+      state.app.onWindowClose(state.appBuilder, entry.builder, windowId);
+    }
+    entry.builder.destroy();
+    state.windowBuilders.delete(windowId);
+  }
+
+  getMultiWindowInstance(
+    appId: string,
+    windowId: string
+  ): MultiWindowInstance | null {
+    const state = this.multiStates.get(appId);
+    if (!state) return null;
+
+    const entry = state.windowBuilders.get(windowId);
+    if (!entry) return null;
+
+    return {
+      app: state.app,
+      appBuilder: state.appBuilder,
+      winBuilder: entry.builder,
+      props: entry.props,
+    };
+  }
+
+  getMultiWindowApp(appId: string): MultiWindowAppState | undefined {
+    return this.multiStates.get(appId);
+  }
+
+  isMultiWindowApp(appId: string): boolean {
+    return this.multiApps.has(appId);
   }
 }

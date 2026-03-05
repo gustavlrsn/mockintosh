@@ -1,8 +1,32 @@
 import { Sprite, BLACK, WHITE } from "./BitCanvas";
 
 /**
+ * Decode a base64-encoded 2bpp sprite.
+ * Pixel encoding: 00=transparent, 01=white, 10=black, 11=reserved.
+ * 4 pixels per byte, MSB-first.
+ */
+export function defineSprite(
+  width: number,
+  height: number,
+  b64: string
+): Sprite {
+  const raw = atob(b64);
+  const total = width * height;
+  const data = new Uint8Array(total);
+  const mask = new Uint8Array(total);
+  for (let i = 0; i < total; i++) {
+    const byteIdx = i >> 2;
+    const shift = 6 - (i & 3) * 2;
+    const val = (raw.charCodeAt(byteIdx) >> shift) & 0x03;
+    data[i] = val === 2 ? BLACK : WHITE;
+    mask[i] = val === 0 ? 0 : 1;
+  }
+  return { width, height, data, mask };
+}
+
+/**
  * Pre-loads images and converts them to 1-bit Sprite data.
- * All sprites are cached by their source URL.
+ * Sprites can be registered synchronously (inline data) or loaded async (PNG URLs).
  */
 export class SpriteRegistry {
   private cache: Map<string, Sprite> = new Map();
@@ -31,7 +55,21 @@ export class SpriteRegistry {
     return this.cache.has(src);
   }
 
-  private async _load(src: string, forcedWidth?: number, forcedHeight?: number): Promise<Sprite> {
+  register(key: string, sprite: Sprite): void {
+    this.cache.set(key, sprite);
+  }
+
+  registerAll(sprites: Record<string, Sprite>): void {
+    for (const [key, sprite] of Object.entries(sprites)) {
+      this.cache.set(key, sprite);
+    }
+  }
+
+  private async _load(
+    src: string,
+    forcedWidth?: number,
+    forcedHeight?: number
+  ): Promise<Sprite> {
     const resp = await fetch(src);
     const blob = await resp.blob();
     const bmp = await createImageBitmap(blob);
@@ -76,7 +114,12 @@ export class SpriteRegistry {
   /**
    * Create a Sprite from raw 1-bit data (for programmatic sprites like cursors).
    */
-  static fromBits(width: number, height: number, bits: number[], hasMask = false): Sprite {
+  static fromBits(
+    width: number,
+    height: number,
+    bits: number[],
+    hasMask = false
+  ): Sprite {
     const data = new Uint8Array(width * height);
     const mask = new Uint8Array(width * height);
     if (hasMask) {

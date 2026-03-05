@@ -5,6 +5,7 @@ import { AppRegistry } from "../lib/canvas/AppRegistry";
 import { EventManager, OSEvent } from "../lib/canvas/EventManager";
 import { WindowManager, TITLE_BAR_HEIGHT } from "../lib/canvas/WindowManager";
 import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
+import { registerAllSprites } from "../lib/canvas/sprites";
 import { HitRegionMap } from "../lib/canvas/HitRegion";
 import { loadFonts } from "../lib/canvas/fontAdapter";
 import { createOSServices } from "../lib/canvas/OSServices";
@@ -14,17 +15,22 @@ import {
   drawMenubar,
   MENUBAR_HEIGHT,
 } from "../lib/canvas/ui/drawMenubar";
-import {
-  DesktopIcon,
-  createDesktopState,
-  drawDesktop,
-} from "../lib/canvas/ui/drawDesktop";
-import { createDialogState, drawDialog } from "../lib/canvas/ui/drawDialog";
 import { TEXT_CURSOR_BLINK_MS } from "../lib/canvas/ui/TextInput";
 import { AppHost, SandboxedApp } from "../lib/canvas/sandbox/AppHost";
+import { MockFS, ROOT_ID, FSFile } from "../lib/canvas/fs/MockFS";
+import { OPFSBackend } from "../lib/canvas/fs/OPFSBackend";
 
 import { SplashscreenApp, setSplashSpriteRegistry } from "../apps/Splashscreen";
-import { FinderApp } from "../apps/Finder";
+import {
+  FinderApp,
+  FinderServices,
+  FinderWindowInfo,
+  DESKTOP_WINDOW_ID,
+  finderIsDragging,
+  finderHandleMouseMove,
+  finderHandleMouseUp,
+  finderRenderDragGhost,
+} from "../apps/Finder";
 import { FileViewerApp } from "../apps/FileViewer";
 import { AboutApp } from "../apps/About";
 import { ControlPanelApp } from "../apps/ControlPanel";
@@ -34,6 +40,7 @@ import { SafariApp } from "../apps/Safari";
 import { PictureApp } from "../apps/Picture";
 import { AppStoreApp } from "../apps/AppStore";
 import { AppBuilderApp } from "../apps/AppBuilderApp";
+import { DialogApp, computeDialogSize } from "../apps/Dialog";
 
 import { resolution } from "../lib/config";
 import getDefaultPosition from "../utils/getDefaultPosition";
@@ -42,61 +49,6 @@ import pkg from "../package.json";
 
 const version = pkg.version;
 const BOOT_TIME = 1337;
-
-const PRELOAD_SPRITES = [
-  "/icons/happy.png",
-  "/icons/hd.png",
-  "/icons/folder.png",
-  "/icons/file.png",
-  "/icons/photobooth-smr-32.png",
-  "/icons/MacFlim.png",
-  "/icons/safari.png",
-  "/icons/computer.png",
-  "/icons/appstore-smr-32x32.png",
-  "/user2.png",
-  "/eaten_apple.png",
-  "/cursors/default-1x.png",
-  "/microdesktop-disk.png",
-];
-
-const finderMenubar: MenubarDefinition[] = [
-  {
-    label: "File",
-    items: [
-      { label: "New Folder", shortcut: "⌘N", disabled: true },
-      { label: "Open", shortcut: "⌘O", disabled: true },
-      { label: "Print", disabled: true },
-      { label: "Close", disabled: true },
-    ],
-  },
-  {
-    label: "Edit",
-    items: [
-      { label: "Undo", shortcut: "⌘Z", disabled: true },
-      { label: "Cut", shortcut: "⌘X", disabled: true },
-      { label: "Copy", shortcut: "⌘C", disabled: true },
-      { label: "Paste", shortcut: "⌘V", disabled: true },
-    ],
-  },
-  {
-    label: "View",
-    items: [
-      { label: "By Icon", disabled: true },
-      { label: "By Name", disabled: true },
-      { label: "By Date", disabled: true },
-    ],
-  },
-  {
-    label: "Special",
-    items: [
-      { label: "Clean Up Desktop", disabled: true },
-      { label: "Empty Trash", disabled: true },
-      { type: "separator" },
-      { label: "Restart", disabled: true },
-      { label: "Shut Down", disabled: true },
-    ],
-  },
-];
 
 const appTypeMap: Record<string, string> = {
   FINDER: "finder",
@@ -119,54 +71,62 @@ async function loadMarkdownFile(name: string): Promise<string> {
   }
 }
 
-async function buildDesktopFiles(): Promise<DesktopIcon[]> {
+async function populateDefaultFS(fs: MockFS): Promise<void> {
+  const root = fs.readDir(ROOT_ID);
+  if (root.length > 0) {
+    ensureDesktopFolder(fs);
+    return;
+  }
+
   const [readme, contributing] = await Promise.all([
     loadMarkdownFile("README.md"),
     loadMarkdownFile("CONTRIBUTING.md"),
   ]);
 
-  return [
+  const hd = fs.mkdir(ROOT_ID, "Mockintosh HD");
+  hd.icon = "icon/hd";
+
+  const dev = fs.mkdir(hd.id, "Development");
+  await fs.writeFile(dev.id, "README.md", readme, "text");
+  await fs.writeFile(dev.id, "CONTRIBUTING.md", contributing, "text");
+
+  fs.mkdir(hd.id, "Applications");
+
+  const desktop = fs.mkdir(hd.id, "Desktop Folder");
+
+  const shortcuts: Array<{
+    name: string;
+    appId: string;
+    icon: string;
+  }> = [
     {
-      title: "Mockintosh HD",
-      type: "FINDER",
-      img: "/icons/hd.png",
-      payload: {
-        icons: [
-          {
-            title: "Development",
-            type: "FINDER",
-            img: "/icons/folder.png",
-            payload: {
-              icons: [
-                {
-                  title: "README.md",
-                  type: "FILE",
-                  img: "/icons/file.png",
-                  payload: { content: readme },
-                },
-                {
-                  title: "CONTRIBUTING.md",
-                  type: "FILE",
-                  img: "/icons/file.png",
-                  payload: { content: contributing },
-                },
-              ],
-            },
-          },
-        ],
-      },
+      name: "Photo Booth",
+      appId: "photobooth",
+      icon: "icon/photobooth-smr-32",
     },
-    {
-      title: "Photo Booth",
-      type: "PHOTO_BOOTH",
-      img: "/icons/photobooth-smr-32.png",
-      defaultPosition: { y: 5, x: 45 },
-    },
-    { title: "1984.mp4", type: "VIDEO", img: "/icons/MacFlim.png" },
-    { title: "Safari", type: "SAFARI", img: "/icons/safari.png" },
-    { title: "App Store", type: "appstore", img: "/icons/safari.png" },
-    { title: "App Builder", type: "appbuilder", img: "/icons/computer.png" },
+    { name: "1984.mp4", appId: "video", icon: "icon/MacFlim" },
+    { name: "Safari", appId: "safari", icon: "icon/safari" },
+    { name: "App Store", appId: "appstore", icon: "icon/appstore-smr-32x32" },
+    { name: "App Builder", appId: "appbuilder", icon: "icon/computer" },
   ];
+
+  for (const s of shortcuts) {
+    await fs.writeFile(
+      desktop.id,
+      s.name,
+      JSON.stringify({ appId: s.appId }),
+      "app-shortcut",
+      { icon: s.icon }
+    );
+  }
+
+  await fs.flush();
+}
+
+function ensureDesktopFolder(fs: MockFS): void {
+  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
+  if (!hd) return;
+  fs.mkdir(hd.id, "Desktop Folder");
 }
 
 async function main() {
@@ -191,9 +151,9 @@ async function main() {
     menubarHeight: MENUBAR_HEIGHT,
   });
 
+  // Register single-window apps
   [
     SplashscreenApp,
-    FinderApp,
     FileViewerApp,
     AboutApp,
     ControlPanelApp,
@@ -203,17 +163,22 @@ async function main() {
     PictureApp,
     AppStoreApp,
     AppBuilderApp,
+    DialogApp,
   ].forEach((a) => appRegistry.register(a));
+
+  // Register multi-window apps
+  appRegistry.registerMultiWindow(FinderApp);
 
   setSplashSpriteRegistry(sprites);
 
   let menubarState = createMenubarState([]);
-  let desktopState = createDesktopState([]);
-  let dialogState = createDialogState();
   let showingSplashscreen = true;
   let cursorX = 0;
   let cursorY = 0;
   let zoom = 1;
+  let mockFS!: MockFS;
+  let finderAppBuilder!: AppBuilder;
+  let finderServices!: FinderServices;
 
   function updateZoom() {
     const ww = window.innerWidth;
@@ -235,25 +200,59 @@ async function main() {
     openWindow: (appId, props) => openWindow(appId, undefined, props),
     closeWindow: (windowId) => {
       windowManager.closeWindow(windowId);
+      if (appRegistry.isMultiWindowApp("finder")) {
+        appRegistry.destroyWindowForApp("finder", windowId);
+      }
       appRegistry.destroyInstance(windowId);
       scheduleRender();
     },
     showDialog: (options) => {
       return new Promise((resolve) => {
-        dialogState.def = {
+        const dialogId = "__dialog__";
+        const size = computeDialogSize(options.message, options.showInput);
+        const dialogProps = {
           message: options.message,
-          buttons: (options.buttons ?? ["OK"]).map((label) => ({
-            label,
-            onClick: () => {
-              const val = options.showInput ? dialogState.inputValue : label;
-              dialogState.def = null;
-              resolve(val);
-              scheduleRender();
-            },
-          })),
+          buttons: options.buttons ?? ["OK"],
           showInput: options.showInput,
+          inputDefault: options.inputDefault,
+          _resolve: (val: string | null) => {
+            windowManager.closeWindow(dialogId);
+            appRegistry.destroyInstance(dialogId);
+            updateMenubar();
+            scheduleRender();
+            resolve(val);
+          },
         };
-        dialogState.inputValue = options.inputDefault ?? "";
+
+        const instance = appRegistry.createInstance("__dialog__", dialogId, {
+          ...dialogProps,
+          _sprites: sprites,
+          _os: osServices,
+        });
+        if (instance) {
+          instance.builder.setRenderFunction(scheduleRender);
+        }
+
+        windowManager.openWindow({
+          id: dialogId,
+          title: "",
+          x: Math.floor((resolution.width - size.width) / 2),
+          y: Math.floor((resolution.height - size.height) / 2),
+          width: size.width,
+          height: size.height,
+          contentHeight: size.height,
+          contentWidth: size.width,
+          appId: "__dialog__",
+          props: dialogProps,
+          scrollable: false,
+          resizable: false,
+          minWidth: size.width,
+          minHeight: size.height,
+          modal: true,
+          chromeless: true,
+        });
+
+        updateMenubar();
         scheduleRender();
       });
     },
@@ -261,6 +260,48 @@ async function main() {
   });
 
   const appHost = new AppHost(sprites, osServices, scheduleRender);
+
+  function openFinderWindow(title: string, directoryId: string) {
+    const windowId = title;
+
+    const existing = windowManager.windows.find((w) => w.id === windowId);
+    if (existing) {
+      windowManager.bringToFront(windowId);
+      scheduleRender();
+      return;
+    }
+
+    const pos = getDefaultPosition(windowManager.windows);
+    const props = {
+      directoryId,
+      _finderServices: finderServices,
+    };
+
+    const inst = appRegistry.createWindowForApp("finder", windowId, props);
+    if (inst) {
+      inst.winBuilder.setRenderFunction(scheduleRender);
+    }
+
+    windowManager.openWindow({
+      id: windowId,
+      title,
+      x: pos.x ?? 20,
+      y: (pos.y ?? 30) + MENUBAR_HEIGHT,
+      width: 340,
+      height: 180,
+      contentHeight: 180,
+      contentWidth: 340,
+      appId: "finder",
+      props,
+      scrollable: true,
+      resizable: true,
+      minWidth: 160,
+      minHeight: 80,
+    });
+
+    updateMenubar();
+    scheduleRender();
+  }
 
   function openWindow(
     appId: string,
@@ -284,6 +325,8 @@ async function main() {
       ...props,
       _sprites: sprites,
       _os: osServices,
+      _fs: mockFS,
+      _openFSNode: (nodeId: string) => openFSNode(nodeId),
       _openWindow: (type: string, t: string, payload: any, defPos: any) => {
         const mappedId = appTypeMap[type] ?? type;
         openWindow(mappedId, t, payload, defPos);
@@ -336,17 +379,164 @@ async function main() {
     scheduleRender();
   }
 
+  async function openFSNode(nodeId: string) {
+    const node = mockFS.getNode(nodeId);
+    if (!node) return;
+
+    if (node.kind === "directory") {
+      openFinderWindow(node.name, node.id);
+      return;
+    }
+
+    const file = node as FSFile;
+
+    if (file.fileType === "app-shortcut") {
+      const raw = await mockFS.readFile(file.id);
+      if (raw) {
+        try {
+          const { appId } = JSON.parse(raw);
+          openWindow(appId);
+        } catch {}
+      }
+      return;
+    }
+
+    if (file.fileType === "app") {
+      const raw = await mockFS.readFile(file.id);
+      if (raw) {
+        try {
+          const appData = JSON.parse(raw);
+          const pos = getDefaultPosition(windowManager.windows);
+          const winId = appData.title ?? "User App";
+          windowManager.openWindow({
+            id: winId,
+            title: appData.title ?? "User App",
+            x: pos.x ?? 40,
+            y: pos.y ?? 40,
+            width: appData.defaultSize?.width ?? 200,
+            height: appData.defaultSize?.height ?? 150,
+            contentHeight: appData.defaultSize?.height ?? 150,
+            contentWidth: appData.defaultSize?.width ?? 200,
+            appId: "__sandboxed__",
+            props: {},
+            scrollable: false,
+            resizable: false,
+            minWidth: 100,
+            minHeight: 60,
+          });
+          appHost.spawn(winId, appData);
+          scheduleRender();
+        } catch {}
+      }
+      return;
+    }
+
+    if (file.fileType === "text") {
+      openWindow("file", file.name, { fileId: file.id, _fs: mockFS });
+      return;
+    }
+
+    if (file.fileType === "image") {
+      const sprite = await mockFS.loadSprite(file.id);
+      if (sprite) {
+        openWindow("picture", file.name, {
+          src: `fs:${file.id}`,
+          title: file.name,
+        });
+      }
+      return;
+    }
+  }
+
   function updateMenubar() {
     const sysMenus = getSystemMenubar();
     const active = windowManager.getActiveWindow();
-    let appMenus: MenubarDefinition[] = finderMenubar;
+    let appMenus: MenubarDefinition[] | undefined;
+
     if (active) {
-      const instance = appRegistry.getInstance(active.id);
-      if (instance?.app.getMenubar) {
-        appMenus = instance.app.getMenubar(instance.builder, instance.props);
+      // Check if this is a multi-window app (Finder)
+      if (active.appId === "finder") {
+        const mwInst = appRegistry.getMultiWindowInstance("finder", active.id);
+        if (mwInst?.app.getMenubar) {
+          mwInst.appBuilder.resetForRender();
+          mwInst.winBuilder.resetForRender();
+          appMenus = mwInst.app.getMenubar(
+            mwInst.appBuilder,
+            mwInst.winBuilder,
+            active.id,
+            mwInst.props
+          );
+        }
+      } else {
+        const instance = appRegistry.getInstance(active.id);
+        if (instance?.app.getMenubar) {
+          appMenus = instance.app.getMenubar(instance.builder, instance.props);
+        }
       }
     }
+
+    // Fallback to desktop Finder menubar
+    if (!appMenus) {
+      const desktopInst = appRegistry.getMultiWindowInstance(
+        "finder",
+        DESKTOP_WINDOW_ID
+      );
+      if (desktopInst?.app.getMenubar) {
+        desktopInst.appBuilder.resetForRender();
+        desktopInst.winBuilder.resetForRender();
+        appMenus = desktopInst.app.getMenubar(
+          desktopInst.appBuilder,
+          desktopInst.winBuilder,
+          DESKTOP_WINDOW_ID,
+          desktopInst.props
+        );
+      }
+    }
+
+    if (!appMenus) {
+      appMenus = getMinimalDesktopMenubar();
+    }
+
     menubarState.menus = [...sysMenus, ...appMenus];
+  }
+
+  function getMinimalDesktopMenubar(): MenubarDefinition[] {
+    return [
+      {
+        label: "File",
+        items: [
+          { label: "Open", shortcut: "⌘O", disabled: true },
+          { label: "Close", disabled: true },
+        ],
+      },
+      {
+        label: "Edit",
+        items: [
+          { label: "Undo", shortcut: "⌘Z", disabled: true },
+          { label: "Cut", shortcut: "⌘X", disabled: true },
+          { label: "Copy", shortcut: "⌘C", disabled: true },
+          { label: "Paste", shortcut: "⌘V", disabled: true },
+        ],
+      },
+      {
+        label: "View",
+        items: [
+          { label: "By Icon", disabled: true },
+          { label: "By Name", disabled: true },
+          { label: "By Date", disabled: true },
+        ],
+      },
+      {
+        label: "Special",
+        items: [
+          { label: "Clean Up Desktop", disabled: true },
+          { label: "Empty Trash", disabled: true },
+          { type: "separator" as const },
+          { label: "Restart", disabled: true },
+          { label: "Shut Down", disabled: true },
+        ],
+      },
+    ];
   }
 
   function getSystemMenubar(): MenubarDefinition[] {
@@ -368,8 +558,6 @@ async function main() {
     ];
   }
 
-  updateMenubar();
-
   function dispatchToApp(windowId: string, event: OSEvent) {
     if (appHost.isRunning(windowId)) {
       appHost.sendEvent(windowId, {
@@ -381,21 +569,52 @@ async function main() {
       });
       return;
     }
+
+    // Multi-window app (Finder)
+    const win = windowManager.windows.find((w) => w.id === windowId);
+    if (win && appRegistry.isMultiWindowApp(win.appId)) {
+      const mwInst = appRegistry.getMultiWindowInstance(win.appId, windowId);
+      if (mwInst?.app.onWindowEvent) {
+        mwInst.appBuilder.resetForRender();
+        mwInst.winBuilder.resetForRender();
+        const contentRect = windowManager.getContentRect(win);
+        const size = {
+          width: win.width,
+          height: win.height,
+          contentOriginX: contentRect.x,
+          contentOriginY: contentRect.y,
+        };
+        mwInst.app.onWindowEvent(
+          mwInst.appBuilder,
+          mwInst.winBuilder,
+          event,
+          windowId,
+          mwInst.props,
+          size
+        );
+      }
+      return;
+    }
+
+    // Single-window app
     const instance = appRegistry.getInstance(windowId);
     if (instance?.app.onEvent) {
-      const win = windowManager.windows.find((w) => w.id === windowId);
-      const size = win
-        ? { width: win.width, height: win.height }
+      const winState = windowManager.windows.find((w) => w.id === windowId);
+      const size = winState
+        ? { width: winState.width, height: winState.height }
         : instance.app.defaultSize;
       instance.builder.resetForRender();
       instance.app.onEvent(instance.builder, event, instance.props, size);
     }
   }
 
-  // Window chrome callbacks (shared with hit regions registered during render)
+  // Window chrome callbacks
   const windowCallbacks = {
     onClose: (id: string) => {
       windowManager.closeWindow(id);
+      if (appRegistry.isMultiWindowApp("finder")) {
+        appRegistry.destroyWindowForApp("finder", id);
+      }
       appRegistry.destroyInstance(id);
       updateMenubar();
       scheduleRender();
@@ -432,15 +651,7 @@ async function main() {
       return;
     }
 
-    if (dialogState.def) {
-      if (event.type === "mouseDown") {
-        const btns = dialogState.def.buttons;
-        if (btns.length > 0) btns[0].onClick();
-      }
-      return;
-    }
-
-    // Drag/resize handling takes priority (continuous mouse tracking)
+    // Window drag/resize takes priority
     if (windowManager.isDraggingOrResizing()) {
       if (event.type === "mouseMove") {
         windowManager.handleMouseMove(event.x!, event.y!);
@@ -454,25 +665,54 @@ async function main() {
       }
     }
 
+    // Finder drag capture: when a Finder drag is active, route mouse events to Finder
+    if (finderAppBuilder && finderIsDragging(finderAppBuilder)) {
+      if (event.type === "mouseMove") {
+        finderAppBuilder.resetForRender();
+        finderHandleMouseMove(
+          finderAppBuilder,
+          event.x!,
+          event.y!,
+          finderServices
+        );
+        scheduleRender();
+        return;
+      }
+      if (event.type === "mouseUp") {
+        finderAppBuilder.resetForRender();
+        finderHandleMouseUp(
+          finderAppBuilder,
+          event.x!,
+          event.y!,
+          finderServices
+        );
+        hitRegions.clearPressed();
+        scheduleRender();
+        return;
+      }
+    }
+
     // All other events dispatch through hit regions
     if (event.type === "mouseMove") {
       hitRegions.handleMouseMove(event.x!, event.y!);
 
-      // Also dispatch mouseMove to active window content for hover effects
       const active = windowManager.getActiveWindow();
-      if (active) {
+      if (active && active.id !== DESKTOP_WINDOW_ID) {
         const contentRect = windowManager.getContentRect(active);
-        if (
+        const local = windowManager.toContentLocal(active, event.x!, event.y!);
+        const isInside =
           event.x! >= contentRect.x &&
           event.x! < contentRect.x + contentRect.w &&
           event.y! >= contentRect.y &&
-          event.y! < contentRect.y + contentRect.h
-        ) {
-          const local = windowManager.toContentLocal(
-            active,
-            event.x!,
-            event.y!
-          );
+          event.y! < contentRect.y + contentRect.h;
+
+        if (isInside) {
+          dispatchToApp(active.id, {
+            type: "mouseMove",
+            x: local.x,
+            y: local.y,
+          });
+        } else if (active.appId === "finder") {
           dispatchToApp(active.id, {
             type: "mouseMove",
             x: local.x,
@@ -485,9 +725,7 @@ async function main() {
     }
 
     if (event.type === "mouseDown") {
-      // Close open menu if clicking outside menubar/dropdown
       if (menubarState.openMenuIndex !== null) {
-        // Check if click is on a menubar or dropdown region
         const hit = hitRegions.hitTest(event.x!, event.y!);
         const isMenubarHit =
           hit !== null &&
@@ -506,7 +744,6 @@ async function main() {
     }
 
     if (event.type === "mouseUp") {
-      // If a menu is open and an item is highlighted, handle it via hit regions
       hitRegions.handleMouseUp(event.x!, event.y!);
       scheduleRender();
       return;
@@ -523,6 +760,7 @@ async function main() {
         .slice()
         .reverse()
         .find((w) => {
+          if (w.id === DESKTOP_WINDOW_ID) return false;
           const headerH = TITLE_BAR_HEIGHT + (w.infoBar ? 20 : 0);
           const totalW = w.width + 1;
           const totalH = headerH + w.height + 1;
@@ -542,7 +780,9 @@ async function main() {
 
     if (event.type === "keyDown" || event.type === "keyUp") {
       const active = windowManager.getActiveWindow();
-      if (active) dispatchToApp(active.id, event);
+      if (active && active.id !== DESKTOP_WINDOW_ID) {
+        dispatchToApp(active.id, event);
+      }
       scheduleRender();
     }
   });
@@ -559,8 +799,6 @@ async function main() {
   function render() {
     renderScheduled = false;
     bitCanvas.clear(WHITE);
-
-    // Rebuild hit regions each frame
     hitRegions.clear();
 
     if (showingSplashscreen) {
@@ -571,48 +809,50 @@ async function main() {
         resolution.height,
         "checkers"
       );
-      const sprite = sprites.get("/icons/happy.png");
+      const sprite = sprites.get("icon/happy");
       if (sprite)
         bitCanvas.blit(
           sprite,
           Math.floor((resolution.width - sprite.width) / 2),
           Math.floor((resolution.height - sprite.height) / 2)
         );
-      const cur = sprites.get("/cursors/default-1x.png");
+      const cur = sprites.get("cursor/default-1x");
       if (cur) bitCanvas.blit(cur, cursorX, cursorY);
       bitCanvas.flush(ctx2d);
       return;
     }
 
-    desktopState.openWindowTitles = new Set(
-      windowManager.windows.map((w) => w.title)
-    );
-    drawDesktop(
-      bitCanvas,
-      desktopState,
-      sprites,
-      resolution.width,
-      resolution.height,
-      MENUBAR_HEIGHT,
-      hitRegions,
-      {
-        onIconClick: (index) => {
-          desktopState.selectedIndex = index;
-          scheduleRender();
-        },
-        onIconDoubleClick: (index) => {
-          const icon = desktopState.icons[index];
-          const mappedId = appTypeMap[icon.type] ?? icon.type;
-          openWindow(mappedId, icon.title, icon.payload, icon.defaultPosition);
-        },
-        onBackgroundClick: () => {
-          desktopState.selectedIndex = null;
-          scheduleRender();
-        },
-      }
-    );
-
+    // Update content heights / info bars for all windows
     for (const win of windowManager.windows) {
+      if (win.appId === "finder") {
+        const mwInst = appRegistry.getMultiWindowInstance("finder", win.id);
+        if (mwInst) {
+          if (mwInst.app.getContentHeight) {
+            mwInst.appBuilder.resetForRender();
+            mwInst.winBuilder.resetForRender();
+            win.contentHeight = mwInst.app.getContentHeight(
+              mwInst.appBuilder,
+              mwInst.winBuilder,
+              win.id,
+              mwInst.props,
+              { width: win.width, height: win.height }
+            );
+          }
+          if (mwInst.app.getInfoBar) {
+            mwInst.appBuilder.resetForRender();
+            mwInst.winBuilder.resetForRender();
+            win.infoBar =
+              mwInst.app.getInfoBar(
+                mwInst.appBuilder,
+                mwInst.winBuilder,
+                win.id,
+                mwInst.props
+              ) ?? undefined;
+          }
+        }
+        continue;
+      }
+
       const instance = appRegistry.getInstance(win.id);
       if (instance?.app.getContentHeight) {
         instance.builder.resetForRender();
@@ -638,7 +878,74 @@ async function main() {
       }
     }
 
+    // Draw all windows (desktop is the first, then folder windows + app windows)
     for (const win of windowManager.windows) {
+      // Desktop window is chromeless and doesn't go through drawWindowChrome
+      if (win.id === DESKTOP_WINDOW_ID) {
+        const mwInst = appRegistry.getMultiWindowInstance("finder", win.id);
+        if (mwInst) {
+          const desktopCtx = new AppContext(
+            bitCanvas,
+            0,
+            MENUBAR_HEIGHT,
+            resolution.width,
+            resolution.height - MENUBAR_HEIGHT,
+            0,
+            hitRegions
+          );
+          mwInst.appBuilder.resetForRender();
+          mwInst.winBuilder.resetForRender();
+          mwInst.app.renderWindow(
+            mwInst.appBuilder,
+            mwInst.winBuilder,
+            desktopCtx,
+            DESKTOP_WINDOW_ID,
+            mwInst.props
+          );
+          mwInst.winBuilder.flushEffects();
+
+          // Register desktop background hit region for clicks on empty space
+          hitRegions.add({
+            id: "desktop-bg",
+            x: 0,
+            y: MENUBAR_HEIGHT,
+            w: resolution.width,
+            h: resolution.height - MENUBAR_HEIGHT,
+            onMouseDown: (_lx: number, _ly: number) => {
+              dispatchToApp(DESKTOP_WINDOW_ID, {
+                type: "mouseDown",
+                x: _lx,
+                y: _ly + MENUBAR_HEIGHT,
+              });
+            },
+            onMouseUp: (_lx: number, _ly: number) => {
+              dispatchToApp(DESKTOP_WINDOW_ID, {
+                type: "mouseUp",
+                x: _lx,
+                y: _ly + MENUBAR_HEIGHT,
+              });
+            },
+            onDoubleClick: (_lx: number, _ly: number) => {
+              dispatchToApp(DESKTOP_WINDOW_ID, {
+                type: "doubleClick",
+                x: _lx,
+                y: _ly + MENUBAR_HEIGHT,
+              });
+            },
+            onDrag: (sx: number, sy: number) => {
+              dispatchToApp(DESKTOP_WINDOW_ID, {
+                type: "mouseMove",
+                x: sx,
+                y: sy,
+              });
+            },
+          });
+
+          desktopCtx.release();
+        }
+        continue;
+      }
+
       windowManager.drawWindowChrome(
         bitCanvas,
         win,
@@ -655,6 +962,20 @@ async function main() {
 
       if (appHost.isRunning(win.id)) {
         appHost.executeCommands(win.id, contentCtx);
+      } else if (win.appId === "finder") {
+        const mwInst = appRegistry.getMultiWindowInstance("finder", win.id);
+        if (mwInst) {
+          mwInst.appBuilder.resetForRender();
+          mwInst.winBuilder.resetForRender();
+          mwInst.app.renderWindow(
+            mwInst.appBuilder,
+            mwInst.winBuilder,
+            contentCtx,
+            win.id,
+            mwInst.props
+          );
+          mwInst.winBuilder.flushEffects();
+        }
       } else {
         const instance = appRegistry.getInstance(win.id);
         if (instance) {
@@ -667,38 +988,118 @@ async function main() {
       contentCtx.release();
     }
 
+    // Draw drag ghost on top of everything (except menubar and cursor)
+    if (finderAppBuilder) {
+      finderAppBuilder.resetForRender();
+      finderRenderDragGhost(finderAppBuilder, bitCanvas, finderServices);
+    }
+
     drawMenubar(
       bitCanvas,
       menubarState,
-      sprites.get("/eaten_apple.png"),
+      sprites.get("eaten_apple"),
       resolution.width,
       hitRegions,
       scheduleRender
     );
 
-    if (dialogState.def)
-      drawDialog(bitCanvas, dialogState, resolution.width, resolution.height);
-
-    const cur = sprites.get("/cursors/default-1x.png");
+    const cur = sprites.get("cursor/default-1x");
     if (cur) bitCanvas.blit(cur, cursorX, cursorY);
 
     bitCanvas.flush(ctx2d);
   }
 
   // --- Boot ---
-  await loadFonts();
-  await sprites.preload(PRELOAD_SPRITES);
-
-  const files = await buildDesktopFiles();
-  desktopState = createDesktopState(files);
-
-  setInterval(scheduleRender, TEXT_CURSOR_BLINK_MS);
-
   scheduleRender();
-  setTimeout(() => {
-    showingSplashscreen = false;
-    scheduleRender();
-  }, BOOT_TIME);
+
+  const bootStart = Date.now();
+
+  await loadFonts();
+  registerAllSprites(sprites);
+
+  const fsBackend = new OPFSBackend();
+  mockFS = new MockFS(fsBackend, sprites);
+  await mockFS.init();
+  await populateDefaultFS(mockFS);
+
+  osServices.fs = mockFS;
+
+  // Start the Finder as a multi-window app
+  finderAppBuilder = appRegistry.startApp("finder")!;
+  finderAppBuilder.setRenderFunction(scheduleRender);
+
+  finderServices = {
+    sprites,
+    fs: mockFS,
+    os: osServices,
+    openFSNode: (nodeId: string) => openFSNode(nodeId),
+    scheduleRender,
+    screenWidth: resolution.width,
+    screenHeight: resolution.height,
+    menubarHeight: MENUBAR_HEIGHT,
+    getOpenFolderWindows: (): FinderWindowInfo[] => {
+      const result: FinderWindowInfo[] = [];
+      for (const win of windowManager.windows) {
+        if (win.id === DESKTOP_WINDOW_ID) continue;
+        if (win.appId !== "finder") continue;
+        const mwInst = appRegistry.getMultiWindowInstance("finder", win.id);
+        if (!mwInst) continue;
+        const directoryId = mwInst.props.directoryId;
+        if (!directoryId) continue;
+        const contentRect = windowManager.getContentRect(win);
+        result.push({
+          windowId: win.id,
+          directoryId,
+          contentX: contentRect.x,
+          contentY: contentRect.y,
+          contentW: contentRect.w,
+          contentH: contentRect.h,
+          scrollY: win.scrollY,
+        });
+      }
+      return result;
+    },
+  };
+
+  // Create the desktop window (Finder's special background window)
+  const desktopProps = { _finderServices: finderServices };
+  const desktopInst = appRegistry.createWindowForApp(
+    "finder",
+    DESKTOP_WINDOW_ID,
+    desktopProps
+  );
+  if (desktopInst) {
+    desktopInst.winBuilder.setRenderFunction(scheduleRender);
+  }
+
+  windowManager.openWindow({
+    id: DESKTOP_WINDOW_ID,
+    title: "",
+    x: 0,
+    y: MENUBAR_HEIGHT,
+    width: resolution.width,
+    height: resolution.height - MENUBAR_HEIGHT,
+    contentHeight: resolution.height - MENUBAR_HEIGHT,
+    contentWidth: resolution.width,
+    appId: "finder",
+    props: desktopProps,
+    scrollable: false,
+    resizable: false,
+    minWidth: resolution.width,
+    minHeight: resolution.height - MENUBAR_HEIGHT,
+    chromeless: true,
+  });
+
+  mockFS.onChange(() => scheduleRender());
+  updateMenubar();
+
+  const elapsed = Date.now() - bootStart;
+  const remaining = Math.max(0, BOOT_TIME - elapsed);
+  await new Promise((r) => setTimeout(r, remaining));
+
+  showingSplashscreen = false;
+  setInterval(scheduleRender, TEXT_CURSOR_BLINK_MS);
+  scheduleRender();
 }
 
 main();

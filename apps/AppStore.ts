@@ -3,6 +3,7 @@ import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { OSEvent } from "../lib/canvas/EventManager";
+import { MockFS, FSFile, ROOT_ID } from "../lib/canvas/fs/MockFS";
 
 interface InstalledApp {
   id: string;
@@ -14,25 +15,74 @@ interface InstalledApp {
 const ITEM_HEIGHT = 40;
 const HEADER_HEIGHT = 28;
 
+function getApplicationsDir(fs: MockFS): string {
+  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
+  if (!hd) return ROOT_ID;
+  const appsDir = fs.findByName(hd.id, "Applications");
+  if (!appsDir) return hd.id;
+  return appsDir.id;
+}
+
+async function loadInstalledApps(fs: MockFS): Promise<InstalledApp[]> {
+  const dirId = getApplicationsDir(fs);
+  const children = fs.readDir(dirId);
+  const apps: InstalledApp[] = [];
+  for (const node of children) {
+    if (node.kind === "file" && (node as FSFile).fileType === "app") {
+      const raw = await fs.readFile(node.id);
+      if (raw) {
+        try {
+          apps.push(JSON.parse(raw));
+        } catch {}
+      }
+    }
+  }
+  return apps;
+}
+
+export async function saveApp(
+  appData: InstalledApp,
+  fs: MockFS
+): Promise<void> {
+  const dirId = getApplicationsDir(fs);
+  await fs.writeFile(
+    dirId,
+    appData.title || appData.id,
+    JSON.stringify(appData),
+    "app",
+    { icon: "icon/appstore-smr-32x32" }
+  );
+}
+
+export async function removeApp(
+  appData: InstalledApp,
+  fs: MockFS
+): Promise<void> {
+  const dirId = getApplicationsDir(fs);
+  const match = fs.findByName(dirId, appData.title || appData.id);
+  if (match) {
+    await fs.remove(match.id);
+  }
+}
+
 export const AppStoreApp: NativeApp = {
   id: "appstore",
   title: "App Store",
-  icon: "/icons/appstore-smr-32x32.png",
+  icon: "icon/appstore-smr-32x32",
   defaultSize: { width: 300, height: 240 },
   scrollable: true,
 
   render(app: AppBuilder, ctx: AppContext, props: any) {
+    const fs: MockFS | undefined = props._fs;
     const [apps, setApps] = app.useState<InstalledApp[]>([]);
     const [selectedIdx, setSelectedIdx] = app.useState<number | null>(null);
 
-    // Load installed apps from storage on mount
     app.useEffect(() => {
-      loadInstalledApps().then(setApps);
+      if (fs) loadInstalledApps(fs).then(setApps);
     }, []);
 
     ctx.clear(WHITE);
 
-    // Header
     ctx.drawText("App Store", ctx.width / 2 - 24, 4, {
       font: "ChiKareGo",
       color: BLACK,
@@ -43,7 +93,6 @@ export const AppStoreApp: NativeApp = {
     });
     ctx.drawHLine(0, HEADER_HEIGHT, ctx.width, BLACK);
 
-    // App list
     let y = HEADER_HEIGHT + 1;
     for (let i = 0; i < apps.length; i++) {
       const a = apps[i];
@@ -85,7 +134,6 @@ export const AppStoreApp: NativeApp = {
       });
     }
 
-    // Bottom action bar
     const barY = ctx.height - 28;
     ctx.fillRect(0, barY, ctx.width, 28, WHITE);
     ctx.drawHLine(0, barY, ctx.width, BLACK);
@@ -95,11 +143,25 @@ export const AppStoreApp: NativeApp = {
         x: 8,
         y: barY + 4,
         label: "Open",
+        id: "appstore-open-btn",
+        onClick: () => {
+          const openSandboxed = props._openSandboxedApp;
+          if (openSandboxed) openSandboxed(apps[selectedIdx]);
+        },
       });
       ctx.drawButton({
         x: 64,
         y: barY + 4,
         label: "Uninstall",
+        id: "appstore-uninstall-btn",
+        onClick: () => {
+          if (fs) {
+            removeApp(apps[selectedIdx], fs).then(() => {
+              loadInstalledApps(fs).then(setApps);
+              setSelectedIdx(null);
+            });
+          }
+        },
       });
     }
   },
@@ -137,55 +199,3 @@ export const AppStoreApp: NativeApp = {
     return HEADER_HEIGHT + apps.length * ITEM_HEIGHT + 32;
   },
 };
-
-async function loadInstalledApps(): Promise<InstalledApp[]> {
-  try {
-    const root = await navigator.storage.getDirectory();
-    const appsDir = await root.getDirectoryHandle("mockintosh-apps", {
-      create: true,
-    });
-    const apps: InstalledApp[] = [];
-    for await (const [name, handle] of (appsDir as any).entries()) {
-      if (handle.kind === "file") {
-        const file = await handle.getFile();
-        const text = await file.text();
-        try {
-          const parsed = JSON.parse(text);
-          apps.push(parsed);
-        } catch {}
-      }
-    }
-    return apps;
-  } catch {
-    return [];
-  }
-}
-
-export async function saveApp(appData: InstalledApp): Promise<void> {
-  try {
-    const root = await navigator.storage.getDirectory();
-    const appsDir = await root.getDirectoryHandle("mockintosh-apps", {
-      create: true,
-    });
-    const file = await appsDir.getFileHandle(`${appData.id}.json`, {
-      create: true,
-    });
-    const writable = await (file as any).createWritable();
-    await writable.write(JSON.stringify(appData));
-    await writable.close();
-  } catch (e) {
-    console.error("Failed to save app:", e);
-  }
-}
-
-export async function removeApp(appId: string): Promise<void> {
-  try {
-    const root = await navigator.storage.getDirectory();
-    const appsDir = await root.getDirectoryHandle("mockintosh-apps", {
-      create: true,
-    });
-    await appsDir.removeEntry(`${appId}.json`);
-  } catch (e) {
-    console.error("Failed to remove app:", e);
-  }
-}

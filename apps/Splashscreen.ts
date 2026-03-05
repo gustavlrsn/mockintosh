@@ -19,7 +19,7 @@ export const SplashscreenApp: NativeApp = {
   render(app: AppBuilder, ctx: AppContext) {
     ctx.clear(WHITE);
     // Draw happy Mac icon centered
-    const sprite = spriteRegistry?.get("/icons/happy.png");
+    const sprite = spriteRegistry?.get("icon/happy");
     if (sprite) {
       const cx = Math.floor((ctx.width - sprite.width) / 2);
       const cy = Math.floor((ctx.height - sprite.height) / 2);

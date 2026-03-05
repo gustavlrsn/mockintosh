@@ -24,6 +24,8 @@ export interface WindowState {
   minWidth: number;
   minHeight: number;
   infoBar?: string[];
+  modal?: boolean;
+  chromeless?: boolean;
 }
 
 export interface WindowManagerConfig {
@@ -95,11 +97,19 @@ export class WindowManager {
   }
 
   bringToFront(id: string) {
+    if (this.hasModalWindow()) {
+      const win = this.windows.find((w) => w.id === id);
+      if (win && !win.modal) return;
+    }
     const idx = this.windows.findIndex((w) => w.id === id);
     if (idx < 0 || idx === this.windows.length - 1) return;
     const [win] = this.windows.splice(idx, 1);
     this.windows.push(win);
     this._updateActive();
+  }
+
+  hasModalWindow(): boolean {
+    return this.windows.some((w) => w.modal);
   }
 
   getActiveWindow(): WindowState | null {
@@ -130,6 +140,9 @@ export class WindowManager {
     w: number;
     h: number;
   } {
+    if (win.chromeless) {
+      return { x: win.x, y: win.y, w: win.width, h: win.height };
+    }
     const sbW = win.scrollable ? SCROLLBAR_WIDTH : 0;
     const headerH = this._headerHeight(win);
     const bodyH = this._bodyHeight(win);
@@ -280,72 +293,122 @@ export class WindowManager {
       scheduleRender: () => void;
     }
   ) {
+    const hasModal = this.hasModalWindow();
+    const interactionBlocked = hasModal && !win.modal;
+
+    if (win.chromeless) {
+      const contentRect = this.getContentRect(win);
+      if (!interactionBlocked) {
+        if (win.modal) {
+          hitRegions.add({
+            id: `modal-scrim`,
+            x: 0,
+            y: 0,
+            w: this.config.screenWidth,
+            h: this.config.screenHeight,
+            onMouseDown: () => {},
+            onMouseUp: () => {},
+          });
+        }
+        hitRegions.add({
+          id: `win-content-${win.id}`,
+          x: contentRect.x,
+          y: contentRect.y,
+          w: contentRect.w,
+          h: contentRect.h,
+          onMouseDown: (lx: number, ly: number) => {
+            callbacks.onContentEvent(win.id, {
+              type: "mouseDown",
+              x: lx,
+              y: ly,
+            });
+          },
+          onMouseUp: (lx: number, ly: number) => {
+            callbacks.onContentEvent(win.id, {
+              type: "mouseUp",
+              x: lx,
+              y: ly,
+            });
+          },
+          onDoubleClick: (lx: number, ly: number) => {
+            callbacks.onContentEvent(win.id, {
+              type: "doubleClick",
+              x: lx,
+              y: ly,
+            });
+          },
+        });
+      }
+      return;
+    }
     const { x, y, width, title, active } = win;
     const headerH = this._headerHeight(win);
     const totalHeight = headerH + win.height;
 
     // --- Register hit regions first, in z-order (lowest first) ---
 
-    // Window background (catch-all, bring to front)
-    hitRegions.add({
-      id: `win-bg-${win.id}`,
-      x: x,
-      y: y,
-      w: width + SHADOW_SIZE,
-      h: totalHeight + SHADOW_SIZE,
-      onMouseDown: () => {
-        callbacks.onBringToFront(win.id);
-      },
-    });
+    if (!interactionBlocked) {
+      // Window background (catch-all, bring to front)
+      hitRegions.add({
+        id: `win-bg-${win.id}`,
+        x: x,
+        y: y,
+        w: width + SHADOW_SIZE,
+        h: totalHeight + SHADOW_SIZE,
+        onMouseDown: () => {
+          callbacks.onBringToFront(win.id);
+        },
+      });
 
-    // Content area (dispatches events to apps)
-    const contentRect = this.getContentRect(win);
-    hitRegions.add({
-      id: `win-content-${win.id}`,
-      x: contentRect.x,
-      y: contentRect.y,
-      w: contentRect.w,
-      h: contentRect.h,
-      onMouseDown: (lx: number, ly: number) => {
-        callbacks.onBringToFront(win.id);
-        callbacks.onContentEvent(win.id, {
-          type: "mouseDown",
-          x: lx,
-          y: ly + win.scrollY,
-        });
-      },
-      onMouseUp: (lx: number, ly: number) => {
-        callbacks.onContentEvent(win.id, {
-          type: "mouseUp",
-          x: lx,
-          y: ly + win.scrollY,
-        });
-      },
-      onDoubleClick: (lx: number, ly: number) => {
-        callbacks.onContentEvent(win.id, {
-          type: "doubleClick",
-          x: lx,
-          y: ly + win.scrollY,
-        });
-      },
-    });
+      // Content area (dispatches events to apps)
+      const contentRect = this.getContentRect(win);
+      hitRegions.add({
+        id: `win-content-${win.id}`,
+        x: contentRect.x,
+        y: contentRect.y,
+        w: contentRect.w,
+        h: contentRect.h,
+        onMouseDown: (lx: number, ly: number) => {
+          callbacks.onBringToFront(win.id);
+          callbacks.onContentEvent(win.id, {
+            type: "mouseDown",
+            x: lx,
+            y: ly + win.scrollY,
+          });
+        },
+        onMouseUp: (lx: number, ly: number) => {
+          callbacks.onContentEvent(win.id, {
+            type: "mouseUp",
+            x: lx,
+            y: ly + win.scrollY,
+          });
+        },
+        onDoubleClick: (lx: number, ly: number) => {
+          callbacks.onContentEvent(win.id, {
+            type: "doubleClick",
+            x: lx,
+            y: ly + win.scrollY,
+          });
+        },
+      });
 
-    // Title bar drag region (on top of content)
-    hitRegions.add({
-      id: `win-titlebar-${win.id}`,
-      x: x,
-      y: y,
-      w: width,
-      h: TITLE_BAR_HEIGHT,
-      onMouseDown: (lx: number, ly: number) => {
-        callbacks.onBringToFront(win.id);
-        this.dragging = {
-          windowId: win.id,
-          offsetX: lx,
-          offsetY: ly,
-        };
-      },
-    });
+      // Title bar drag region (on top of content)
+      hitRegions.add({
+        id: `win-titlebar-${win.id}`,
+        x: x,
+        y: y,
+        w: width,
+        h: TITLE_BAR_HEIGHT,
+        onMouseDown: (lx: number, ly: number) => {
+          callbacks.onBringToFront(win.id);
+          this.dragging = {
+            windowId: win.id,
+            offsetX: lx,
+            offsetY: ly,
+          };
+        },
+      });
+    }
 
     // --- Draw visuals ---
 
@@ -396,14 +459,16 @@ export class WindowManager {
       canvas.drawRect(bx, by, CLOSE_BOX_SIZE, CLOSE_BOX_SIZE, BLACK);
 
       // Close box hit region (highest z in title bar area)
-      hitRegions.add({
-        id: `win-close-${win.id}`,
-        x: bx,
-        y: by,
-        w: CLOSE_BOX_SIZE,
-        h: CLOSE_BOX_SIZE,
-        onMouseDown: () => callbacks.onClose(win.id),
-      });
+      if (!interactionBlocked) {
+        hitRegions.add({
+          id: `win-close-${win.id}`,
+          x: bx,
+          y: by,
+          w: CLOSE_BOX_SIZE,
+          h: CLOSE_BOX_SIZE,
+          onMouseDown: () => callbacks.onClose(win.id),
+        });
+      }
 
       canvas.fillRect(
         titleX - 4,

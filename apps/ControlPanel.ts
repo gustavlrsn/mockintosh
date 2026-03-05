@@ -10,7 +10,7 @@ const SIDEBAR_WIDTH = 64;
 export const ControlPanelApp: NativeApp = {
   id: "control_panel",
   title: "Control Panel",
-  icon: "/icons/computer.png",
+  icon: "icon/computer",
   defaultSize: { width: 320, height: 200 },
   scrollable: false,
 
@@ -24,7 +24,7 @@ export const ControlPanelApp: NativeApp = {
     ctx.drawVLine(SIDEBAR_WIDTH, 0, ctx.height, BLACK);
     ctx.drawVLine(SIDEBAR_WIDTH + 1, 0, ctx.height, BLACK);
 
-    const computerSprite = sprites?.get("/icons/computer.png");
+    const computerSprite = sprites?.get("icon/computer");
     if (computerSprite) {
       const ix = Math.floor((SIDEBAR_WIDTH - 32) / 2);
       if (selectedPane === "General") {
