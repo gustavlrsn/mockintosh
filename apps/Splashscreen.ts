@@ -1,4 +1,4 @@
-import { NativeApp } from "../lib/canvas/AppRegistry";
+import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
@@ -10,7 +10,7 @@ export function setSplashSpriteRegistry(reg: SpriteRegistry) {
   spriteRegistry = reg;
 }
 
-export const SplashscreenApp: NativeApp = {
+export const SplashscreenApp: SystemApp = {
   id: "splashscreen",
   title: "Splashscreen",
   icon: "",

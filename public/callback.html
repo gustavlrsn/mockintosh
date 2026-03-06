@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><title>Spotify Callback</title></head>
+<body>
+<script>
+  var params = new URLSearchParams(window.location.search);
+  var code = params.get("code");
+  var error = params.get("error");
+  if (window.opener) {
+    window.opener.postMessage({ type: "spotify-callback", code: code, error: error }, "*");
+  }
+  window.close();
+</script>
+</body>
+</html>

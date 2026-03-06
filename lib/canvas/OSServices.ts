@@ -1,7 +1,7 @@
 import { MockFS } from "./fs/MockFS";
 
 /**
- * OS-level services exposed to both native and sandboxed apps.
+ * OS-level services exposed to apps.
  */
 export interface OSServices {
   openWindow(appId: string, props?: any): void;

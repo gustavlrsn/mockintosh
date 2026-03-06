@@ -1,4 +1,4 @@
-import { NativeApp, WindowSize } from "../lib/canvas/AppRegistry";
+import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
@@ -150,7 +150,7 @@ function ditherFrame(
   }
 }
 
-export const PhotoBoothApp: NativeApp = {
+export const PhotoBoothApp: SystemApp = {
   id: "photobooth",
   title: "Photo Booth",
   icon: "icon/photobooth-smr-32",

@@ -1,102 +1,201 @@
-import { NativeApp } from "../lib/canvas/AppRegistry";
+import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { OSEvent } from "../lib/canvas/EventManager";
-import { MockFS, FSFile, ROOT_ID } from "../lib/canvas/fs/MockFS";
+import { MenubarDefinition } from "../lib/canvas/ui/drawMenubar";
+import { AppManifest } from "../lib/canvas/AppLoader";
 
-interface InstalledApp {
+interface RegistryEntry {
   id: string;
   title: string;
+  author: string;
+  version: string;
+  sdk: string;
   description: string;
-  code: string;
+  entry: string | null;
+  repo: string;
+  permissions: string[];
+  approved: boolean;
+  pricing?: {
+    type: "free" | "one-time" | "subscription";
+    amount_cents?: number;
+    currency?: string;
+    interval?: "month" | "year";
+    polar_product_id?: string;
+  };
 }
 
-const ITEM_HEIGHT = 40;
-const HEADER_HEIGHT = 28;
+type Tab = "browse" | "installed";
 
-function getApplicationsDir(fs: MockFS): string {
-  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
-  if (!hd) return ROOT_ID;
-  const appsDir = fs.findByName(hd.id, "Applications");
-  if (!appsDir) return hd.id;
-  return appsDir.id;
-}
+const ITEM_HEIGHT = 42;
+const HEADER_HEIGHT = 24;
+const TAB_BAR_HEIGHT = 20;
+const ACTION_BAR_HEIGHT = 28;
 
-async function loadInstalledApps(fs: MockFS): Promise<InstalledApp[]> {
-  const dirId = getApplicationsDir(fs);
-  const children = fs.readDir(dirId);
-  const apps: InstalledApp[] = [];
-  for (const node of children) {
-    if (node.kind === "file" && (node as FSFile).fileType === "app") {
-      const raw = await fs.readFile(node.id);
-      if (raw) {
-        try {
-          apps.push(JSON.parse(raw));
-        } catch {}
-      }
-    }
-  }
-  return apps;
-}
+const REGISTRY_URL =
+  "https://raw.githubusercontent.com/mockintosh/app-registry/main/registry.json";
 
-export async function saveApp(
-  appData: InstalledApp,
-  fs: MockFS
-): Promise<void> {
-  const dirId = getApplicationsDir(fs);
-  await fs.writeFile(
-    dirId,
-    appData.title || appData.id,
-    JSON.stringify(appData),
-    "app",
-    { icon: "icon/appstore-smr-32x32" }
-  );
-}
-
-export async function removeApp(
-  appData: InstalledApp,
-  fs: MockFS
-): Promise<void> {
-  const dirId = getApplicationsDir(fs);
-  const match = fs.findByName(dirId, appData.title || appData.id);
-  if (match) {
-    await fs.remove(match.id);
+async function fetchRegistry(): Promise<RegistryEntry[]> {
+  try {
+    const resp = await fetch(REGISTRY_URL);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return data.apps ?? [];
+  } catch {
+    return [];
   }
 }
 
-export const AppStoreApp: NativeApp = {
+function formatPrice(pricing?: RegistryEntry["pricing"]): string {
+  if (!pricing || pricing.type === "free") return "Free";
+  const dollars = ((pricing.amount_cents ?? 0) / 100).toFixed(2);
+  const currency = (pricing.currency ?? "usd").toUpperCase();
+  if (pricing.type === "subscription") {
+    const interval = pricing.interval === "year" ? "/yr" : "/mo";
+    return `$${dollars}${interval}`;
+  }
+  return `$${dollars}`;
+}
+
+export const AppStoreApp: SystemApp = {
   id: "appstore",
   title: "App Store",
   icon: "icon/appstore-smr-32x32",
-  defaultSize: { width: 300, height: 240 },
+  defaultSize: { width: 320, height: 280 },
   scrollable: true,
+  resizable: true,
+  minSize: { width: 240, height: 180 },
 
   render(app: AppBuilder, ctx: AppContext, props: any) {
-    const fs: MockFS | undefined = props._fs;
-    const [apps, setApps] = app.useState<InstalledApp[]>([]);
+    const [tab, setTab] = app.useState<Tab>("browse");
+    const [registry, setRegistry] = app.useState<RegistryEntry[]>([]);
+    const [loading, setLoading] = app.useState(true);
+    const [error, setError] = app.useState<string | null>(null);
     const [selectedIdx, setSelectedIdx] = app.useState<number | null>(null);
+    const [installedIds, setInstalledIds] = app.useState<Set<string>>(
+      new Set()
+    );
+    const [installing, setInstalling] = app.useState<string | null>(null);
 
     app.useEffect(() => {
-      if (fs) loadInstalledApps(fs).then(setApps);
+      fetchRegistry()
+        .then((entries) => {
+          setRegistry(entries);
+          setLoading(false);
+        })
+        .catch(() => {
+          setError("Failed to load app catalog.");
+          setLoading(false);
+        });
     }, []);
 
     ctx.clear(WHITE);
 
-    ctx.drawText("App Store", ctx.width / 2 - 24, 4, {
+    ctx.drawText("App Store", ctx.width / 2 - 26, 4, {
       font: "ChiKareGo",
       color: BLACK,
     });
-    ctx.drawText(`${apps.length} apps installed`, ctx.width / 2 - 40, 16, {
-      font: "Geneva9",
-      color: BLACK,
-    });
-    ctx.drawHLine(0, HEADER_HEIGHT, ctx.width, BLACK);
+    ctx.drawHLine(0, 16, ctx.width, BLACK);
 
-    let y = HEADER_HEIGHT + 1;
-    for (let i = 0; i < apps.length; i++) {
-      const a = apps[i];
+    const browseSelected = tab === "browse";
+    const installedSelected = tab === "installed";
+    const tabW = ctx.width / 2;
+
+    if (browseSelected) {
+      ctx.fillRect(0, 17, tabW, TAB_BAR_HEIGHT - 1, BLACK);
+      ctx.drawText("Browse", tabW / 2 - 16, 20, {
+        font: "Geneva9",
+        color: WHITE,
+      });
+    } else {
+      ctx.drawText("Browse", tabW / 2 - 16, 20, {
+        font: "Geneva9",
+        color: BLACK,
+      });
+    }
+
+    ctx.hitRegion(
+      "tab-browse",
+      { x: 0, y: 17, w: tabW, h: TAB_BAR_HEIGHT },
+      {
+        onMouseDown: () => {
+          setTab("browse");
+          setSelectedIdx(null);
+        },
+      }
+    );
+
+    if (installedSelected) {
+      ctx.fillRect(tabW, 17, tabW, TAB_BAR_HEIGHT - 1, BLACK);
+      ctx.drawText("Installed", tabW + tabW / 2 - 22, 20, {
+        font: "Geneva9",
+        color: WHITE,
+      });
+    } else {
+      ctx.drawText("Installed", tabW + tabW / 2 - 22, 20, {
+        font: "Geneva9",
+        color: BLACK,
+      });
+    }
+
+    ctx.hitRegion(
+      "tab-installed",
+      { x: tabW, y: 17, w: tabW, h: TAB_BAR_HEIGHT },
+      {
+        onMouseDown: () => {
+          setTab("installed");
+          setSelectedIdx(null);
+        },
+      }
+    );
+
+    ctx.drawHLine(0, 17 + TAB_BAR_HEIGHT, ctx.width, BLACK);
+    ctx.drawVLine(tabW, 17, TAB_BAR_HEIGHT, BLACK);
+
+    const contentY = 17 + TAB_BAR_HEIGHT + 1;
+    const items =
+      tab === "browse"
+        ? registry
+        : registry.filter((e) => installedIds.has(e.id));
+
+    if (loading) {
+      ctx.drawText("Loading app catalog...", 16, contentY + 20, {
+        font: "Geneva9",
+        color: BLACK,
+      });
+      return;
+    }
+
+    if (error) {
+      ctx.drawText(error, 16, contentY + 20, {
+        font: "Geneva9",
+        color: BLACK,
+      });
+      return;
+    }
+
+    if (items.length === 0) {
+      const msg =
+        tab === "browse" ? "No apps available yet." : "No apps installed.";
+      ctx.drawText(msg, 16, contentY + 20, {
+        font: "Geneva9",
+        color: BLACK,
+      });
+      if (tab === "browse") {
+        ctx.drawText("Check back soon!", 16, contentY + 34, {
+          font: "Geneva9",
+          color: BLACK,
+        });
+      }
+      return;
+    }
+
+    let y = contentY;
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i];
       const isSelected = selectedIdx === i;
+      const isInstalled = installedIds.has(entry.id);
 
       if (isSelected) {
         ctx.fillRect(0, y, ctx.width, ITEM_HEIGHT, BLACK);
@@ -104,15 +203,30 @@ export const AppStoreApp: NativeApp = {
 
       const textColor = isSelected ? WHITE : BLACK;
 
-      ctx.drawText(a.title, 8, y + 4, {
+      ctx.drawText(entry.title, 8, y + 4, {
         font: "ChiKareGo",
         color: textColor,
       });
 
-      ctx.drawText(a.description || "No description", 8, y + 18, {
+      const priceStr = formatPrice(entry.pricing);
+      const statusStr = isInstalled ? "Installed" : priceStr;
+      ctx.drawText(statusStr, ctx.width - 70, y + 4, {
         font: "Geneva9",
         color: textColor,
       });
+
+      ctx.drawText(`by ${entry.author} · v${entry.version}`, 8, y + 16, {
+        font: "Geneva9",
+        color: textColor,
+      });
+
+      const desc = entry.description || "No description";
+      ctx.drawText(
+        desc.length > 45 ? desc.slice(0, 42) + "..." : desc,
+        8,
+        y + 28,
+        { font: "Geneva9", color: textColor }
+      );
 
       ctx.drawDottedHLine(
         0,
@@ -120,82 +234,149 @@ export const AppStoreApp: NativeApp = {
         ctx.width,
         isSelected ? WHITE : BLACK
       );
+
+      ctx.hitRegion(
+        `app-item-${i}`,
+        { x: 0, y, w: ctx.width, h: ITEM_HEIGHT },
+        {
+          onMouseDown: () => setSelectedIdx(i),
+        }
+      );
+
       y += ITEM_HEIGHT;
     }
 
-    if (apps.length === 0) {
-      ctx.drawText("No apps installed yet.", 16, HEADER_HEIGHT + 16, {
-        font: "Geneva9",
-        color: BLACK,
-      });
-      ctx.drawText("Use App Builder to create one!", 16, HEADER_HEIGHT + 32, {
-        font: "Geneva9",
-        color: BLACK,
-      });
-    }
-
-    const barY = ctx.height - 28;
-    ctx.fillRect(0, barY, ctx.width, 28, WHITE);
+    const barY = y + 4;
     ctx.drawHLine(0, barY, ctx.width, BLACK);
 
-    if (selectedIdx !== null && selectedIdx < apps.length) {
-      ctx.drawButton({
-        x: 8,
-        y: barY + 4,
-        label: "Open",
-        id: "appstore-open-btn",
-        onClick: () => {
-          const openSandboxed = props._openSandboxedApp;
-          if (openSandboxed) openSandboxed(apps[selectedIdx]);
-        },
-      });
-      ctx.drawButton({
-        x: 64,
-        y: barY + 4,
-        label: "Uninstall",
-        id: "appstore-uninstall-btn",
-        onClick: () => {
-          if (fs) {
-            removeApp(apps[selectedIdx], fs).then(() => {
-              loadInstalledApps(fs).then(setApps);
-              setSelectedIdx(null);
+    if (selectedIdx !== null && selectedIdx < items.length) {
+      const selected = items[selectedIdx];
+      const isInstalled = installedIds.has(selected.id);
+      const isCurrentlyInstalling = installing === selected.id;
+
+      if (isInstalled) {
+        ctx.drawButton({
+          x: 8,
+          y: barY + 4,
+          label: "Open",
+          id: "appstore-open-btn",
+          onClick: () => {
+            props._os?.openWindow(selected.id);
+          },
+        });
+        ctx.drawButton({
+          x: 60,
+          y: barY + 4,
+          label: "Uninstall",
+          id: "appstore-uninstall-btn",
+          onClick: () => {
+            setInstalledIds((prev: Set<string>) => {
+              const next = new Set(prev);
+              next.delete(selected.id);
+              return next;
             });
-          }
-        },
-      });
+            setSelectedIdx(null);
+          },
+        });
+      } else {
+        const isFree = !selected.pricing || selected.pricing.type === "free";
+        const label = isCurrentlyInstalling
+          ? "Installing..."
+          : isFree
+          ? "Install"
+          : `Buy ${formatPrice(selected.pricing)}`;
+
+        ctx.drawButton({
+          x: 8,
+          y: barY + 4,
+          label,
+          id: "appstore-install-btn",
+          disabled: isCurrentlyInstalling,
+          onClick: () => {
+            if (isCurrentlyInstalling) return;
+
+            if (isFree && selected.entry) {
+              setInstalling(selected.id);
+              const appLoader = props._appLoader;
+              if (appLoader) {
+                const manifest: AppManifest = {
+                  id: selected.id,
+                  title: selected.title,
+                  description: selected.description ?? "",
+                  icon: selected.id + "/icon",
+                  author: selected.author,
+                  version: selected.version,
+                  sdk: selected.sdk,
+                  permissions: selected.permissions,
+                  entry: selected.entry!,
+                };
+                appLoader
+                  .load(manifest)
+                  .then(() => {
+                    setInstalledIds((prev: Set<string>) => {
+                      const next = new Set(prev);
+                      next.add(selected.id);
+                      return next;
+                    });
+                    setInstalling(null);
+                  })
+                  .catch((err: Error) => {
+                    console.error("Install failed:", err);
+                    setInstalling(null);
+                    setError(`Failed to install ${selected.title}`);
+                  });
+              }
+            } else if (!isFree) {
+              // TODO: Polar.sh checkout integration (see FUTURE.md)
+            }
+          },
+        });
+      }
     }
   },
 
   onEvent(app: AppBuilder, event: OSEvent, props: any) {
     if (event.type === "mouseDown") {
-      const [apps] = app.useState<InstalledApp[]>([]);
-      const [, setSelectedIdx] = app.useState<number | null>(null);
-
-      const y = event.y! - HEADER_HEIGHT - 1;
-      if (y >= 0) {
-        const idx = Math.floor(y / ITEM_HEIGHT);
-        if (idx >= 0 && idx < apps.length) {
-          setSelectedIdx(idx);
-        } else {
-          setSelectedIdx(null);
-        }
-      }
-    }
-
-    if (event.type === "doubleClick") {
-      const [apps] = app.useState<InstalledApp[]>([]);
-      const [selectedIdx] = app.useState<number | null>(null);
-      if (selectedIdx !== null && selectedIdx < apps.length) {
-        const openWindow = props._openSandboxedApp;
-        if (openWindow) {
-          openWindow(apps[selectedIdx]);
-        }
-      }
+      // Selection is handled by hit regions in render
     }
   },
 
-  getContentHeight(app: AppBuilder, props: any): number {
-    const [apps] = app.useState<InstalledApp[]>([]);
-    return HEADER_HEIGHT + apps.length * ITEM_HEIGHT + 32;
+  getContentHeight(app: AppBuilder, props: any, size: WindowSize): number {
+    const [tab] = app.useState<Tab>("browse");
+    const [registry] = app.useState<RegistryEntry[]>([]);
+    const [installedIds] = app.useState<Set<string>>(new Set());
+
+    const items =
+      tab === "browse"
+        ? registry
+        : registry.filter((e) => installedIds.has(e.id));
+
+    const contentY = 17 + TAB_BAR_HEIGHT + 1;
+    return contentY + items.length * ITEM_HEIGHT + ACTION_BAR_HEIGHT + 8;
+  },
+
+  getMenubar(app: AppBuilder, props: any): MenubarDefinition[] {
+    const [, setLoading] = app.useState(true);
+    const [, setRegistry] = app.useState<RegistryEntry[]>([]);
+    const [, setError] = app.useState<string | null>(null);
+
+    return [
+      {
+        label: "Store",
+        items: [
+          {
+            label: "Refresh Catalog",
+            onClick: () => {
+              setLoading(true);
+              setError(null);
+              fetchRegistry().then((entries) => {
+                setRegistry(entries);
+                setLoading(false);
+              });
+            },
+          },
+        ],
+      },
+    ];
   },
 };

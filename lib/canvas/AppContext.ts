@@ -5,6 +5,9 @@ import { ButtonDef, drawButton as _drawButton } from "./ui/drawButton";
 import {
   TextInputState,
   drawTextInput as _drawTextInput,
+  handleTextInputClick as _handleTextInputClick,
+  handleTextInputDoubleClick as _handleTextInputDoubleClick,
+  handleTextInputDrag as _handleTextInputDrag,
 } from "./ui/TextInput";
 import {
   TextBlockOptions as _TextBlockOptions,
@@ -258,16 +261,49 @@ export class AppContext {
     x: number,
     y: number,
     width: number,
-    height?: number
+    height?: number,
+    options?: {
+      /** Unique id for hit-region registration. When provided (and hit regions
+       *  are available), click / double-click / drag interactions are handled
+       *  automatically so the caller doesn't need to wire them up. */
+      id?: string;
+      /** Called after any mouse interaction mutates the state. */
+      onChange?: () => void;
+    }
   ) {
+    const h = height ?? 16;
     _drawTextInput(
       this.canvas,
       state,
       this.ox + x,
       this.oy + y - this.scrollOffsetY,
       width,
-      height
+      h
     );
+
+    if (this._hitRegions && options?.id) {
+      const onChange = options.onChange;
+      this.hitRegion(
+        options.id,
+        { x, y, w: width, h },
+        {
+          onMouseDown: (lx: number) => {
+            _handleTextInputClick(state, lx, false);
+            onChange?.();
+          },
+          onDoubleClick: (lx: number) => {
+            _handleTextInputDoubleClick(state, lx);
+            onChange?.();
+          },
+          onDrag: (absX: number) => {
+            const localX = absX - (this.ox + x);
+            if (_handleTextInputDrag(state, localX)) {
+              onChange?.();
+            }
+          },
+        }
+      );
+    }
   }
 
   /**

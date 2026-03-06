@@ -16,9 +16,9 @@ import {
   MENUBAR_HEIGHT,
 } from "../lib/canvas/ui/drawMenubar";
 import { TEXT_CURSOR_BLINK_MS } from "../lib/canvas/ui/TextInput";
-import { AppHost, SandboxedApp } from "../lib/canvas/sandbox/AppHost";
 import { MockFS, ROOT_ID, FSFile } from "../lib/canvas/fs/MockFS";
 import { OPFSBackend } from "../lib/canvas/fs/OPFSBackend";
+import { AppLoader, AppManifest } from "../lib/canvas/AppLoader";
 
 import { SplashscreenApp, setSplashSpriteRegistry } from "../apps/Splashscreen";
 import {
@@ -39,7 +39,9 @@ import { VideoPlayerApp } from "../apps/VideoPlayer";
 import { SafariApp } from "../apps/Safari";
 import { PictureApp } from "../apps/Picture";
 import { AppStoreApp } from "../apps/AppStore";
-import { AppBuilderApp } from "../apps/AppBuilderApp";
+import { ChatGippityApp } from "../apps/ChatGippity";
+import { SpotifyPlayerApp } from "../apps/SpotifyPlayer";
+import { spotifySprites } from "../apps/sprites/spotify";
 import { DialogApp, computeDialogSize } from "../apps/Dialog";
 
 import { resolution } from "../lib/config";
@@ -75,6 +77,7 @@ async function populateDefaultFS(fs: MockFS): Promise<void> {
   const root = fs.readDir(ROOT_ID);
   if (root.length > 0) {
     ensureDesktopFolder(fs);
+    await ensureDesktopShortcuts(fs);
     return;
   }
 
@@ -90,27 +93,11 @@ async function populateDefaultFS(fs: MockFS): Promise<void> {
   await fs.writeFile(dev.id, "README.md", readme, "text");
   await fs.writeFile(dev.id, "CONTRIBUTING.md", contributing, "text");
 
-  fs.mkdir(hd.id, "Applications");
+  const appsDir = fs.mkdir(hd.id, "Applications");
 
   const desktop = fs.mkdir(hd.id, "Desktop Folder");
 
-  const shortcuts: Array<{
-    name: string;
-    appId: string;
-    icon: string;
-  }> = [
-    {
-      name: "Photo Booth",
-      appId: "photobooth",
-      icon: "icon/photobooth-smr-32",
-    },
-    { name: "1984.mp4", appId: "video", icon: "icon/MacFlim" },
-    { name: "Safari", appId: "safari", icon: "icon/safari" },
-    { name: "App Store", appId: "appstore", icon: "icon/appstore-smr-32x32" },
-    { name: "App Builder", appId: "appbuilder", icon: "icon/computer" },
-  ];
-
-  for (const s of shortcuts) {
+  for (const s of DESKTOP_SHORTCUTS) {
     await fs.writeFile(
       desktop.id,
       s.name,
@@ -127,6 +114,82 @@ function ensureDesktopFolder(fs: MockFS): void {
   const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
   if (!hd) return;
   fs.mkdir(hd.id, "Desktop Folder");
+}
+
+const DESKTOP_SHORTCUTS: Array<{ name: string; appId: string; icon: string }> =
+  [
+    {
+      name: "Photo Booth",
+      appId: "photobooth",
+      icon: "icon/photobooth-smr-32",
+    },
+    { name: "1984.mp4", appId: "video", icon: "icon/MacFlim" },
+    { name: "Safari", appId: "safari", icon: "icon/safari" },
+    { name: "App Store", appId: "appstore", icon: "icon/appstore-smr-32x32" },
+    { name: "ChatGippity", appId: "chatgippity", icon: "icon/computer" },
+    { name: "Spotify Player", appId: "spotify", icon: "icon/spotify" },
+  ];
+
+async function ensureDesktopShortcuts(fs: MockFS): Promise<void> {
+  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
+  if (!hd) return;
+  const desktop = fs.findByName(hd.id, "Desktop Folder");
+  if (!desktop) return;
+
+  for (const s of DESKTOP_SHORTCUTS) {
+    const existing = fs.findByName(desktop.id, s.name);
+    if (!existing) {
+      await fs.writeFile(
+        desktop.id,
+        s.name,
+        JSON.stringify({ appId: s.appId }),
+        "app-shortcut",
+        { icon: s.icon }
+      );
+    }
+  }
+}
+
+/**
+ * Load persisted third-party app manifests from MockFS and dynamically
+ * register them via the AppLoader. Manifests are stored as JSON files
+ * with fileType "app" under /Mockintosh HD/System/InstalledApps/.
+ */
+async function loadPersistedApps(fs: MockFS, loader: AppLoader): Promise<void> {
+  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
+  if (!hd) return;
+
+  let systemDir = fs.findByName(hd.id, "System");
+  if (!systemDir) {
+    systemDir = fs.mkdir(hd.id, "System");
+  }
+
+  let appsDir = fs.findByName(systemDir.id, "InstalledApps");
+  if (!appsDir) {
+    appsDir = fs.mkdir(systemDir.id, "InstalledApps");
+    return;
+  }
+
+  const children = fs.readDir(appsDir.id);
+  const manifests: AppManifest[] = [];
+
+  for (const node of children) {
+    if (node.kind !== "file") continue;
+    const file = node as FSFile;
+    if (file.fileType !== "app") continue;
+    const raw = await fs.readFile(file.id);
+    if (!raw) continue;
+    try {
+      const manifest: AppManifest = JSON.parse(raw);
+      if (manifest.id && manifest.entry) {
+        manifests.push(manifest);
+      }
+    } catch {}
+  }
+
+  if (manifests.length > 0) {
+    await loader.loadAll(manifests);
+  }
 }
 
 async function main() {
@@ -162,12 +225,15 @@ async function main() {
     SafariApp,
     PictureApp,
     AppStoreApp,
-    AppBuilderApp,
+    ChatGippityApp,
+    SpotifyPlayerApp,
     DialogApp,
   ].forEach((a) => appRegistry.register(a));
 
   // Register multi-window apps
   appRegistry.registerMultiWindow(FinderApp);
+
+  const appLoader = new AppLoader(sprites, appRegistry);
 
   setSplashSpriteRegistry(sprites);
 
@@ -259,8 +325,6 @@ async function main() {
     videoElement: video,
   });
 
-  const appHost = new AppHost(sprites, osServices, scheduleRender);
-
   function openFinderWindow(title: string, directoryId: string) {
     const windowId = title;
 
@@ -326,32 +390,14 @@ async function main() {
       _sprites: sprites,
       _os: osServices,
       _fs: mockFS,
+      _appLoader: appLoader,
       _openFSNode: (nodeId: string) => openFSNode(nodeId),
       _openWindow: (type: string, t: string, payload: any, defPos: any) => {
         const mappedId = appTypeMap[type] ?? type;
         openWindow(mappedId, t, payload, defPos);
       },
-      _openSandboxedApp: (app: SandboxedApp) => {
-        const winId = app.title ?? "User App";
-        windowManager.openWindow({
-          id: winId,
-          title: app.title ?? "User App",
-          x: pos.x ?? 40,
-          y: pos.y ?? 40,
-          width: app.defaultSize?.width ?? 200,
-          height: app.defaultSize?.height ?? 150,
-          contentHeight: app.defaultSize?.height ?? 150,
-          contentWidth: app.defaultSize?.width ?? 200,
-          appId: "__sandboxed__",
-          props: {},
-          scrollable: false,
-          resizable: false,
-          minWidth: 100,
-          minHeight: 60,
-        });
-        appHost.spawn(winId, app);
-        scheduleRender();
-      },
+      _bitCanvas: bitCanvas,
+      _windowManager: windowManager,
     });
 
     if (instance) {
@@ -405,27 +451,11 @@ async function main() {
       const raw = await mockFS.readFile(file.id);
       if (raw) {
         try {
-          const appData = JSON.parse(raw);
-          const pos = getDefaultPosition(windowManager.windows);
-          const winId = appData.title ?? "User App";
-          windowManager.openWindow({
-            id: winId,
-            title: appData.title ?? "User App",
-            x: pos.x ?? 40,
-            y: pos.y ?? 40,
-            width: appData.defaultSize?.width ?? 200,
-            height: appData.defaultSize?.height ?? 150,
-            contentHeight: appData.defaultSize?.height ?? 150,
-            contentWidth: appData.defaultSize?.width ?? 200,
-            appId: "__sandboxed__",
-            props: {},
-            scrollable: false,
-            resizable: false,
-            minWidth: 100,
-            minHeight: 60,
-          });
-          appHost.spawn(winId, appData);
-          scheduleRender();
+          const manifest: AppManifest = JSON.parse(raw);
+          if (manifest.id && manifest.entry) {
+            await appLoader.load(manifest);
+            openWindow(manifest.id);
+          }
         } catch {}
       }
       return;
@@ -560,17 +590,6 @@ async function main() {
   }
 
   function dispatchToApp(windowId: string, event: OSEvent) {
-    if (appHost.isRunning(windowId)) {
-      appHost.sendEvent(windowId, {
-        kind: event.type,
-        x: event.x,
-        y: event.y,
-        key: event.key,
-        code: event.code,
-      });
-      return;
-    }
-
     // Multi-window app (Finder)
     const win = windowManager.windows.find((w) => w.id === windowId);
     if (win && appRegistry.isMultiWindowApp(win.appId)) {
@@ -772,8 +791,12 @@ async function main() {
             event.y! < w.y + totalH
           );
         });
-      if (id && id.scrollable) {
-        windowManager.handleScroll(id, event.deltaY ?? 0);
+      if (id) {
+        if (id.scrollable) {
+          windowManager.handleScroll(id, event.deltaY ?? 0);
+        } else {
+          dispatchToApp(id.id, event);
+        }
         scheduleRender();
       }
       return;
@@ -795,6 +818,22 @@ async function main() {
     if (renderScheduled) return;
     renderScheduled = true;
     requestAnimationFrame(render);
+  }
+
+  function drawCornerMasks() {
+    const lt = sprites.get("corner-lt");
+    const rt = sprites.get("corner-rt");
+    const lb = sprites.get("corner-lb");
+    const rb = sprites.get("corner-rb");
+    if (lt) bitCanvas.blit(lt, 0, 0);
+    if (rt) bitCanvas.blit(rt, resolution.width - rt.width, 0);
+    if (lb) bitCanvas.blit(lb, 0, resolution.height - lb.height);
+    if (rb)
+      bitCanvas.blit(
+        rb,
+        resolution.width - rb.width,
+        resolution.height - rb.height
+      );
   }
 
   function render() {
@@ -819,6 +858,7 @@ async function main() {
         );
       const cur = sprites.get("cursor/default-1x");
       if (cur) bitCanvas.blit(cur, cursorX, cursorY);
+      drawCornerMasks();
       bitCanvas.flush(ctx2d);
       return;
     }
@@ -961,9 +1001,7 @@ async function main() {
         hitRegions
       );
 
-      if (appHost.isRunning(win.id)) {
-        appHost.executeCommands(win.id, contentCtx);
-      } else if (win.appId === "finder") {
+      if (win.appId === "finder") {
         const mwInst = appRegistry.getMultiWindowInstance("finder", win.id);
         if (mwInst) {
           mwInst.appBuilder.resetForRender();
@@ -1007,16 +1045,19 @@ async function main() {
     const cur = sprites.get("cursor/default-1x");
     if (cur) bitCanvas.blit(cur, cursorX, cursorY);
 
+    drawCornerMasks();
+
     bitCanvas.flush(ctx2d);
   }
 
   // --- Boot ---
+  registerAllSprites(sprites);
+  sprites.registerAll(spotifySprites);
   scheduleRender();
 
   const bootStart = Date.now();
 
   await loadFonts();
-  registerAllSprites(sprites);
 
   const fsBackend = new OPFSBackend();
   mockFS = new MockFS(fsBackend, sprites);
@@ -1093,6 +1134,9 @@ async function main() {
 
   mockFS.onChange(() => scheduleRender());
   updateMenubar();
+
+  // Load persisted third-party apps from MockFS
+  await loadPersistedApps(mockFS, appLoader);
 
   const elapsed = Date.now() - bootStart;
   const remaining = Math.max(0, BOOT_TIME - elapsed);

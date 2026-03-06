@@ -1,4 +1,4 @@
-import { NativeApp } from "../lib/canvas/AppRegistry";
+import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
@@ -7,7 +7,7 @@ import { OSEvent } from "../lib/canvas/EventManager";
 
 const SIDEBAR_WIDTH = 64;
 
-export const ControlPanelApp: NativeApp = {
+export const ControlPanelApp: SystemApp = {
   id: "control_panel",
   title: "Control Panel",
   icon: "icon/computer",

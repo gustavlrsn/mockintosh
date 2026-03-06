@@ -11,10 +11,10 @@ export interface WindowSize {
 }
 
 // ---------------------------------------------------------------------------
-// Single-window app (existing interface, unchanged)
+// Single-window app
 // ---------------------------------------------------------------------------
 
-export interface NativeApp {
+export interface SystemApp {
   id: string;
   title: string;
   icon: string;
@@ -39,7 +39,7 @@ export interface NativeApp {
 
 export interface AppInstance {
   appId: string;
-  app: NativeApp;
+  app: SystemApp;
   builder: AppBuilder;
   props: any;
 }
@@ -48,7 +48,7 @@ export interface AppInstance {
 // Multi-window app — one app instance can own many windows + background layers
 // ---------------------------------------------------------------------------
 
-export interface MultiWindowApp {
+export interface MultiWindowSystemApp {
   id: string;
   title: string;
   icon: string;
@@ -113,14 +113,14 @@ export interface MultiWindowApp {
   ): string[] | null;
 }
 
-interface MultiWindowAppState {
-  app: MultiWindowApp;
+interface MultiWindowSystemAppState {
+  app: MultiWindowSystemApp;
   appBuilder: AppBuilder;
   windowBuilders: Map<string, { builder: AppBuilder; props: any }>;
 }
 
 export interface MultiWindowInstance {
-  app: MultiWindowApp;
+  app: MultiWindowSystemApp;
   appBuilder: AppBuilder;
   winBuilder: AppBuilder;
   props: any;
@@ -131,23 +131,23 @@ export interface MultiWindowInstance {
 // ---------------------------------------------------------------------------
 
 export class AppRegistry {
-  private apps: Map<string, NativeApp> = new Map();
+  private apps: Map<string, SystemApp> = new Map();
   private instances: Map<string, AppInstance> = new Map();
 
-  private multiApps: Map<string, MultiWindowApp> = new Map();
-  private multiStates: Map<string, MultiWindowAppState> = new Map();
+  private multiApps: Map<string, MultiWindowSystemApp> = new Map();
+  private multiStates: Map<string, MultiWindowSystemAppState> = new Map();
 
   // --- Single-window apps (unchanged) ---
 
-  register(app: NativeApp) {
+  register(app: SystemApp) {
     this.apps.set(app.id, app);
   }
 
-  get(id: string): NativeApp | undefined {
+  get(id: string): SystemApp | undefined {
     return this.apps.get(id);
   }
 
-  getAll(): NativeApp[] {
+  getAll(): SystemApp[] {
     return Array.from(this.apps.values());
   }
 
@@ -187,7 +187,7 @@ export class AppRegistry {
 
   // --- Multi-window apps ---
 
-  registerMultiWindow(app: MultiWindowApp) {
+  registerMultiWindow(app: MultiWindowSystemApp) {
     this.multiApps.set(app.id, app);
   }
 
@@ -199,7 +199,7 @@ export class AppRegistry {
     }
 
     const appBuilder = new AppBuilder();
-    const state: MultiWindowAppState = {
+    const state: MultiWindowSystemAppState = {
       app,
       appBuilder,
       windowBuilders: new Map(),
@@ -297,7 +297,7 @@ export class AppRegistry {
     };
   }
 
-  getMultiWindowApp(appId: string): MultiWindowAppState | undefined {
+  getMultiWindowApp(appId: string): MultiWindowSystemAppState | undefined {
     return this.multiStates.get(appId);
   }
 

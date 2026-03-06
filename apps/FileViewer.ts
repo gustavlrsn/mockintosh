@@ -1,11 +1,11 @@
-import { NativeApp, WindowSize } from "../lib/canvas/AppRegistry";
+import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { WHITE } from "../lib/canvas/BitCanvas";
 import { measureTextBlock } from "../lib/canvas/ui/TextBlock";
 import { MockFS } from "../lib/canvas/fs/MockFS";
 
-export const FileViewerApp: NativeApp = {
+export const FileViewerApp: SystemApp = {
   id: "file",
   title: "File",
   icon: "icon/file",

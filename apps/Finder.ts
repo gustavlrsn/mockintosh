@@ -1,4 +1,4 @@
-import { MultiWindowApp, WindowSize } from "../lib/canvas/AppRegistry";
+import { MultiWindowSystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BitCanvas, BLACK, WHITE } from "../lib/canvas/BitCanvas";
@@ -230,7 +230,7 @@ function getFolderIconPos(
 // The Finder application
 // ---------------------------------------------------------------------------
 
-export const FinderApp: MultiWindowApp = {
+export const FinderApp: MultiWindowSystemApp = {
   id: "finder",
   title: "Finder",
   icon: "icon/folder",

@@ -1,0 +1,109 @@
+import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const PORT = 3001;
+
+function loadEnvLocal() {
+  try {
+    const envPath = resolve(import.meta.dirname!, "..", ".env.local");
+    const content = readFileSync(envPath, "utf-8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx === -1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      const value = trimmed.slice(eqIdx + 1).trim();
+      if (!process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    console.warn(
+      "No .env.local found — LLM_API_KEY must be set in environment"
+    );
+  }
+}
+
+loadEnvLocal();
+
+async function readBody(req: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString();
+}
+
+async function nodeToWebRequest(
+  req: IncomingMessage,
+  body: string
+): Promise<Request> {
+  const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  return new Request(url.toString(), {
+    method: req.method,
+    headers: req.headers as Record<string, string>,
+    body: req.method !== "GET" && req.method !== "HEAD" ? body : undefined,
+  });
+}
+
+async function webToNodeResponse(webRes: Response, res: ServerResponse) {
+  res.writeHead(webRes.status, Object.fromEntries(webRes.headers.entries()));
+
+  if (!webRes.body) {
+    res.end();
+    return;
+  }
+
+  const reader = webRes.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(value);
+    }
+  } finally {
+    res.end();
+  }
+}
+
+const { default: handler } = await import("../api/generate-app.js");
+
+const server = createServer(async (req, res) => {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    });
+    res.end();
+    return;
+  }
+
+  try {
+    const body = await readBody(req);
+    const webReq = await nodeToWebRequest(req, body);
+    const webRes = await handler(webReq);
+    await webToNodeResponse(webRes, res);
+  } catch (err) {
+    console.error("Handler error:", err);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Internal server error" }));
+  }
+});
+
+server.listen(PORT, () => {
+  const keySet =
+    !!process.env.LLM_API_KEY &&
+    process.env.LLM_API_KEY !== "sk-...your-key-here...";
+  console.log(`API server listening on http://localhost:${PORT}`);
+  console.log(`  LLM_MODEL: ${process.env.LLM_MODEL || "gpt-4o-mini"}`);
+  console.log(
+    `  LLM_API_KEY: ${
+      keySet ? "configured" : "NOT SET — will return sample app"
+    }`
+  );
+  if (!keySet) {
+    console.log("\n  Set your OpenAI key in .env.local:");
+    console.log("    LLM_API_KEY=sk-...");
+  }
+});

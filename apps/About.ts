@@ -1,4 +1,4 @@
-import { NativeApp } from "../lib/canvas/AppRegistry";
+import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
@@ -9,7 +9,7 @@ import pkg from "../package.json";
 const version = pkg.version;
 const contributors = [{ username: "gustavlrsn", commits: 74 }];
 
-export const AboutApp: NativeApp = {
+export const AboutApp: SystemApp = {
   id: "about",
   title: "About This Mockintosh",
   icon: "icon/computer",

@@ -1,11 +1,11 @@
-import { NativeApp } from "../lib/canvas/AppRegistry";
+import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
 import { OSEvent } from "../lib/canvas/EventManager";
 
-export const PictureApp: NativeApp = {
+export const PictureApp: SystemApp = {
   id: "picture",
   title: "Picture",
   icon: "icon/MacFlim",

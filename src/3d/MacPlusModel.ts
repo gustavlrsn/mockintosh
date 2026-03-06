@@ -15,7 +15,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
  * sub-rectangle of that UV space defined by the RASTER_UV_* constants.
  */
 
-const MODEL_PATH = "/mac.glb";
+const MODEL_PATH = "/mac-simple.glb";
 
 /**
  * The GLB was authored in mm. We scale it so the overall model is
@@ -55,6 +55,8 @@ export const RASTER_UV_MAX_Y = 1.0 - V_INSET;
 export interface MacPlusModelResult {
   group: THREE.Group;
   crtMesh: THREE.Mesh;
+  /** The brightness adjustment knob on the front-left of the case. */
+  brightnessKnob: THREE.Mesh | null;
   /** The original material from the GLB, for use when the screen is off. */
   screenOffMaterial: THREE.Material;
 }
@@ -70,6 +72,7 @@ export async function loadMacPlusModel(
 
   let crtMesh: THREE.Mesh | null = null;
   let screenOffMaterial: THREE.Material | null = null;
+  let brightnessKnob: THREE.Mesh | null = null;
 
   group.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
@@ -96,6 +99,8 @@ export async function loadMacPlusModel(
         clearcoatRoughness: 0.05,
       });
       child.renderOrder = 1;
+    } else if (child.name === "twist") {
+      brightnessKnob = child;
     }
   });
 
@@ -106,7 +111,12 @@ export async function loadMacPlusModel(
     );
   }
 
-  return { group, crtMesh, screenOffMaterial: screenOffMaterial! };
+  return {
+    group,
+    crtMesh,
+    brightnessKnob,
+    screenOffMaterial: screenOffMaterial!,
+  };
 }
 
 function getMeshNames(root: THREE.Object3D): string[] {

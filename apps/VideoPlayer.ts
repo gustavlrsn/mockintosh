@@ -1,4 +1,4 @@
-import { NativeApp, WindowSize } from "../lib/canvas/AppRegistry";
+import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
@@ -7,7 +7,7 @@ import Dither from "canvas-dither";
 
 const VIDEO_WIDTH = 340;
 
-export const VideoPlayerApp: NativeApp = {
+export const VideoPlayerApp: SystemApp = {
   id: "video",
   title: "1984.mp4",
   icon: "icon/MacFlim",

@@ -1,4 +1,4 @@
-import { NativeApp, WindowSize } from "../lib/canvas/AppRegistry";
+import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
@@ -299,7 +299,7 @@ function navigateTo(
 const HEADER_HEIGHT = 28;
 const CONTENT_MARGIN = 8;
 
-export const SafariApp: NativeApp = {
+export const SafariApp: SystemApp = {
   id: "safari",
   title: "Safari",
   icon: "icon/safari",

@@ -1,0 +1,11 @@
+{
+  "id": "myapp",
+  "title": "My App",
+  "description": "A Mockintosh app",
+  "icon": "myapp/icon",
+  "author": "your-github-username",
+  "version": "1.0.0",
+  "sdk": "^1.0.0",
+  "permissions": [],
+  "entry": "./dist/index.js"
+}

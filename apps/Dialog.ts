@@ -1,4 +1,4 @@
-import { NativeApp, WindowSize } from "../lib/canvas/AppRegistry";
+import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
@@ -44,7 +44,7 @@ export function computeDialogSize(
   return { width, height };
 }
 
-export const DialogApp: NativeApp = {
+export const DialogApp: SystemApp = {
   id: "__dialog__",
   title: "",
   icon: "icon/computer",

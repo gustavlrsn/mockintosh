@@ -86,7 +86,7 @@ async function init() {
   // --- CRT material ---
   const crtMaterial = createCRTPhysicalMaterial({
     screenTexture: upRT.texture,
-    emissiveIntensity: 1.5,
+    emissiveIntensity: 1.0,
     scanlineIntensity: 0.03,
     rasterMin: [RASTER_UV_MIN_X, RASTER_UV_MIN_Y],
     rasterMax: [RASTER_UV_MAX_X, RASTER_UV_MAX_Y],
@@ -95,6 +95,7 @@ async function init() {
   const {
     group: macModel,
     crtMesh,
+    brightnessKnob,
     screenOffMaterial,
   } = await loadMacPlusModel(crtMaterial);
   macModel.position.y = -1.5;
@@ -115,16 +116,77 @@ async function init() {
     powerBtn.classList.toggle("off", !screenOn);
   });
 
-  const brightnessSlider = document.getElementById(
-    "brightness"
-  )! as HTMLInputElement;
-  brightnessSlider.addEventListener("input", () => {
-    const val = parseFloat(brightnessSlider.value);
+  // --- Brightness knob interaction ---
+  // The knob mesh ("twist") has vertices baked in absolute model coordinates
+  // (~440mm from origin) with no translation. Rotating the mesh as-is swings
+  // it around the scene origin. Fix: shift the geometry so the mesh's local
+  // origin is at its geometric center, then set mesh.position to compensate.
+  // Now rotation acts around the knob's own center.
+  const BRIGHTNESS_MIN = 0.2;
+  const BRIGHTNESS_MAX = 3.0;
+  let currentBrightness = 1.0;
+  const KNOB_SENSITIVITY = 0.015;
+
+  let knobDragging = false;
+  let knobDragLastY = 0;
+
+  if (brightnessKnob) {
+    brightnessKnob.geometry.computeBoundingBox();
+    const center = brightnessKnob.geometry.boundingBox!.getCenter(
+      new THREE.Vector3()
+    );
+    brightnessKnob.geometry.translate(-center.x, -center.y, -center.z);
+    // position is in parent space (post-quaternion), so we must rotate the
+    // geometry-space center by the mesh's own quaternion to compensate.
+    brightnessKnob.position
+      .copy(center)
+      .applyQuaternion(brightnessKnob.quaternion);
+
+    console.log("[KNOB DEBUG] center:", center);
+    console.log(
+      "[KNOB DEBUG] rotated position:",
+      brightnessKnob.position.clone()
+    );
+    console.log(
+      "[KNOB DEBUG] world position:",
+      brightnessKnob.getWorldPosition(new THREE.Vector3())
+    );
+  }
+
+  const knobBaseQuat = brightnessKnob
+    ? brightnessKnob.quaternion.clone()
+    : new THREE.Quaternion();
+
+  function setBrightness(val: number) {
+    currentBrightness = Math.max(BRIGHTNESS_MIN, Math.min(BRIGHTNESS_MAX, val));
+    console.log("[KNOB] brightness:", currentBrightness.toFixed(2));
     const shader = (crtMaterial as CRTPhysicalMaterial).__crtShader;
     if (shader) {
-      shader.uniforms.uCrtEmissiveIntensity.value = val;
+      shader.uniforms.uCrtEmissiveIntensity.value = currentBrightness;
     }
-  });
+    if (brightnessKnob) {
+      const t =
+        (currentBrightness - BRIGHTNESS_MIN) /
+        (BRIGHTNESS_MAX - BRIGHTNESS_MIN);
+      // Spin ~270° across the full range; local Y is the cylindrical axis
+      const angle = t * Math.PI * 1.5;
+      const spinQuat = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        angle
+      );
+      brightnessKnob.quaternion.copy(knobBaseQuat).multiply(spinQuat);
+    }
+  }
+
+  // Initialize knob visual rotation
+  setBrightness(currentBrightness);
+
+  if (brightnessKnob) {
+    console.log(
+      "[KNOB DEBUG] after setBrightness world position:",
+      brightnessKnob.getWorldPosition(new THREE.Vector3())
+    );
+  }
 
   // --- Floor ---
   const floorGeo = new THREE.PlaneGeometry(20, 20);
@@ -141,9 +203,50 @@ async function init() {
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
 
-  function onPointerEvent(event: PointerEvent) {
+  function updatePointerNDC(event: { clientX: number; clientY: number }) {
     pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
     pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  }
+
+  function hitsKnob(): boolean {
+    if (!brightnessKnob) return false;
+    raycaster.setFromCamera(pointer, camera);
+    return raycaster.intersectObject(brightnessKnob).length > 0;
+  }
+
+  // --- Knob drag ---
+  renderer.domElement.addEventListener("pointerdown", (event) => {
+    updatePointerNDC(event);
+    if (hitsKnob()) {
+      knobDragging = true;
+      knobDragLastY = event.clientY;
+      controls.enabled = false;
+      renderer.domElement.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    }
+  });
+
+  renderer.domElement.addEventListener("pointermove", (event) => {
+    if (knobDragging) {
+      const dy = knobDragLastY - event.clientY;
+      knobDragLastY = event.clientY;
+      setBrightness(currentBrightness + dy * KNOB_SENSITIVITY);
+      renderer.domElement.style.cursor = "ns-resize";
+      return;
+    }
+  });
+
+  renderer.domElement.addEventListener("pointerup", (event) => {
+    if (knobDragging) {
+      knobDragging = false;
+      renderer.domElement.releasePointerCapture(event.pointerId);
+    }
+  });
+
+  // --- Screen interaction ---
+  function onScreenPointerEvent(event: PointerEvent) {
+    if (knobDragging) return;
+    updatePointerNDC(event);
 
     raycaster.setFromCamera(pointer, camera);
     const hits = raycaster.intersectObject(crtMesh);
@@ -164,13 +267,12 @@ async function init() {
     }
   }
 
-  renderer.domElement.addEventListener("pointermove", onPointerEvent);
-  renderer.domElement.addEventListener("pointerdown", onPointerEvent);
-  renderer.domElement.addEventListener("pointerup", onPointerEvent);
+  renderer.domElement.addEventListener("pointermove", onScreenPointerEvent);
+  renderer.domElement.addEventListener("pointerdown", onScreenPointerEvent);
+  renderer.domElement.addEventListener("pointerup", onScreenPointerEvent);
 
   renderer.domElement.addEventListener("dblclick", (event) => {
-    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
-    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    updatePointerNDC(event);
 
     raycaster.setFromCamera(pointer, camera);
     const hits = raycaster.intersectObject(crtMesh);
@@ -183,20 +285,31 @@ async function init() {
     }
   });
 
+  // --- Cursor + orbit control toggle ---
   let pointerOverScreen = false;
   renderer.domElement.addEventListener("pointermove", (event) => {
-    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
-    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    if (knobDragging) return;
+    updatePointerNDC(event);
 
     raycaster.setFromCamera(pointer, camera);
-    const hits = raycaster.intersectObject(crtMesh);
+
+    // Check knob hover
+    const overKnob = hitsKnob();
+
+    // Check screen hover
+    const screenHits = raycaster.intersectObject(crtMesh);
     const onRaster =
-      hits.length > 0 &&
-      !!hits[0].uv &&
-      !!mapCRTUVToCanvas(hits[0].uv.x, hits[0].uv.y);
+      screenHits.length > 0 &&
+      !!screenHits[0].uv &&
+      !!mapCRTUVToCanvas(screenHits[0].uv.x, screenHits[0].uv.y);
     pointerOverScreen = onRaster;
-    controls.enabled = !pointerOverScreen;
-    renderer.domElement.style.cursor = pointerOverScreen ? "none" : "";
+
+    controls.enabled = !pointerOverScreen && !overKnob;
+    renderer.domElement.style.cursor = pointerOverScreen
+      ? "none"
+      : overKnob
+      ? "ns-resize"
+      : "";
   });
 
   // --- Resize ---

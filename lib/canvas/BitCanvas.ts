@@ -382,4 +382,38 @@ export class BitCanvas {
     }
     ctx.putImageData(this.imageData, 0, 0);
   }
+
+  /**
+   * Capture a rectangular region of the 1-bit buffer as a PNG data URL.
+   * Uses an offscreen canvas to encode the pixels.
+   */
+  captureRegion(x: number, y: number, w: number, h: number): string {
+    x = Math.max(0, x | 0);
+    y = Math.max(0, y | 0);
+    w = Math.min(w | 0, this.width - x);
+    h = Math.min(h | 0, this.height - y);
+    if (w <= 0 || h <= 0) return "";
+
+    const offscreen = document.createElement("canvas");
+    offscreen.width = w;
+    offscreen.height = h;
+    const ctx = offscreen.getContext("2d")!;
+    const imgData = ctx.createImageData(w, h);
+    const rgba = imgData.data;
+
+    for (let py = 0; py < h; py++) {
+      for (let px = 0; px < w; px++) {
+        const srcIdx = (y + py) * this.width + (x + px);
+        const color = this.pixels[srcIdx] ? 0 : 255;
+        const dstIdx = (py * w + px) * 4;
+        rgba[dstIdx] = color;
+        rgba[dstIdx + 1] = color;
+        rgba[dstIdx + 2] = color;
+        rgba[dstIdx + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    return offscreen.toDataURL("image/png");
+  }
 }
