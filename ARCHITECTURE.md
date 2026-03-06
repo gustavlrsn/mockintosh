@@ -272,7 +272,30 @@ Key capabilities:
 
 ## AppContext
 
-A scoped drawing proxy given to each app. Wraps `BitCanvas` with coordinate offset, automatic clipping, hit region registration, and UI component drawing (buttons, text inputs, text blocks).
+A scoped drawing proxy given to each app. Wraps `BitCanvas` with coordinate offset, automatic clipping, hit region registration, and UI component drawing (buttons, text inputs, text blocks, scroll areas).
+
+### ScrollArea
+
+`ctx.scrollArea(id, rect, opts, drawContent)` is a composable scrollable region. It handles clipping, scrollbar rendering (classic Mac style), and all scroll interaction (wheel, arrows, thumb drag) — the app only manages the scroll offset via `useState`.
+
+Use `scrollArea` when only **part** of the window content should scroll (e.g., a message list with a fixed input bar). For windows where the entire content scrolls, set `scrollable: true` on the app and implement `getContentHeight` — the OS handles the scrollbar in the window chrome.
+
+```typescript
+const [scrollOffset, setScrollOffset] = app.useState(0);
+
+ctx.scrollArea(
+  "my-list",
+  { x: 0, y: 0, w: ctx.width, h: ctx.height - TOOLBAR_HEIGHT },
+  {
+    contentHeight: totalHeight,
+    scrollOffset,
+    onScroll: setScrollOffset,
+  },
+  (scrollCtx) => {
+    // draw content as if starting at (0,0) — scrollCtx handles the offset
+  }
+);
+```
 
 ## AppBuilder (Hooks)
 

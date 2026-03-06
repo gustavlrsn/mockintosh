@@ -297,25 +297,77 @@ getMenubar(app: AppBuilder, props: AppProps): MenubarDefinition[] {
 
 ## Scrollable Content
 
-For apps with content taller than the window:
+There are two scrolling patterns. Choose based on what scrolls.
+
+### Full-window scrolling
+
+Use this when the entire content area of the window scrolls (e.g., a list, a document viewer). Set `scrollable: true` and implement `getContentHeight`. The OS renders the scrollbar in the window chrome and offsets the entire `AppContext`.
 
 ```typescript
 const MyApp: App = {
-  // ...
   scrollable: true,
   resizable: true,
   minSize: { width: 150, height: 100 },
 
   getContentHeight(app, props, size) {
-    // Return the total content height
     return items.length * ITEM_HEIGHT + HEADER_HEIGHT;
   },
 
   render(app, ctx, props) {
-    // ctx.scrollY gives the current scroll offset
-    // Draw as if from (0,0) — the OS handles clipping
+    // Draw as if starting at (0,0) with unlimited height.
+    // The OS clips and offsets automatically.
+    // ctx.scrollY gives the current scroll offset if you need it.
   },
 };
+```
+
+### Partial scrolling with ScrollArea
+
+Use `ctx.scrollArea()` when only **part** of the window scrolls — for example, a chat message list with a fixed input bar at the bottom, or a panel with a fixed header and scrollable body.
+
+The app owns the scroll state (via `useState`). The `ScrollArea` handles clipping, the classic Mac scrollbar, and all interaction (wheel, arrows, thumb drag).
+
+```typescript
+const MyApp: App = {
+  // Note: scrollable is false (or omitted) — the window chrome has no scrollbar
+
+  render(app, ctx, props) {
+    const [scrollOffset, setScrollOffset] = app.useState(0);
+
+    const FIXED_BAR_HEIGHT = 30;
+    const scrollableH = ctx.height - FIXED_BAR_HEIGHT;
+    const totalContentHeight = items.length * ITEM_HEIGHT;
+
+    ctx.scrollArea(
+      "my-list",
+      { x: 0, y: 0, w: ctx.width, h: scrollableH },
+      {
+        contentHeight: totalContentHeight,
+        scrollOffset,
+        onScroll: setScrollOffset,
+      },
+      (scrollCtx) => {
+        // scrollCtx is clipped and offset — draw content starting at (0,0).
+        // Available width is ctx.width - 15 (scrollbar takes 15px on the right).
+        for (let i = 0; i < items.length; i++) {
+          scrollCtx.drawText(items[i], 4, i * ITEM_HEIGHT, { font: "Geneva9" });
+        }
+      }
+    );
+
+    // This draws below the scroll area, fixed in place
+    ctx.drawHLine(0, scrollableH, ctx.width, BLACK);
+    ctx.drawButton({ x: 8, y: scrollableH + 6, label: "Action", id: "btn" });
+  },
+};
+```
+
+To programmatically scroll (e.g., auto-scroll to bottom when new content arrives), update the `scrollOffset` state directly:
+
+```typescript
+// Scroll to bottom after adding a new message
+const newContentHeight = computeNewHeight();
+setScrollOffset(Math.max(0, newContentHeight - visibleHeight));
 ```
 
 ## The Manifest: mockintosh.json

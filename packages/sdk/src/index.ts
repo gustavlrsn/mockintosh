@@ -189,6 +189,19 @@ export interface AppBuilder {
 }
 
 // ---------------------------------------------------------------------------
+// ScrollArea
+// ---------------------------------------------------------------------------
+
+export interface ScrollAreaOptions {
+  contentHeight: number;
+  scrollOffset: number;
+  onScroll: (newOffset: number) => void;
+  /** When set, a resize handle is drawn at the bottom-right corner of the scroll
+   *  area. Dragging it resizes the window. */
+  resize?: "both" | "vertical" | "horizontal";
+}
+
+// ---------------------------------------------------------------------------
 // AppContext interface (provided at runtime by the OS)
 // ---------------------------------------------------------------------------
 
@@ -276,6 +289,12 @@ export interface AppContext {
     font?: FontName,
     lineSpacing?: number
   ): number;
+  scrollArea(
+    id: string,
+    rect: { x: number; y: number; w: number; h: number },
+    opts: ScrollAreaOptions,
+    drawContent: (ctx: AppContext) => void
+  ): void;
   clear(color?: number): void;
   hitRegion(
     id: string,

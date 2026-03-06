@@ -792,10 +792,18 @@ async function main() {
           );
         });
       if (id) {
-        if (id.scrollable) {
-          windowManager.handleScroll(id, event.deltaY ?? 0);
-        } else {
-          dispatchToApp(id.id, event);
+        // ScrollArea hit regions take priority — they handle their own wheel events
+        const consumedByScrollArea = hitRegions.handleScroll(
+          event.x!,
+          event.y!,
+          event.deltaY ?? 0
+        );
+        if (!consumedByScrollArea) {
+          if (id.scrollable) {
+            windowManager.handleScroll(id, event.deltaY ?? 0);
+          } else {
+            dispatchToApp(id.id, event);
+          }
         }
         scheduleRender();
       }

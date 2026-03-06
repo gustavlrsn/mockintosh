@@ -160,7 +160,32 @@ export class WindowManager {
     hitRegions?: HitRegionMap
   ): AppContext {
     const r = this.getContentRect(win);
-    return new AppContext(canvas, r.x, r.y, r.w, r.h, win.scrollY, hitRegions);
+    const onStartResize = (
+      startX: number,
+      startY: number,
+      startWidth: number,
+      startHeight: number
+    ) => {
+      this.resizing = {
+        windowId: win.id,
+        startX,
+        startY,
+        startWidth,
+        startHeight,
+      };
+    };
+    return new AppContext(
+      canvas,
+      r.x,
+      r.y,
+      r.w,
+      r.h,
+      win.scrollY,
+      hitRegions,
+      onStartResize,
+      { width: win.minWidth, height: win.minHeight },
+      { width: win.width, height: win.height }
+    );
   }
 
   toContentLocal(

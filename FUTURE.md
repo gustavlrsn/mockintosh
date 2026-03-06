@@ -96,6 +96,29 @@ Should the OS lock to specific app versions, or always load the latest approved?
 
 Should users see a permissions prompt when installing apps (like mobile), or is the review process sufficient?
 
+## Window open/close animation (explore later)
+
+The original Mac Window Manager does **not** animate windows opening or closing at the system level—it shows or hides them immediately and redraws. The Human Interface Guidelines, however, encourage an _illusion_ of direct manipulation: e.g. a window “retreating into” its document icon when closed, or the Finder-style “zoom” from an icon into a window when opening. Those effects are **application-level** (the Finder draws them), not provided by the Window Manager.
+
+For Mockintosh we could explore, later:
+
+- **App-level effects:** Let applications (e.g. Finder) implement their own open/close transitions—e.g. when opening a document from the desktop, animate a rectangle growing from the icon to the window bounds; when closing, animate the window shrinking back to the icon. The OS would only need to expose hooks (e.g. “window about to open” / “about to close”) and perhaps a way to draw a transition frame (or the app draws to the canvas during the transition).
+- **Optional OS-level helper:** A small animation helper (e.g. “draw grow-from-rect over N frames”) that apps or the Finder could call for a consistent “zoom open/close” feel without each app reimplementing it.
+
+No change to the current refactor plan: we keep immediate show/hide to match classic Mac WM behavior. This is a future enhancement for a more polished, HIG-aligned feel.
+
+## refCon on Windows (explore later)
+
+The original Mac Window Record had a **refCon** (reference constant) field: an application-defined value the Window Manager stored but never interpreted. We deferred adding it in the Window Manager refactor because its use wasn’t critical yet; it’s worth exploring later.
+
+**Why it could be useful:**
+
+- **Document–window binding:** When an app opens one window per document (e.g. FileViewer per file), it could set `refCon` to the document id or a handle when creating the window. On activate, update, or close events, the app gets the window back and reads `refCon` to know which document to update or save—without maintaining a separate `windowId → document` map.
+- **Dialog context:** A modal or modeless dialog could store a reference to the parent window or the operation it’s for, so when the user clicks OK/Cancel the app knows where to route the result.
+- **Palette state:** A utility window could store a handle to its tool state or configuration.
+
+Today we have `windowId`, `appId`, and `props` per window; `refCon` would be a single optional slot (e.g. `refCon?: unknown`) set at open time. The OS would never read or interpret it—only pass it back when the window is referenced. If we later want a cleaner “window ↔ document” story or fewer ad-hoc maps in app code, adding refCon is a small, Mac-aligned option. See the Window Manager refactor plan for the deferred refCon item.
+
 ## Font System Overhaul
 
 The current font rendering path triggers `willReadFrequently` warnings from Chrome — `buildGlyphCache` in `fontAdapter.ts` makes repeated `getImageData` calls on a canvas that wasn't created with the `willReadFrequently` hint. The immediate fix is to pass `{ willReadFrequently: true }` when creating that offscreen canvas, but this is a good opportunity to review the font subsystem more broadly:

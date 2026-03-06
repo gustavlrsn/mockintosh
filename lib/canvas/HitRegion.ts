@@ -12,6 +12,7 @@ export interface HitRegion {
   onClick?: (x: number, y: number) => void;
   onDoubleClick?: (x: number, y: number) => void;
   onDrag?: (x: number, y: number) => void;
+  onScroll?: (deltaY: number) => void;
 }
 
 export class HitRegionMap {
@@ -88,6 +89,15 @@ export class HitRegionMap {
     const hit = this.hitTest(x, y);
     if (hit?.onDoubleClick) {
       hit.onDoubleClick(x - hit.x, y - hit.y);
+      return true;
+    }
+    return false;
+  }
+
+  handleScroll(x: number, y: number, deltaY: number): boolean {
+    const hit = this.hitTest(x, y);
+    if (hit?.onScroll) {
+      hit.onScroll(deltaY);
       return true;
     }
     return false;

@@ -66,7 +66,7 @@ async function webToNodeResponse(webRes: Response, res: ServerResponse) {
   }
 }
 
-const { default: handler } = await import("../api/generate-app.js");
+const { default: handler } = await import("../api/chat.js");
 
 const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
@@ -99,11 +99,11 @@ server.listen(PORT, () => {
   console.log(`  LLM_MODEL: ${process.env.LLM_MODEL || "gpt-4o-mini"}`);
   console.log(
     `  LLM_API_KEY: ${
-      keySet ? "configured" : "NOT SET — will return sample app"
+      keySet ? "configured" : "NOT SET — ChatGippity will return errors"
     }`
   );
   if (!keySet) {
-    console.log("\n  Set your OpenAI key in .env.local:");
+    console.log("\n  Set your LLM key in .env.local:");
     console.log("    LLM_API_KEY=sk-...");
   }
 });

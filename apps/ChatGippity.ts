@@ -1,4 +1,4 @@
-import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
+import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppContext } from "../lib/canvas/AppContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
@@ -61,6 +61,22 @@ function wrapText(text: string, maxWidth: number): string[] {
   return lines;
 }
 
+function computeContentHeight(
+  messages: ChatMessage[],
+  loading: boolean,
+  contentWidth: number
+): number {
+  let h = 4;
+  for (const msg of messages) {
+    const prefix = msg.role === "user" ? "You: " : "Gippity: ";
+    h += wrapText(prefix + msg.content, contentWidth).length * LINE_HEIGHT + 4;
+  }
+  if (loading) {
+    h += wrapText("Gippity: ...", contentWidth).length * LINE_HEIGHT + 4;
+  }
+  return h;
+}
+
 function doSend(
   messages: ChatMessage[],
   inputState: TextInputState,
@@ -102,7 +118,7 @@ export const ChatGippityApp: SystemApp = {
   icon: "icon/computer",
   defaultSize: { width: 280, height: 300 },
   scrollable: false,
-  resizable: true,
+  resizable: false,
   minSize: { width: 200, height: 160 },
 
   // Hook order: messages, inputState, loading, scrollOffset
@@ -116,49 +132,59 @@ export const ChatGippityApp: SystemApp = {
 
     ctx.clear(WHITE);
 
-    const contentWidth = ctx.width - 8;
+    // The scrollbar takes 15px from the right of the scroll area
+    const scrollBarWidth = 15;
     const chatAreaHeight = ctx.height - BAR_HEIGHT;
+    const contentWidth = ctx.width - scrollBarWidth - 8;
 
-    let totalContentHeight = 4;
-    const messageLayouts: Array<{
-      role: string;
-      lines: string[];
-      y: number;
-    }> = [];
+    const totalContentHeight = computeContentHeight(
+      messages,
+      loading,
+      contentWidth
+    );
 
-    for (const msg of messages) {
-      const prefix = msg.role === "user" ? "You: " : "Gippity: ";
-      const wrapped = wrapText(prefix + msg.content, contentWidth);
-      messageLayouts.push({
-        role: msg.role,
-        lines: wrapped,
-        y: totalContentHeight,
+    if (messages.length === 0 && !loading) {
+      const welcomeY = chatAreaHeight / 2 - 20;
+      ctx.drawText("Welcome to ChatGippity!", ctx.width / 2 - 60, welcomeY, {
+        font: TITLE_FONT,
+        color: BLACK,
       });
-      totalContentHeight += wrapped.length * LINE_HEIGHT + 4;
+      ctx.drawText(
+        "Type a message below to start chatting.",
+        20,
+        welcomeY + 18,
+        { font: FONT, color: BLACK }
+      );
     }
 
-    if (loading) {
-      const wrapped = wrapText("Gippity: ...", contentWidth);
-      messageLayouts.push({
-        role: "assistant",
-        lines: wrapped,
-        y: totalContentHeight,
-      });
-      totalContentHeight += wrapped.length * LINE_HEIGHT + 4;
-    }
+    ctx.scrollArea(
+      "chat-messages",
+      { x: 0, y: 0, w: ctx.width, h: chatAreaHeight },
+      {
+        contentHeight: totalContentHeight,
+        scrollOffset,
+        onScroll: setScrollOffset,
+        resize: "both",
+      },
+      (scrollCtx) => {
+        let y = 4;
+        const allMessages = loading
+          ? [...messages, { role: "assistant" as const, content: "..." }]
+          : messages;
 
-    const maxScroll = Math.max(0, totalContentHeight - chatAreaHeight);
-    const clampedScroll = Math.min(scrollOffset, maxScroll);
-
-    ctx.pushClip(0, 0, ctx.width, chatAreaHeight);
-    for (const layout of messageLayouts) {
-      for (let i = 0; i < layout.lines.length; i++) {
-        const ly = layout.y + i * LINE_HEIGHT - clampedScroll;
-        if (ly + LINE_HEIGHT < 0 || ly > chatAreaHeight) continue;
-        ctx.drawText(layout.lines[i], 4, ly, { font: FONT, color: BLACK });
+        for (const msg of allMessages) {
+          const prefix = msg.role === "user" ? "You: " : "Gippity: ";
+          const wrapped = wrapText(prefix + msg.content, contentWidth);
+          for (let i = 0; i < wrapped.length; i++) {
+            scrollCtx.drawText(wrapped[i], 4, y + i * LINE_HEIGHT, {
+              font: FONT,
+              color: BLACK,
+            });
+          }
+          y += wrapped.length * LINE_HEIGHT + 4;
+        }
       }
-    }
-    ctx.popClip();
+    );
 
     ctx.drawHLine(0, chatAreaHeight, ctx.width, BLACK);
 
@@ -189,24 +215,10 @@ export const ChatGippityApp: SystemApp = {
         );
       },
     });
-
-    if (messages.length === 0 && !loading) {
-      const welcomeY = chatAreaHeight / 2 - 20;
-      ctx.drawText("Welcome to ChatGippity!", ctx.width / 2 - 60, welcomeY, {
-        font: TITLE_FONT,
-        color: BLACK,
-      });
-      ctx.drawText(
-        "Type a message below to start chatting.",
-        20,
-        welcomeY + 18,
-        { font: FONT, color: BLACK }
-      );
-    }
   },
 
   // Hook order must match render: messages, inputState, loading, scrollOffset
-  onEvent(app: AppBuilder, event: OSEvent, props: any, size: WindowSize) {
+  onEvent(app: AppBuilder, event: OSEvent, props: any, size: any) {
     const [messages, setMessages] = app.useState<ChatMessage[]>([]);
     const [inputState] = app.useState<TextInputState>(createTextInputState(""));
     const [loading, setLoading] = app.useState(false);
@@ -215,16 +227,10 @@ export const ChatGippityApp: SystemApp = {
     if (event.type === "keyDown") {
       if (event.key === "Enter") {
         if (!loading && inputState?.value?.trim()) {
+          const scrollBarWidth = 15;
+          const contentWidth = size.width - scrollBarWidth - 8;
           const chatAreaHeight = size.height - BAR_HEIGHT;
-          const contentWidth = size.width - 8;
-          let totalH = 4;
-          for (const msg of messages) {
-            const prefix = msg.role === "user" ? "You: " : "Gippity: ";
-            totalH +=
-              wrapText(prefix + msg.content, contentWidth).length *
-                LINE_HEIGHT +
-              4;
-          }
+          const totalH = computeContentHeight(messages, loading, contentWidth);
           doSend(
             messages,
             inputState,
@@ -250,11 +256,6 @@ export const ChatGippityApp: SystemApp = {
       ) {
         app.scheduleRender();
       }
-    }
-
-    if (event.type === "scroll") {
-      const delta = (event as any).deltaY ?? 0;
-      setScrollOffset((prev: number) => Math.max(0, prev + delta));
     }
   },
 

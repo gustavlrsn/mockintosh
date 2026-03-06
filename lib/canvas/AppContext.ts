@@ -16,6 +16,21 @@ import {
 } from "./ui/TextBlock";
 import { HitRegion, HitRegionMap } from "./HitRegion";
 
+const SCROLL_AREA_BAR_WIDTH = 15;
+const SCROLL_AREA_ARROW_HEIGHT = 15;
+const SCROLL_STEP = 12;
+const GROW_BOX_SIZE = 15;
+
+export interface ScrollAreaOptions {
+  contentHeight: number;
+  scrollOffset: number;
+  onScroll: (newOffset: number) => void;
+  /** When set, a resize handle is drawn at the bottom-right corner of the scroll
+   *  area. Dragging it resizes the window. Requires the window to have been
+   *  created with the AppContext resize callback (standard windows always have it). */
+  resize?: "both" | "vertical" | "horizontal";
+}
+
 /**
  * A scoped drawing context for an app, clipped and offset to the window's
  * content area. Apps draw in local coordinates (0,0 is top-left of their area).
@@ -28,6 +43,17 @@ export class AppContext {
   private h: number;
   private scrollOffsetY: number;
   private _hitRegions: HitRegionMap | undefined;
+  private _onStartResize:
+    | ((
+        startX: number,
+        startY: number,
+        startWidth: number,
+        startHeight: number
+      ) => void)
+    | undefined;
+  private _minSize: { width: number; height: number } | undefined;
+  /** Full window dimensions at context creation time, for grow-box resize baseline. */
+  private _windowSize: { width: number; height: number } | undefined;
 
   constructor(
     canvas: BitCanvas,
@@ -36,7 +62,15 @@ export class AppContext {
     w: number,
     h: number,
     scrollY: number = 0,
-    hitRegions?: HitRegionMap
+    hitRegions?: HitRegionMap,
+    onStartResize?: (
+      startX: number,
+      startY: number,
+      startWidth: number,
+      startHeight: number
+    ) => void,
+    minSize?: { width: number; height: number },
+    windowSize?: { width: number; height: number }
   ) {
     this.canvas = canvas;
     this.ox = x;
@@ -45,6 +79,9 @@ export class AppContext {
     this.h = h;
     this.scrollOffsetY = scrollY;
     this._hitRegions = hitRegions;
+    this._onStartResize = onStartResize;
+    this._minSize = minSize;
+    this._windowSize = windowSize;
     canvas.pushClip(x, y, w, h);
   }
 
@@ -349,6 +386,197 @@ export class AppContext {
     lineSpacing?: number
   ): number {
     return _measureTextBlock(text, maxWidth, font, lineSpacing);
+  }
+
+  /**
+   * Draw a scrollable region within the app's content area.
+   *
+   * The app owns the scroll state and passes it via `opts`. The ScrollArea
+   * handles clipping, scrollbar rendering, and all hit regions — the app
+   * only needs to draw content inside `drawContent(scrollCtx)` as if it
+   * starts at (0,0) with unlimited height.
+   *
+   * The content width available inside `drawContent` is `rect.w - 15` (scrollbar).
+   */
+  scrollArea(
+    id: string,
+    rect: { x: number; y: number; w: number; h: number },
+    opts: ScrollAreaOptions,
+    drawContent: (ctx: AppContext) => void
+  ) {
+    if (!this._hitRegions) return;
+
+    const { contentHeight, scrollOffset, onScroll, resize } = opts;
+    const hasGrowBox = !!resize && !!this._onStartResize;
+    const growBoxSize = hasGrowBox ? GROW_BOX_SIZE : 0;
+
+    const maxScroll = Math.max(0, contentHeight - rect.h);
+    const clampedOffset = Math.min(scrollOffset, maxScroll);
+
+    const sbW = SCROLL_AREA_BAR_WIDTH;
+    const contentW = rect.w - sbW;
+
+    // Screen-absolute origin of the scroll area (accounting for parent window scroll)
+    const absX = this.ox + rect.x;
+    const absY = this.oy + rect.y - this.scrollOffsetY;
+
+    // --- Draw content (clipped, offset by scroll) ---
+    const contentCtx = new AppContext(
+      this.canvas,
+      absX,
+      absY,
+      contentW,
+      rect.h,
+      clampedOffset,
+      this._hitRegions
+    );
+    drawContent(contentCtx);
+    contentCtx.release();
+
+    // --- Draw scrollbar chrome directly on BitCanvas (no extra offset) ---
+    const sbx = absX + contentW;
+    const sby = absY;
+    // When there's a grow box, the scrollbar track is shorter by GROW_BOX_SIZE
+    const bodyH = rect.h - growBoxSize;
+
+    this.canvas.drawVLine(sbx, sby, rect.h, BLACK);
+
+    const trackTop = sby + SCROLL_AREA_ARROW_HEIGHT;
+    const trackH = bodyH - SCROLL_AREA_ARROW_HEIGHT * 2;
+    const arrowCx = sbx + 7;
+
+    // Up arrow
+    this.canvas.fillRect(
+      sbx + 1,
+      sby,
+      sbW - 1,
+      SCROLL_AREA_ARROW_HEIGHT,
+      WHITE
+    );
+    this.canvas.drawHLine(sbx, sby + SCROLL_AREA_ARROW_HEIGHT - 1, sbW, BLACK);
+    this.canvas.setPixel(arrowCx, sby + 4, BLACK);
+    this.canvas.drawHLine(arrowCx - 1, sby + 5, 3, BLACK);
+    this.canvas.drawHLine(arrowCx - 2, sby + 6, 5, BLACK);
+    this.canvas.drawHLine(arrowCx - 3, sby + 7, 7, BLACK);
+
+    // Down arrow — sits directly above grow box (or at bottom of full height)
+    const downTop = sby + bodyH - SCROLL_AREA_ARROW_HEIGHT;
+    this.canvas.fillRect(
+      sbx + 1,
+      downTop,
+      sbW - 1,
+      SCROLL_AREA_ARROW_HEIGHT,
+      WHITE
+    );
+    this.canvas.drawHLine(sbx, downTop, sbW, BLACK);
+    this.canvas.setPixel(arrowCx, downTop + 10, BLACK);
+    this.canvas.drawHLine(arrowCx - 1, downTop + 9, 3, BLACK);
+    this.canvas.drawHLine(arrowCx - 2, downTop + 8, 5, BLACK);
+    this.canvas.drawHLine(arrowCx - 3, downTop + 7, 7, BLACK);
+
+    // Track
+    const needsScroll = contentHeight > rect.h;
+    if (needsScroll) {
+      this.canvas.fillPattern(sbx + 1, trackTop, sbW - 1, trackH, "gray50");
+
+      const thumbH = Math.max(
+        12,
+        Math.floor((rect.h / contentHeight) * trackH)
+      );
+      const thumbY =
+        trackTop + Math.floor((clampedOffset / maxScroll) * (trackH - thumbH));
+      this.canvas.fillRect(sbx + 1, thumbY, sbW - 2, thumbH, WHITE);
+      this.canvas.drawRect(sbx + 1, thumbY, sbW - 2, thumbH, BLACK);
+    } else {
+      this.canvas.fillRect(sbx + 1, trackTop, sbW - 1, trackH, WHITE);
+    }
+
+    // Grow box (replaces the bottom section of the scrollbar)
+    if (hasGrowBox) {
+      const gbx = sbx;
+      const gby = sby + bodyH;
+      this.canvas.fillRect(gbx, gby, GROW_BOX_SIZE, GROW_BOX_SIZE, WHITE);
+      this.canvas.drawHLine(gbx, gby, GROW_BOX_SIZE, BLACK);
+      this.canvas.drawRect(gbx + 2, gby + 6, 7, 7, BLACK);
+      this.canvas.fillRect(gbx + 5, gby + 3, 7, 7, WHITE);
+      this.canvas.drawRect(gbx + 5, gby + 3, 7, 7, BLACK);
+    }
+
+    // --- Hit regions ---
+
+    // Scroll up arrow
+    this._hitRegions.add({
+      id: `${id}-scroll-up`,
+      x: sbx,
+      y: sby,
+      w: sbW,
+      h: SCROLL_AREA_ARROW_HEIGHT,
+      onMouseDown: () => {
+        onScroll(Math.max(0, clampedOffset - SCROLL_STEP));
+      },
+    });
+
+    // Scroll down arrow
+    this._hitRegions.add({
+      id: `${id}-scroll-down`,
+      x: sbx,
+      y: downTop,
+      w: sbW,
+      h: SCROLL_AREA_ARROW_HEIGHT,
+      onMouseDown: () => {
+        onScroll(Math.min(maxScroll, clampedOffset + SCROLL_STEP));
+      },
+    });
+
+    // Scroll track (thumb drag)
+    if (needsScroll) {
+      const thumbH = Math.max(
+        12,
+        Math.floor((rect.h / contentHeight) * trackH)
+      );
+      this._hitRegions.add({
+        id: `${id}-scroll-track`,
+        x: sbx,
+        y: trackTop,
+        w: sbW,
+        h: trackH,
+        onMouseDown: (_lx: number, ly: number) => {
+          const ratio = ly / Math.max(1, trackH - thumbH);
+          onScroll(Math.max(0, Math.min(maxScroll, ratio * maxScroll)));
+        },
+      });
+    }
+
+    // Scroll wheel — covers the full rect (content + scrollbar)
+    this._hitRegions.add({
+      id: `${id}-scroll-wheel`,
+      x: absX,
+      y: absY,
+      w: rect.w,
+      h: rect.h,
+      onScroll: (deltaY: number) => {
+        onScroll(Math.max(0, Math.min(maxScroll, clampedOffset + deltaY)));
+      },
+    });
+
+    // Grow box hit region
+    if (hasGrowBox) {
+      const gbx = sbx;
+      const gby = sby + bodyH;
+      const onStartResize = this._onStartResize!;
+      const winW = this._windowSize?.width ?? this.w + 2;
+      const winH = this._windowSize?.height ?? this.h + 20;
+      this._hitRegions.add({
+        id: `${id}-grow-box`,
+        x: gbx,
+        y: gby,
+        w: GROW_BOX_SIZE,
+        h: GROW_BOX_SIZE,
+        onMouseDown: (lx: number, ly: number) => {
+          onStartResize(gbx + lx, gby + ly, winW, winH);
+        },
+      });
+    }
   }
 
   clear(color: number = WHITE) {
