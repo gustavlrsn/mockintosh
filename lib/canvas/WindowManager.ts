@@ -5,6 +5,42 @@ import { OSEvent } from "./EventManager";
 import { SpriteRegistry } from "./SpriteRegistry";
 import { HitRegionMap } from "./HitRegion";
 
+// ---------------------------------------------------------------------------
+// Window kind — Mac-aligned classification of every window
+// ---------------------------------------------------------------------------
+
+export type WindowKind =
+  | "document" // primary document/app window (modeless, title bar, close + zoom)
+  | "dialog" // modeless or movable-modal dialog (title bar, no zoom)
+  | "alert" // strictly modal: no title bar, double-outline, on top of all
+  | "utility" // floating palette: always above document windows
+  | "desktop"; // Finder desktop (chromeless, below everything)
+
+// ---------------------------------------------------------------------------
+// FindWindow part codes — Mac-aligned hit-testing enum
+// ---------------------------------------------------------------------------
+
+export type WindowHitPart =
+  | "inMenuBar"
+  | "inDesktop"
+  | "inWindowBackground"
+  | "inDrag" // title bar / drag region
+  | "inGoAway" // close box
+  | "inZoom" // zoom box
+  | "inGrow" // size box
+  | "inVScroll" // vertical scroll bar (including arrows + track)
+  | "inHScroll" // horizontal scroll bar
+  | "inContent"; // window content area
+
+export interface FindWindowResult {
+  windowId: string | null;
+  part: WindowHitPart;
+}
+
+// ---------------------------------------------------------------------------
+// WindowState
+// ---------------------------------------------------------------------------
+
 export interface WindowState {
   id: string;
   title: string;
@@ -24,14 +60,28 @@ export interface WindowState {
   minWidth: number;
   minHeight: number;
   infoBar?: string[];
+  /** Window kind replaces the old ad-hoc `modal`/`chromeless` flags as the
+   *  single source of truth for type. `modal` and `chromeless` are derived
+   *  from `windowKind` at open time for backward-compatible fast reads. */
+  windowKind: WindowKind;
   modal?: boolean;
   chromeless?: boolean;
+  /** Application-defined standard bounds (for zoom box). Computed at open
+   *  from the initial rect or app defaultSize; if absent defaults to gray
+   *  region minus 3 px border. */
+  standardBounds?: { x: number; y: number; width: number; height: number };
+  /** Last user-defined bounds (position + size). Updated whenever the user
+   *  moves or resizes the window. */
+  userBounds?: { x: number; y: number; width: number; height: number };
 }
 
 export interface WindowManagerConfig {
   screenWidth: number;
   screenHeight: number;
   menubarHeight: number;
+  /** Callback fired when the active (frontmost) window changes.
+   *  Enables caller to dispatch activate/deactivate events. */
+  onActivateChange?: (previousId: string | null, newId: string | null) => void;
 }
 
 const TITLE_BAR_HEIGHT = 20;
@@ -39,37 +89,71 @@ const INFO_BAR_HEIGHT = 20;
 const SCROLLBAR_WIDTH = 15;
 const SHADOW_SIZE = 1;
 const CLOSE_BOX_SIZE = 11;
+const ZOOM_BOX_SIZE = 11;
 const GROW_BOX_SIZE = 15;
+
+// ---------------------------------------------------------------------------
+// WindowManager
+// ---------------------------------------------------------------------------
 
 export class WindowManager {
   windows: WindowState[] = [];
   private config: WindowManagerConfig;
+
   private dragging: {
     windowId: string;
     offsetX: number;
     offsetY: number;
+    /** Prospective position updated on each mouse-move; applied on mouse-up */
+    prospectiveX: number;
+    prospectiveY: number;
   } | null = null;
+
   private resizing: {
     windowId: string;
     startX: number;
     startY: number;
     startWidth: number;
     startHeight: number;
+    /** Prospective size updated on each mouse-move; applied on mouse-up */
+    prospectiveWidth: number;
+    prospectiveHeight: number;
   } | null = null;
+
   private scrollDragging: {
     windowId: string;
     startY: number;
     startScrollY: number;
   } | null = null;
+
   private hScrollDragging: {
     windowId: string;
     startX: number;
     startScrollX: number;
   } | null = null;
 
+  /** Window whose zoom box is currently pressed (for highlight feedback) */
+  private zoomBoxPressed: string | null = null;
+
   constructor(config: WindowManagerConfig) {
     this.config = config;
   }
+
+  // ---------------------------------------------------------------------------
+  // Helpers: derive chromeless / modal from windowKind
+  // ---------------------------------------------------------------------------
+
+  static isChromeless(kind: WindowKind): boolean {
+    return kind === "alert" || kind === "desktop";
+  }
+
+  static isModal(kind: WindowKind): boolean {
+    return kind === "alert";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Window list management
+  // ---------------------------------------------------------------------------
 
   openWindow(
     win: Omit<WindowState, "active" | "scrollY" | "scrollX"> & {
@@ -82,18 +166,70 @@ export class WindowManager {
       this.bringToFront(win.id);
       return;
     }
-    this.windows.push({
+
+    // Derive convenience booleans from kind
+    const chromeless =
+      win.chromeless ?? WindowManager.isChromeless(win.windowKind);
+    const modal = win.modal ?? WindowManager.isModal(win.windowKind);
+
+    const newWin: WindowState = {
       ...win,
       scrollY: win.scrollY ?? 0,
       scrollX: win.scrollX ?? 0,
       active: true,
-    });
-    this._updateActive();
+      chromeless,
+      modal,
+    };
+
+    // Initialise userBounds from opening position/size
+    newWin.userBounds = {
+      x: newWin.x,
+      y: newWin.y,
+      width: newWin.width,
+      height: newWin.height,
+    };
+
+    this._insertInLayerOrder(newWin);
+    this._notifyActiveChange(() => this._updateActive());
+  }
+
+  /** Insert window respecting kind-based layering:
+   *  desktop → document / dialog → utility → alert */
+  private _insertInLayerOrder(win: WindowState) {
+    if (win.windowKind === "desktop") {
+      this.windows.unshift(win);
+      return;
+    }
+    if (win.windowKind === "alert") {
+      this.windows.push(win);
+      return;
+    }
+    if (win.windowKind === "utility") {
+      // Place utility above all documents/dialogs but below any alert
+      const firstAlertIdx = this.windows.findIndex(
+        (w) => w.windowKind === "alert"
+      );
+      if (firstAlertIdx >= 0) {
+        this.windows.splice(firstAlertIdx, 0, win);
+      } else {
+        this.windows.push(win);
+      }
+      return;
+    }
+    // document / dialog: place above desktop but below utilities and alerts
+    const firstUtilityOrAlert = this.windows.findIndex(
+      (w) => w.windowKind === "utility" || w.windowKind === "alert"
+    );
+    if (firstUtilityOrAlert >= 0) {
+      this.windows.splice(firstUtilityOrAlert, 0, win);
+    } else {
+      this.windows.push(win);
+    }
   }
 
   closeWindow(id: string) {
     this.windows = this.windows.filter((w) => w.id !== id);
-    this._updateActive();
+    this._notifyActiveChange(() => this._updateActive());
   }
 
   bringToFront(id: string) {
@@ -102,10 +238,39 @@ export class WindowManager {
       if (win && !win.modal) return;
     }
     const idx = this.windows.findIndex((w) => w.id === id);
-    if (idx < 0 || idx === this.windows.length - 1) return;
-    const [win] = this.windows.splice(idx, 1);
-    this.windows.push(win);
-    this._updateActive();
+    if (idx < 0) return;
+
+    const win = this.windows[idx];
+
+    // Remove the window from its current position
+    this.windows.splice(idx, 1);
+
+    // Find the highest index that is still within this window's tier
+    // (i.e., the last window with the same or lower tier index)
+    const tier = this._tierOf(win.windowKind);
+    let insertAt = 0;
+    for (let i = 0; i < this.windows.length; i++) {
+      if (this._tierOf(this.windows[i].windowKind) <= tier) {
+        insertAt = i + 1;
+      }
+    }
+    this.windows.splice(insertAt, 0, win);
+
+    this._notifyActiveChange(() => this._updateActive());
+  }
+
+  private _tierOf(kind: WindowKind): number {
+    switch (kind) {
+      case "desktop":
+        return 0;
+      case "document":
+      case "dialog":
+        return 1;
+      case "utility":
+        return 2;
+      case "alert":
+        return 3;
+    }
   }
 
   hasModalWindow(): boolean {
@@ -113,14 +278,225 @@ export class WindowManager {
   }
 
   getActiveWindow(): WindowState | null {
-    return this.windows.length ? this.windows[this.windows.length - 1] : null;
+    // Active window = frontmost non-desktop window
+    for (let i = this.windows.length - 1; i >= 0; i--) {
+      if (this.windows[i].windowKind !== "desktop") {
+        return this.windows[i];
+      }
+    }
+    return null;
   }
 
+  private _lastActiveId: string | null = null;
+
   private _updateActive() {
+    const active = this.getActiveWindow();
     for (let i = 0; i < this.windows.length; i++) {
-      this.windows[i].active = i === this.windows.length - 1;
+      this.windows[i].active =
+        this.windows[i].windowKind !== "desktop" &&
+        active !== null &&
+        this.windows[i].id === active.id;
     }
   }
+
+  private _notifyActiveChange(updateFn: () => void) {
+    const prevId = this._lastActiveId;
+    updateFn();
+    const newActive = this.getActiveWindow();
+    const newId = newActive?.id ?? null;
+    if (newId !== prevId) {
+      this._lastActiveId = newId;
+      if (this.config.onActivateChange) {
+        this.config.onActivateChange(prevId, newId);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Zoom box support
+  // ---------------------------------------------------------------------------
+
+  /** Compute the fallback standard bounds when the app does not specify one:
+   *  desktop area (screenWidth × screenHeight - menubarHeight) minus 3 px on
+   *  all sides, matching Mac WM behaviour. */
+  private _defaultStandardBounds(): {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } {
+    return {
+      x: 3,
+      y: this.config.menubarHeight + 3,
+      width: this.config.screenWidth - 6,
+      height: this.config.screenHeight - this.config.menubarHeight - 6,
+    };
+  }
+
+  /** Toggle the window between standard state and user state. Called by the
+   *  zoom-box hit region on mouse-up while cursor is still in the box. */
+  zoomWindow(win: WindowState) {
+    const std = win.standardBounds ?? this._defaultStandardBounds();
+
+    const isAtStandard =
+      win.x === std.x &&
+      win.y === std.y &&
+      win.width === std.width &&
+      win.height === std.height;
+
+    if (isAtStandard) {
+      // Zoom in → restore user state
+      const user = win.userBounds ?? {
+        x: win.x,
+        y: win.y,
+        width: win.width,
+        height: win.height,
+      };
+      win.x = user.x;
+      win.y = user.y;
+      win.width = user.width;
+      win.height = user.height;
+    } else {
+      // Zoom out → save user state and switch to standard
+      win.userBounds = {
+        x: win.x,
+        y: win.y,
+        width: win.width,
+        height: win.height,
+      };
+      win.x = std.x;
+      win.y = std.y;
+      win.width = std.width;
+      win.height = std.height;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // FindWindow
+  // ---------------------------------------------------------------------------
+
+  /** Given a point in global (screen) coordinates, return which window and
+   *  which part of the UI it falls in — analogous to Mac FindWindow(pt). */
+  findWindow(globalX: number, globalY: number): FindWindowResult {
+    // Menu bar has already been drawn but we check it by y position
+    if (globalY < this.config.menubarHeight) {
+      return { windowId: null, part: "inMenuBar" };
+    }
+
+    // Check windows top-to-bottom (last in array = frontmost)
+    for (let i = this.windows.length - 1; i >= 0; i--) {
+      const win = this.windows[i];
+      if (win.windowKind === "desktop") continue;
+
+      const part = this._hitTestWindow(win, globalX, globalY);
+      if (part !== null) {
+        return { windowId: win.id, part };
+      }
+    }
+
+    return { windowId: null, part: "inDesktop" };
+  }
+
+  private _hitTestWindow(
+    win: WindowState,
+    gx: number,
+    gy: number
+  ): WindowHitPart | null {
+    if (win.chromeless) {
+      const cr = this.getContentRect(win);
+      if (gx >= cr.x && gx < cr.x + cr.w && gy >= cr.y && gy < cr.y + cr.h) {
+        return "inContent";
+      }
+      return null;
+    }
+
+    const { x, y, width } = win;
+    const headerH = this._headerHeight(win);
+    const totalHeight = headerH + win.height;
+
+    // Outside structure region entirely
+    if (
+      gx < x ||
+      gx >= x + width + SHADOW_SIZE ||
+      gy < y ||
+      gy >= y + totalHeight + SHADOW_SIZE
+    ) {
+      return null;
+    }
+
+    // Zoom box (right of title bar, active only)
+    if (win.active && gy >= y && gy < y + TITLE_BAR_HEIGHT) {
+      const zbx = x + width - 8 - ZOOM_BOX_SIZE;
+      const zby = y + (TITLE_BAR_HEIGHT - ZOOM_BOX_SIZE) / 2;
+      if (gx >= zbx && gx < zbx + ZOOM_BOX_SIZE) {
+        return "inZoom";
+      }
+    }
+
+    // Close box (left of title bar, active only)
+    if (win.active && gy >= y && gy < y + TITLE_BAR_HEIGHT) {
+      const bx = x + 8;
+      const by = y + (TITLE_BAR_HEIGHT - CLOSE_BOX_SIZE) / 2;
+      if (gx >= bx && gx < bx + CLOSE_BOX_SIZE) {
+        return "inGoAway";
+      }
+    }
+
+    // Title bar drag
+    if (gy >= y && gy < y + TITLE_BAR_HEIGHT) {
+      return "inDrag";
+    }
+
+    // Grow box (resize handle)
+    if (win.resizable) {
+      const gbx = x + width - GROW_BOX_SIZE;
+      const gby = y + headerH + win.height - GROW_BOX_SIZE;
+      if (
+        gx >= gbx &&
+        gx < gbx + GROW_BOX_SIZE &&
+        gy >= gby &&
+        gy < gby + GROW_BOX_SIZE
+      ) {
+        return "inGrow";
+      }
+    }
+
+    // Vertical scroll bar
+    if (win.scrollable) {
+      const sbx = x + width - SCROLLBAR_WIDTH - 1;
+      const sby = y + headerH;
+      const bodyH = this._bodyHeight(win);
+      if (
+        gx >= sbx &&
+        gx < sbx + SCROLLBAR_WIDTH &&
+        gy >= sby &&
+        gy < sby + bodyH
+      ) {
+        return "inVScroll";
+      }
+    }
+
+    // Horizontal scroll bar
+    if (win.resizable) {
+      const hsby = y + headerH + this._bodyHeight(win);
+      const hsbh = SCROLLBAR_WIDTH;
+      if (gy >= hsby && gy < hsby + hsbh) {
+        return "inHScroll";
+      }
+    }
+
+    // Content
+    const cr = this.getContentRect(win);
+    if (gx >= cr.x && gx < cr.x + cr.w && gy >= cr.y && gy < cr.y + cr.h) {
+      return "inContent";
+    }
+
+    return "inWindowBackground";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Geometry helpers
+  // ---------------------------------------------------------------------------
 
   private _headerHeight(win: WindowState): number {
     return TITLE_BAR_HEIGHT + (win.infoBar ? INFO_BAR_HEIGHT : 0);
@@ -172,6 +548,8 @@ export class WindowManager {
         startY,
         startWidth,
         startHeight,
+        prospectiveWidth: startWidth,
+        prospectiveHeight: startHeight,
       };
     };
     return new AppContext(
@@ -197,29 +575,39 @@ export class WindowManager {
     return { x: x - r.x, y: y - r.y + win.scrollY };
   }
 
-  // --- Drag/resize handling (still needs imperative handling for continuous updates) ---
+  // ---------------------------------------------------------------------------
+  // Drag / resize mouse handling
+  // ---------------------------------------------------------------------------
 
   handleMouseMove(
     x: number,
     y: number
   ): { consumed: boolean; windowId?: string; contentEvent?: OSEvent } {
     if (this.dragging) {
-      const win = this.windows.find((w) => w.id === this.dragging!.windowId);
-      if (win) {
-        win.x = x - this.dragging.offsetX;
-        win.y = Math.max(this.config.menubarHeight, y - this.dragging.offsetY);
-      }
+      const newX = x - this.dragging.offsetX;
+      const newY = Math.max(
+        this.config.menubarHeight,
+        y - this.dragging.offsetY
+      );
+      this.dragging.prospectiveX = newX;
+      this.dragging.prospectiveY = newY;
       return { consumed: true };
     }
 
     if (this.resizing) {
+      const dx = x - this.resizing.startX;
+      const dy = y - this.resizing.startY;
       const win = this.windows.find((w) => w.id === this.resizing!.windowId);
-      if (win) {
-        const dx = x - this.resizing.startX;
-        const dy = y - this.resizing.startY;
-        win.width = Math.max(win.minWidth, this.resizing.startWidth + dx);
-        win.height = Math.max(win.minHeight, this.resizing.startHeight + dy);
-      }
+      const minW = win?.minWidth ?? 100;
+      const minH = win?.minHeight ?? 60;
+      this.resizing.prospectiveWidth = Math.max(
+        minW,
+        this.resizing.startWidth + dx
+      );
+      this.resizing.prospectiveHeight = Math.max(
+        minH,
+        this.resizing.startHeight + dy
+      );
       return { consumed: true };
     }
 
@@ -271,10 +659,36 @@ export class WindowManager {
 
   handleMouseUp(): { consumed: boolean } {
     if (this.dragging) {
+      // Apply prospective position on mouse-up (Mac DragWindow behaviour)
+      const win = this.windows.find((w) => w.id === this.dragging!.windowId);
+      if (win) {
+        win.x = this.dragging.prospectiveX;
+        win.y = this.dragging.prospectiveY;
+        // Save new user bounds when user moves window
+        win.userBounds = {
+          x: win.x,
+          y: win.y,
+          width: win.width,
+          height: win.height,
+        };
+      }
       this.dragging = null;
       return { consumed: true };
     }
     if (this.resizing) {
+      // Apply prospective size on mouse-up (Mac grow-image behaviour)
+      const win = this.windows.find((w) => w.id === this.resizing!.windowId);
+      if (win) {
+        win.width = this.resizing.prospectiveWidth;
+        win.height = this.resizing.prospectiveHeight;
+        // Save new user bounds when user resizes window
+        win.userBounds = {
+          x: win.x,
+          y: win.y,
+          width: win.width,
+          height: win.height,
+        };
+      }
       this.resizing = null;
       return { consumed: true };
     }
@@ -298,13 +712,53 @@ export class WindowManager {
     );
   }
 
+  /** Expose current drag/resize prospective outline for the render loop. */
+  getDragOutline(): {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    kind: "drag" | "resize";
+    windowId: string;
+  } | null {
+    if (this.dragging) {
+      const win = this.windows.find((w) => w.id === this.dragging!.windowId);
+      if (!win) return null;
+      const headerH = this._headerHeight(win);
+      return {
+        x: this.dragging.prospectiveX,
+        y: this.dragging.prospectiveY,
+        width: win.width,
+        height: headerH + win.height,
+        kind: "drag",
+        windowId: win.id,
+      };
+    }
+    if (this.resizing) {
+      const win = this.windows.find((w) => w.id === this.resizing!.windowId);
+      if (!win) return null;
+      const headerH = this._headerHeight(win);
+      return {
+        x: win.x,
+        y: win.y,
+        width: this.resizing.prospectiveWidth,
+        height: headerH + this.resizing.prospectiveHeight,
+        kind: "resize",
+        windowId: win.id,
+      };
+    }
+    return null;
+  }
+
   handleScroll(win: WindowState, deltaY: number) {
     const bodyH = this._bodyHeight(win);
     const maxScroll = Math.max(0, win.contentHeight - bodyH);
     win.scrollY = Math.max(0, Math.min(maxScroll, win.scrollY + deltaY));
   }
 
-  // --- Rendering with hit regions ---
+  // ---------------------------------------------------------------------------
+  // Chrome rendering
+  // ---------------------------------------------------------------------------
 
   drawWindowChrome(
     canvas: BitCanvas,
@@ -315,6 +769,7 @@ export class WindowManager {
       onClose: (id: string) => void;
       onBringToFront: (id: string) => void;
       onContentEvent: (id: string, event: OSEvent) => void;
+      onZoom: (id: string) => void;
       scheduleRender: () => void;
     }
   ) {
@@ -366,6 +821,7 @@ export class WindowManager {
       }
       return;
     }
+
     const { x, y, width, title, active } = win;
     const headerH = this._headerHeight(win);
     const totalHeight = headerH + win.height;
@@ -430,6 +886,8 @@ export class WindowManager {
             windowId: win.id,
             offsetX: lx,
             offsetY: ly,
+            prospectiveX: win.x,
+            prospectiveY: win.y,
           };
         },
       });
@@ -472,6 +930,7 @@ export class WindowManager {
       const stripeH = 11;
       canvas.fillPattern(x + 1, stripeTop, width - 2, stripeH, "stripes");
 
+      // --- Close box ---
       const bx = x + 8;
       const by = y + (TITLE_BAR_HEIGHT - CLOSE_BOX_SIZE) / 2;
       canvas.fillRect(
@@ -483,7 +942,6 @@ export class WindowManager {
       );
       canvas.drawRect(bx, by, CLOSE_BOX_SIZE, CLOSE_BOX_SIZE, BLACK);
 
-      // Close box hit region (highest z in title bar area)
       if (!interactionBlocked) {
         hitRegions.add({
           id: `win-close-${win.id}`,
@@ -492,6 +950,60 @@ export class WindowManager {
           w: CLOSE_BOX_SIZE,
           h: CLOSE_BOX_SIZE,
           onMouseDown: () => callbacks.onClose(win.id),
+        });
+      }
+
+      // --- Zoom box (right side of title bar) ---
+      const zbx = x + width - 8 - ZOOM_BOX_SIZE;
+      const zby = y + (TITLE_BAR_HEIGHT - ZOOM_BOX_SIZE) / 2;
+      const isZoomPressed = this.zoomBoxPressed === win.id;
+
+      canvas.fillRect(
+        zbx - 1,
+        zby - 1,
+        ZOOM_BOX_SIZE + 2,
+        ZOOM_BOX_SIZE + 2,
+        WHITE
+      );
+      canvas.drawRect(zbx, zby, ZOOM_BOX_SIZE, ZOOM_BOX_SIZE, BLACK);
+
+      // Inner marks on zoom box (two small nested rectangles like Mac)
+      canvas.drawRect(zbx + 2, zby + 4, 5, 5, BLACK);
+      canvas.drawRect(zbx + 4, zby + 2, 5, 5, BLACK);
+      canvas.fillRect(zbx + 5, zby + 3, 3, 3, WHITE);
+
+      if (isZoomPressed) {
+        // Highlight the box interior when pressed
+        canvas.invertRect(
+          zbx + 1,
+          zby + 1,
+          ZOOM_BOX_SIZE - 2,
+          ZOOM_BOX_SIZE - 2
+        );
+      }
+
+      if (!interactionBlocked) {
+        hitRegions.add({
+          id: `win-zoom-${win.id}`,
+          x: zbx,
+          y: zby,
+          w: ZOOM_BOX_SIZE,
+          h: ZOOM_BOX_SIZE,
+          onMouseDown: () => {
+            // Highlight on press
+            this.zoomBoxPressed = win.id;
+            callbacks.scheduleRender();
+          },
+          onMouseUp: (lx: number, ly: number) => {
+            // Zoom fires on mouse-up while still in box (Mac behaviour)
+            const stillInBox =
+              lx >= 0 && lx < ZOOM_BOX_SIZE && ly >= 0 && ly < ZOOM_BOX_SIZE;
+            this.zoomBoxPressed = null;
+            if (stillInBox) {
+              callbacks.onZoom(win.id);
+            }
+            callbacks.scheduleRender();
+          },
         });
       }
 
@@ -524,6 +1036,26 @@ export class WindowManager {
       this._drawHScrollbar(canvas, win, hitRegions, callbacks);
       this._drawGrowBox(canvas, win, hitRegions, callbacks);
     }
+  }
+
+  /** Draw the drag/resize outline on the canvas after all windows are drawn.
+   *
+   * Uses the same technique as the original Mac DragGrayRgn / notPatXor:
+   * XOR a 50% gray pattern along the outline perimeter. This ensures the
+   * outline is always visible regardless of what is underneath (checkerboard,
+   * white, black) — any pixel touched is guaranteed to change, and drawing
+   * twice restores the original pixels exactly. */
+  drawDragOutline(canvas: BitCanvas) {
+    const outline = this.getDragOutline();
+    if (!outline) return;
+
+    canvas.xorPatternRect(
+      outline.x,
+      outline.y,
+      outline.width,
+      outline.height,
+      "darkCheckers"
+    );
   }
 
   private _drawInfoBar(canvas: BitCanvas, win: WindowState) {
@@ -798,6 +1330,8 @@ export class WindowManager {
           startY: gby + ly,
           startWidth: win.width,
           startHeight: win.height,
+          prospectiveWidth: win.width,
+          prospectiveHeight: win.height,
         };
       },
     });

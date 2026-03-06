@@ -6,7 +6,11 @@ export interface OSEvent {
     | "doubleClick"
     | "scroll"
     | "keyDown"
-    | "keyUp";
+    | "keyUp"
+    /** Sent to the app whose window just became the active (frontmost) window. */
+    | "activate"
+    /** Sent to the app whose window just lost active status. */
+    | "deactivate";
   x?: number;
   y?: number;
   button?: number;

@@ -247,14 +247,50 @@ Every frame follows this exact order, painting from back to front:
 1. **Clear** — fill the pixel buffer with white
 2. **Desktop** — the Finder's desktop window: checkerboard background + volume icons + Desktop Folder icons
 3. **Windows** — iterate bottom-to-top through the remaining window stack:
-   - Draw window chrome (border, title bar, close box, scrollbar)
+   - Draw window chrome (border, title bar, close box, zoom box, scrollbar)
    - Create a clipped `AppContext` for the content area
    - Call the app's `render()` / `renderWindow()` function
    - Release the clip
 4. **Drag ghost** — if the Finder has an active icon drag
-5. **Menubar** — white bar at top with menu labels and open dropdown
-6. **Cursor** — 16×16 sprite at current mouse position
-7. **Flush** — expand the 1-bit buffer to RGBA `ImageData` and `putImageData`
+5. **Drag/resize outline** — if a window is being dragged or resized, draw a dotted rectangle at the prospective position/size (Mac DragGrayRgn behaviour)
+6. **Menubar** — white bar at top with menu labels and open dropdown
+7. **Cursor** — 16×16 sprite at current mouse position
+8. **Flush** — expand the 1-bit buffer to RGBA `ImageData` and `putImageData`
+
+## Window Kinds
+
+Every window carries a `windowKind` field that is the single source of truth for its type. This maps directly to the original Macintosh window classification:
+
+| Kind         | Description                                           | Chrome                                                          | Modality              | Layer                                |
+| ------------ | ----------------------------------------------------- | --------------------------------------------------------------- | --------------------- | ------------------------------------ |
+| `"document"` | Primary app window (folder, viewer, editor…)          | title bar, close box, zoom box, optional scroll bars / size box | modeless              | lowest                               |
+| `"dialog"`   | Modeless or movable-modal dialog                      | title bar, close box; no zoom                                   | modeless or app-modal | same as document                     |
+| `"alert"`    | Strictly modal notification (no user can switch away) | chromeless, double-outline                                      | strictly modal        | above all others                     |
+| `"utility"`  | Floating palette / tool panel                         | small title bar; no zoom (optional close)                       | modeless              | always above document/dialog windows |
+| `"desktop"`  | Finder desktop background                             | chromeless, full screen                                         | none                  | behind all windows                   |
+
+`modal` and `chromeless` are derived from `windowKind` at `openWindow` time (`WindowManager.isModal()` / `WindowManager.isChromeless()`). Layering is enforced by `_insertInLayerOrder` and `bringToFront` in `WindowManager`.
+
+### Zoom box (standard / user state)
+
+Document and utility windows support a zoom box in the right side of the title bar. Clicking it toggles between:
+
+- **Standard state** — application-defined ideal size (`standardBounds` on `WindowState`). If the app does not set one, the system default is the full gray region (screen minus menu bar) minus a 3 px border on all sides.
+- **User state** — the last position and size set by the user via drag or resize (`userBounds`).
+
+The transition fires on **mouse release** while the cursor is still inside the box (Mac WM behaviour).
+
+### Activate / deactivate events
+
+When the frontmost window changes, `WindowManager` invokes its `onActivateChange(prevId, newId)` callback. `main.tsx` translates this into `{ type: 'deactivate' }` and `{ type: 'activate' }` OSEvents dispatched to the affected apps via `dispatchToApp`. Apps that don't handle these events are unaffected; apps that do can update controls and highlighting (e.g. dim inactive controls).
+
+### FindWindow
+
+`windowManager.findWindow(globalX, globalY)` returns a `FindWindowResult` containing the `windowId` and a `WindowHitPart` code (`inMenuBar`, `inDesktop`, `inDrag`, `inGoAway`, `inZoom`, `inGrow`, `inVScroll`, `inHScroll`, `inContent`, `inWindowBackground`). This is the Macintosh `FindWindow(pt)` equivalent — a single query API over the hit-region geometry without replacing the per-region callback dispatch.
+
+### Drag outline / grow image
+
+During a title-bar drag or a grow-box resize, the window **does not move or resize immediately**. Instead, `WindowManager` tracks prospective position/size internally and `drawDragOutline()` renders a dotted rectangle outline at those prospective bounds each frame. The actual `win.x`/`win.y`/`win.width`/`win.height` are updated only on mouse release. This matches the original Macintosh `DragWindow` / `GrowWindow` behaviour.
 
 ## BitCanvas
 

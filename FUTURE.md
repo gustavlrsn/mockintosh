@@ -1,5 +1,23 @@
 # Future Enhancements
 
+## Special presentation mode
+
+The Macintosh supports a **special presentation mode** for screen-sized presentations: the application can use the **entire screen**, including the area normally used by the menu bar. The menu bar is hidden so content (e.g. slides, demos) fills the full display. This is distinct from the zoom box’s standard state, which only fills the gray region (desktop minus menu bar) with a border.
+
+**Human Interface Guidelines:**
+
+- **User option** — The mode must be optional; the user chooses to enter it, not forced.
+- **Restore menu bar** — The application must provide a visible way to bring the menu bar back: e.g. a keyboard shortcut (Command-key) or an on-screen button labeled “Menu Bar” that the user can click. The method must be clearly visible or easily accessible while the bar is hidden.
+- **Application responsibility** — The app is responsible for the logic of hiding the bar, drawing full-screen content, and letting the user exit; the system (Window Manager) provides the capacity for full-screen drawing (its port covers the whole screen).
+
+**Implementation sketch for Mockintosh:**
+
+- **OS support:** (1) API or flag for an app to request “presentation mode” (e.g. `enterPresentationMode()` / `exitPresentationMode()`). (2) When active: hide the menu bar in the render loop and allow the requesting app to draw over the full canvas (0,0 to screen width/height). (3) Reserve a global shortcut (e.g. Escape or ⌘+something) or require the app to call `exitPresentationMode()` from its own UI (e.g. “Menu Bar” button). (4) Only one app can be in presentation mode at a time; exiting restores the menu bar and normal window layout.
+- **App support:** The app enters the mode when the user chooses (e.g. “Present” or “Full screen”), draws its content full-screen, and provides a visible “Menu Bar” button or documents the shortcut so the user can exit.
+- **Rendering:** In the main render loop, if presentation mode is active for app X, skip drawing the menu bar (and possibly the desktop/windows of other apps, or draw them underneath and let the presenting app cover them). The presenting app’s render receives the full canvas or a full-screen AppContext.
+
+Not part of the current Window Manager refactor; add when we have a need (e.g. a slides or video app that wants true full-screen).
+
 ## Paid Apps via Polar.sh
 
 Developers should be able to sell their apps in the App Store — either free or paid (one-time purchase or subscription). Payment processing would be handled by [Polar.sh](https://polar.sh), which acts as merchant of record and handles checkout, licensing, payouts, tax, and refunds.

@@ -213,6 +213,61 @@ export class BitCanvas {
   }
 
   /**
+   * XOR a pattern along the perimeter of a rectangle, 1 pixel wide.
+   *
+   * This matches the Mac Window Manager's notPatXor pen mode used by
+   * DragGrayRgn / GrowWindow: the outline is always visible regardless of
+   * what is underneath because XOR with a 50% gray pattern inverts every
+   * other pixel, breaking any coincidence with a uniform background.
+   * Drawing the same outline twice restores the original pixels exactly.
+   */
+  xorPatternRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    pattern: PatternName | Uint8Array = "gray50"
+  ) {
+    const pat = typeof pattern === "string" ? getPattern(pattern) : pattern;
+    x = x | 0;
+    y = y | 0;
+    w = w | 0;
+    h = h | 0;
+
+    const xorRow = (row: number, px0: number, px1: number) => {
+      if (row < this.clip.y || row >= this.clip.y + this.clip.h) return;
+      if (row < 0 || row >= this.height) return;
+      const r = row * this.width;
+      const cx0 = Math.max(px0, this.clip.x, 0);
+      const cx1 = Math.min(px1, this.clip.x + this.clip.w, this.width);
+      for (let px = cx0; px < cx1; px++) {
+        if (samplePattern(pat, px, row)) {
+          this.pixels[r + px] ^= 1;
+        }
+      }
+    };
+
+    const xorCol = (col: number, py0: number, py1: number) => {
+      if (col < this.clip.x || col >= this.clip.x + this.clip.w) return;
+      if (col < 0 || col >= this.width) return;
+      const cy0 = Math.max(py0, this.clip.y, 0);
+      const cy1 = Math.min(py1, this.clip.y + this.clip.h, this.height);
+      for (let py = cy0; py < cy1; py++) {
+        if (samplePattern(pat, col, py)) {
+          this.pixels[py * this.width + col] ^= 1;
+        }
+      }
+    };
+
+    // Top and bottom edges (full width)
+    xorRow(y, x, x + w);
+    xorRow(y + h - 1, x, x + w);
+    // Left and right edges (interior rows to avoid double-drawing corners)
+    xorCol(x, y + 1, y + h - 1);
+    xorCol(x + w - 1, y + 1, y + h - 1);
+  }
+
+  /**
    * Invert a rectangular region (black <-> white).
    */
   invertRect(x: number, y: number, w: number, h: number) {

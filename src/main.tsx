@@ -3,7 +3,11 @@ import { AppContext } from "../lib/canvas/AppContext";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppRegistry } from "../lib/canvas/AppRegistry";
 import { EventManager, OSEvent } from "../lib/canvas/EventManager";
-import { WindowManager, TITLE_BAR_HEIGHT } from "../lib/canvas/WindowManager";
+import {
+  WindowManager,
+  TITLE_BAR_HEIGHT,
+  WindowKind,
+} from "../lib/canvas/WindowManager";
 import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
 import { registerAllSprites } from "../lib/canvas/sprites";
 import { HitRegionMap } from "../lib/canvas/HitRegion";
@@ -212,6 +216,16 @@ async function main() {
     screenWidth: resolution.width,
     screenHeight: resolution.height,
     menubarHeight: MENUBAR_HEIGHT,
+    onActivateChange: (prevId, newId) => {
+      if (prevId) {
+        dispatchToApp(prevId, { type: "deactivate" });
+      }
+      if (newId) {
+        dispatchToApp(newId, { type: "activate" });
+      }
+      updateMenubar();
+      scheduleRender();
+    },
   });
 
   // Register single-window apps
@@ -314,6 +328,7 @@ async function main() {
           resizable: false,
           minWidth: size.width,
           minHeight: size.height,
+          windowKind: "alert",
           modal: true,
           chromeless: true,
         });
@@ -361,6 +376,7 @@ async function main() {
       resizable: true,
       minWidth: 160,
       minHeight: 80,
+      windowKind: "document",
     });
 
     updateMenubar();
@@ -419,6 +435,7 @@ async function main() {
       resizable: appDef.resizable ?? false,
       minWidth: appDef.minSize?.width ?? 100,
       minHeight: appDef.minSize?.height ?? 60,
+      windowKind: "document",
     });
 
     updateMenubar();
@@ -647,6 +664,14 @@ async function main() {
     onContentEvent: (id: string, event: OSEvent) => {
       dispatchToApp(id, event);
       scheduleRender();
+    },
+    onZoom: (id: string) => {
+      const win = windowManager.windows.find((w) => w.id === id);
+      if (win) {
+        windowManager.zoomWindow(win);
+        updateMenubar();
+        scheduleRender();
+      }
     },
     scheduleRender: () => scheduleRender(),
   };
@@ -1041,6 +1066,9 @@ async function main() {
       finderRenderDragGhost(finderAppBuilder, bitCanvas, finderServices);
     }
 
+    // Draw drag/resize outline over all windows (Mac DragGrayRgn behaviour)
+    windowManager.drawDragOutline(bitCanvas);
+
     drawMenubar(
       bitCanvas,
       menubarState,
@@ -1137,6 +1165,7 @@ async function main() {
     resizable: false,
     minWidth: resolution.width,
     minHeight: resolution.height - MENUBAR_HEIGHT,
+    windowKind: "desktop",
     chromeless: true,
   });
 
