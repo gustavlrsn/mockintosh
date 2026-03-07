@@ -18,6 +18,18 @@ const GROUPS: SpriteGroup[] = [
 
 const ROOT_SPRITES = ["eaten_apple.png", "user2.png", "microdesktop-disk.png"];
 
+const CHROME_SPRITES = [
+  "up",
+  "down",
+  "left",
+  "right",
+  "close",
+  "closing",
+  "resize",
+  "zoom",
+  "scrollbar-bg",
+];
+
 function toKey(prefix: string, filename: string): string {
   const name = basename(filename, extname(filename));
   return `${prefix}/${name}`;
@@ -131,6 +143,36 @@ async function convertRootSprites(): Promise<string> {
   return lines.join("\n");
 }
 
+async function convertChromeSprites(): Promise<string> {
+  const lines: string[] = [
+    `import { Sprite } from "../BitCanvas";`,
+    `import { defineSprite } from "../SpriteRegistry";`,
+    ``,
+  ];
+
+  const entries: string[] = [];
+
+  for (const name of CHROME_SPRITES) {
+    const filepath = join(PUBLIC, "convert-sprites", name + ".png");
+    const { width, height, b64 } = await pngToBase64Sprite(filepath);
+    const constName = `CHROME_${name.toUpperCase().replace(/-/g, "_")}`;
+    lines.push(
+      `const ${constName} = defineSprite(${width}, ${height}, ${escapeForTS(
+        b64
+      )});`
+    );
+    entries.push(`  "chrome/${name}": ${constName},`);
+  }
+
+  lines.push(``);
+  lines.push(`export const chromeSprites: Record<string, Sprite> = {`);
+  lines.push(...entries);
+  lines.push(`};`);
+  lines.push(``);
+
+  return lines.join("\n");
+}
+
 async function main() {
   const { mkdir } = await import("fs/promises");
   await mkdir(OUT_DIR, { recursive: true });
@@ -146,6 +188,11 @@ async function main() {
   const uiPath = join(OUT_DIR, "ui.ts");
   await writeFile(uiPath, uiSource, "utf-8");
   console.log(`Wrote ${uiPath}`);
+
+  const chromeSource = await convertChromeSprites();
+  const chromePath = join(OUT_DIR, "chrome.ts");
+  await writeFile(chromePath, chromeSource, "utf-8");
+  console.log(`Wrote ${chromePath}`);
 }
 
 main().catch((err) => {

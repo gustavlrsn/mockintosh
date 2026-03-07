@@ -237,6 +237,7 @@ export interface AppContext {
   readonly width: number;
   readonly height: number;
   readonly scrollY: number;
+  readonly scrollX: number;
   release(): void;
   setPixel(x: number, y: number, color?: number): void;
   getPixel(x: number, y: number): number;

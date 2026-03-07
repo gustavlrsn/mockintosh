@@ -73,6 +73,9 @@ export interface WindowState {
   /** Last user-defined bounds (position + size). Updated whenever the user
    *  moves or resizes the window. */
   userBounds?: { x: number; y: number; width: number; height: number };
+  /** Screen rect of the icon this window was opened from (for close zoom
+   *  animation). Stored at open time and never changed. */
+  openedFromRect?: { x: number; y: number; width: number; height: number };
 }
 
 export interface WindowManagerConfig {
@@ -86,11 +89,13 @@ export interface WindowManagerConfig {
 
 const TITLE_BAR_HEIGHT = 20;
 const INFO_BAR_HEIGHT = 20;
-const SCROLLBAR_WIDTH = 15;
+/** 16px wide per Mac spec; rightmost pixel overlaps the window border */
+const SCROLLBAR_WIDTH = 16;
 const SHADOW_SIZE = 1;
 const CLOSE_BOX_SIZE = 11;
 const ZOOM_BOX_SIZE = 11;
-const GROW_BOX_SIZE = 15;
+/** 16×16 per Mac spec */
+const GROW_BOX_SIZE = 16;
 
 // ---------------------------------------------------------------------------
 // WindowManager
@@ -134,6 +139,8 @@ export class WindowManager {
 
   /** Window whose zoom box is currently pressed (for highlight feedback) */
   private zoomBoxPressed: string | null = null;
+  /** Window whose close box is currently pressed (for closing sprite feedback) */
+  private closeBoxPressed: string | null = null;
 
   constructor(config: WindowManagerConfig) {
     this.config = config;
@@ -316,6 +323,16 @@ export class WindowManager {
   // Zoom box support
   // ---------------------------------------------------------------------------
 
+  /** Maximum content size: desktop (gray region) minus 3 px on all sides.
+   *  Used to clamp both initial open and resize so no window can exceed the
+   *  available space (Mac: app/sizeRect set max; we enforce it system-wide). */
+  private _maxContentSize(): { width: number; height: number } {
+    return {
+      width: this.config.screenWidth - 6,
+      height: this.config.screenHeight - this.config.menubarHeight - 6,
+    };
+  }
+
   /** Compute the fallback standard bounds when the app does not specify one:
    *  desktop area (screenWidth × screenHeight - menubarHeight) minus 3 px on
    *  all sides, matching Mac WM behaviour. */
@@ -325,11 +342,12 @@ export class WindowManager {
     width: number;
     height: number;
   } {
+    const max = this._maxContentSize();
     return {
       x: 3,
       y: this.config.menubarHeight + 3,
-      width: this.config.screenWidth - 6,
-      height: this.config.screenHeight - this.config.menubarHeight - 6,
+      width: max.width,
+      height: max.height,
     };
   }
 
@@ -559,6 +577,7 @@ export class WindowManager {
       r.w,
       r.h,
       win.scrollY,
+      win.scrollX,
       hitRegions,
       onStartResize,
       { width: win.minWidth, height: win.minHeight },
@@ -572,7 +591,7 @@ export class WindowManager {
     y: number
   ): { x: number; y: number } {
     const r = this.getContentRect(win);
-    return { x: x - r.x, y: y - r.y + win.scrollY };
+    return { x: x - r.x + win.scrollX, y: y - r.y + win.scrollY };
   }
 
   // ---------------------------------------------------------------------------
@@ -600,13 +619,14 @@ export class WindowManager {
       const win = this.windows.find((w) => w.id === this.resizing!.windowId);
       const minW = win?.minWidth ?? 100;
       const minH = win?.minHeight ?? 60;
+      const max = this._maxContentSize();
       this.resizing.prospectiveWidth = Math.max(
         minW,
-        this.resizing.startWidth + dx
+        Math.min(max.width, this.resizing.startWidth + dx)
       );
       this.resizing.prospectiveHeight = Math.max(
         minH,
-        this.resizing.startHeight + dy
+        Math.min(max.height, this.resizing.startHeight + dy)
       );
       return { consumed: true };
     }
@@ -756,6 +776,13 @@ export class WindowManager {
     win.scrollY = Math.max(0, Math.min(maxScroll, win.scrollY + deltaY));
   }
 
+  handleHScroll(win: WindowState, deltaX: number) {
+    const sbW = win.scrollable ? SCROLLBAR_WIDTH : 0;
+    const contentW = win.width - 2 - sbW;
+    const maxScrollX = Math.max(0, win.contentWidth - contentW);
+    win.scrollX = Math.max(0, Math.min(maxScrollX, win.scrollX + deltaX));
+  }
+
   // ---------------------------------------------------------------------------
   // Chrome rendering
   // ---------------------------------------------------------------------------
@@ -799,22 +826,22 @@ export class WindowManager {
           onMouseDown: (lx: number, ly: number) => {
             callbacks.onContentEvent(win.id, {
               type: "mouseDown",
-              x: lx,
-              y: ly,
+              x: lx + win.scrollX,
+              y: ly + win.scrollY,
             });
           },
           onMouseUp: (lx: number, ly: number) => {
             callbacks.onContentEvent(win.id, {
               type: "mouseUp",
-              x: lx,
-              y: ly,
+              x: lx + win.scrollX,
+              y: ly + win.scrollY,
             });
           },
           onDoubleClick: (lx: number, ly: number) => {
             callbacks.onContentEvent(win.id, {
               type: "doubleClick",
-              x: lx,
-              y: ly,
+              x: lx + win.scrollX,
+              y: ly + win.scrollY,
             });
           },
         });
@@ -853,21 +880,21 @@ export class WindowManager {
           callbacks.onBringToFront(win.id);
           callbacks.onContentEvent(win.id, {
             type: "mouseDown",
-            x: lx,
+            x: lx + win.scrollX,
             y: ly + win.scrollY,
           });
         },
         onMouseUp: (lx: number, ly: number) => {
           callbacks.onContentEvent(win.id, {
             type: "mouseUp",
-            x: lx,
+            x: lx + win.scrollX,
             y: ly + win.scrollY,
           });
         },
         onDoubleClick: (lx: number, ly: number) => {
           callbacks.onContentEvent(win.id, {
             type: "doubleClick",
-            x: lx,
+            x: lx + win.scrollX,
             y: ly + win.scrollY,
           });
         },
@@ -933,6 +960,7 @@ export class WindowManager {
       // --- Close box ---
       const bx = x + 8;
       const by = y + (TITLE_BAR_HEIGHT - CLOSE_BOX_SIZE) / 2;
+      // White clearing pad so sprite sits cleanly against title bar stripes
       canvas.fillRect(
         bx - 1,
         by - 1,
@@ -940,7 +968,16 @@ export class WindowManager {
         CLOSE_BOX_SIZE + 2,
         WHITE
       );
-      canvas.drawRect(bx, by, CLOSE_BOX_SIZE, CLOSE_BOX_SIZE, BLACK);
+
+      const isClosePressed = this.closeBoxPressed === win.id;
+      const closeSprite = sprites.get(
+        isClosePressed ? "chrome/closing" : "chrome/close"
+      );
+      if (closeSprite) {
+        canvas.blit(closeSprite, bx, by);
+      } else {
+        canvas.drawRect(bx, by, CLOSE_BOX_SIZE, CLOSE_BOX_SIZE, BLACK);
+      }
 
       if (!interactionBlocked) {
         hitRegions.add({
@@ -949,7 +986,17 @@ export class WindowManager {
           y: by,
           w: CLOSE_BOX_SIZE,
           h: CLOSE_BOX_SIZE,
-          onMouseDown: () => callbacks.onClose(win.id),
+          onMouseDown: () => {
+            this.closeBoxPressed = win.id;
+            callbacks.scheduleRender();
+          },
+          onMouseUp: (lx: number, ly: number) => {
+            const stillInBox =
+              lx >= 0 && lx < CLOSE_BOX_SIZE && ly >= 0 && ly < CLOSE_BOX_SIZE;
+            this.closeBoxPressed = null;
+            if (stillInBox) callbacks.onClose(win.id);
+            else callbacks.scheduleRender();
+          },
         });
       }
 
@@ -965,15 +1012,14 @@ export class WindowManager {
         ZOOM_BOX_SIZE + 2,
         WHITE
       );
-      canvas.drawRect(zbx, zby, ZOOM_BOX_SIZE, ZOOM_BOX_SIZE, BLACK);
-
-      // Inner marks on zoom box (two small nested rectangles like Mac)
-      canvas.drawRect(zbx + 2, zby + 4, 5, 5, BLACK);
-      canvas.drawRect(zbx + 4, zby + 2, 5, 5, BLACK);
-      canvas.fillRect(zbx + 5, zby + 3, 3, 3, WHITE);
+      const zoomSprite = sprites.get("chrome/zoom");
+      if (zoomSprite) {
+        canvas.blit(zoomSprite, zbx, zby);
+      } else {
+        canvas.drawRect(zbx, zby, ZOOM_BOX_SIZE, ZOOM_BOX_SIZE, BLACK);
+      }
 
       if (isZoomPressed) {
-        // Highlight the box interior when pressed
         canvas.invertRect(
           zbx + 1,
           zby + 1,
@@ -1028,13 +1074,13 @@ export class WindowManager {
 
     // Vertical scrollbar
     if (win.scrollable) {
-      this._drawScrollbar(canvas, win, hitRegions, callbacks);
+      this._drawScrollbar(canvas, win, sprites, hitRegions, callbacks);
     }
 
     // Horizontal scrollbar + grow box
     if (win.resizable) {
-      this._drawHScrollbar(canvas, win, hitRegions, callbacks);
-      this._drawGrowBox(canvas, win, hitRegions, callbacks);
+      this._drawHScrollbar(canvas, win, sprites, hitRegions, callbacks);
+      this._drawGrowBox(canvas, win, sprites, hitRegions, callbacks);
     }
   }
 
@@ -1089,56 +1135,52 @@ export class WindowManager {
   private _drawScrollbar(
     canvas: BitCanvas,
     win: WindowState,
+    sprites: SpriteRegistry,
     hitRegions: HitRegionMap,
     callbacks: { scheduleRender: () => void }
   ) {
     const headerH = this._headerHeight(win);
     const bodyH = this._bodyHeight(win);
-    const sbx = win.x + win.width - SCROLLBAR_WIDTH - 1;
-    const sby = win.y + headerH;
+
+    // Right edge of scrollbar sits on the window's right border (1px overlap).
+    // Top overlaps the title-bar bottom border by 1px (Mac convention).
+    const sbx = win.x + win.width - SCROLLBAR_WIDTH;
+    const sby = win.y + headerH - 1;
     const needsScroll = win.contentHeight > bodyH;
 
-    canvas.drawVLine(sbx, sby, bodyH, BLACK);
+    // Vertical dividing line between content and scrollbar
+    canvas.drawVLine(sbx, win.y + headerH, bodyH, BLACK);
 
-    const trackTop = sby + 15;
-    const trackHeight = bodyH - 30;
+    // Arrow sprites are 16×16; their outer border overlaps the window border
+    const upSprite = sprites.get("chrome/up");
+    if (upSprite) canvas.blit(upSprite, sbx, sby);
 
-    // Up arrow
-    canvas.fillRect(sbx + 1, sby, SCROLLBAR_WIDTH - 1, 15, WHITE);
-    canvas.drawHLine(sbx, sby + 14, SCROLLBAR_WIDTH, BLACK);
-    const arrowCx = sbx + 7;
-    canvas.setPixel(arrowCx, sby + 4, BLACK);
-    canvas.drawHLine(arrowCx - 1, sby + 5, 3, BLACK);
-    canvas.drawHLine(arrowCx - 2, sby + 6, 5, BLACK);
-    canvas.drawHLine(arrowCx - 3, sby + 7, 7, BLACK);
+    // Down arrow: bottom edge shares the grow-box top border line
+    const downTop = win.y + headerH + bodyH - SCROLLBAR_WIDTH + 1;
+    const downSprite = sprites.get("chrome/down");
+    if (downSprite) canvas.blit(downSprite, sbx, downTop);
+
+    const trackTop = sby + SCROLLBAR_WIDTH;
+    const trackHeight = downTop - trackTop;
 
     hitRegions.add({
       id: `win-scroll-up-${win.id}`,
       x: sbx,
       y: sby,
       w: SCROLLBAR_WIDTH,
-      h: 15,
+      h: SCROLLBAR_WIDTH,
       onMouseDown: () => {
         win.scrollY = Math.max(0, win.scrollY - 12);
         callbacks.scheduleRender();
       },
     });
 
-    // Down arrow
-    const downTop = sby + bodyH - 15;
-    canvas.fillRect(sbx + 1, downTop, SCROLLBAR_WIDTH - 1, 15, WHITE);
-    canvas.drawHLine(sbx, downTop, SCROLLBAR_WIDTH, BLACK);
-    canvas.setPixel(arrowCx, downTop + 10, BLACK);
-    canvas.drawHLine(arrowCx - 1, downTop + 9, 3, BLACK);
-    canvas.drawHLine(arrowCx - 2, downTop + 8, 5, BLACK);
-    canvas.drawHLine(arrowCx - 3, downTop + 7, 7, BLACK);
-
     hitRegions.add({
       id: `win-scroll-down-${win.id}`,
       x: sbx,
       y: downTop,
       w: SCROLLBAR_WIDTH,
-      h: 15,
+      h: SCROLLBAR_WIDTH,
       onMouseDown: () => {
         const maxScroll = Math.max(0, win.contentHeight - bodyH);
         win.scrollY = Math.min(maxScroll, win.scrollY + 12);
@@ -1148,13 +1190,26 @@ export class WindowManager {
 
     // Track
     if (needsScroll) {
-      canvas.fillPattern(
-        sbx + 1,
-        trackTop,
-        SCROLLBAR_WIDTH - 1,
-        trackHeight,
-        "gray50"
-      );
+      const trackSprite = sprites.get("scrollbar-bg");
+      if (trackSprite) {
+        canvas.fillSpriteTile(
+          sbx + 1,
+          trackTop,
+          SCROLLBAR_WIDTH - 1,
+          trackHeight,
+          trackSprite
+        );
+      } else {
+        canvas.fillPattern(
+          sbx + 1,
+          trackTop,
+          SCROLLBAR_WIDTH - 1,
+          trackHeight,
+          "gray50"
+        );
+      }
+      // Right border line (the scrollbar overlaps the window border, so we redraw it)
+      canvas.drawVLine(sbx + SCROLLBAR_WIDTH - 1, trackTop, trackHeight, BLACK);
 
       const maxScroll = win.contentHeight - bodyH;
       const thumbH = Math.max(
@@ -1189,43 +1244,48 @@ export class WindowManager {
         trackHeight,
         WHITE
       );
+      canvas.drawVLine(sbx + SCROLLBAR_WIDTH - 1, trackTop, trackHeight, BLACK);
     }
   }
 
   private _drawHScrollbar(
     canvas: BitCanvas,
     win: WindowState,
+    sprites: SpriteRegistry,
     hitRegions: HitRegionMap,
     callbacks: { scheduleRender: () => void }
   ) {
     const headerH = this._headerHeight(win);
     const bodyH = this._bodyHeight(win);
+
+    // H-scrollbar top edge sits at the first row below the content area.
+    // Its bottom edge overlaps the window's bottom border (1px overlap).
     const hsby = win.y + headerH + bodyH;
     const hsbx = win.x;
     const hsbw = win.width - GROW_BOX_SIZE;
     const sbW = win.scrollable ? SCROLLBAR_WIDTH : 0;
-    const contentW = win.width - 2 - sbW;
+    const contentW = win.width - 1 - sbW;
     const needsScroll = win.contentWidth > contentW;
 
-    canvas.drawHLine(hsbx, hsby, hsbw, BLACK);
+    // Horizontal dividing line between content and h-scrollbar (the top edge of the bar)
+    canvas.drawHLine(win.x, hsby, win.width - GROW_BOX_SIZE, BLACK);
 
-    const trackLeft = hsbx + 15;
-    const trackWidth = hsbw - 30;
+    // Arrow sprites are 16×16
+    const leftSprite = sprites.get("chrome/left");
+    if (leftSprite) canvas.blit(leftSprite, hsbx, hsby);
 
-    // Left arrow
-    canvas.fillRect(hsbx + 1, hsby + 1, 14, SCROLLBAR_WIDTH - 2, WHITE);
-    canvas.drawVLine(hsbx + 14, hsby, SCROLLBAR_WIDTH, BLACK);
-    const arrowCy = hsby + 7;
-    canvas.setPixel(hsbx + 4, arrowCy, BLACK);
-    canvas.drawVLine(hsbx + 5, arrowCy - 1, 3, BLACK);
-    canvas.drawVLine(hsbx + 6, arrowCy - 2, 5, BLACK);
-    canvas.drawVLine(hsbx + 7, arrowCy - 3, 7, BLACK);
+    const rightLeft = hsbx + hsbw - SCROLLBAR_WIDTH + 1;
+    const rightSprite = sprites.get("chrome/right");
+    if (rightSprite) canvas.blit(rightSprite, rightLeft, hsby);
+
+    const trackLeft = hsbx + SCROLLBAR_WIDTH;
+    const trackWidth = rightLeft - trackLeft;
 
     hitRegions.add({
       id: `win-hscroll-left-${win.id}`,
       x: hsbx,
       y: hsby,
-      w: 15,
+      w: SCROLLBAR_WIDTH,
       h: SCROLLBAR_WIDTH,
       onMouseDown: () => {
         win.scrollX = Math.max(0, win.scrollX - 12);
@@ -1233,20 +1293,11 @@ export class WindowManager {
       },
     });
 
-    // Right arrow
-    const rightLeft = hsbx + hsbw - 15;
-    canvas.fillRect(rightLeft + 1, hsby + 1, 14, SCROLLBAR_WIDTH - 2, WHITE);
-    canvas.drawVLine(rightLeft, hsby, SCROLLBAR_WIDTH, BLACK);
-    canvas.setPixel(rightLeft + 10, arrowCy, BLACK);
-    canvas.drawVLine(rightLeft + 9, arrowCy - 1, 3, BLACK);
-    canvas.drawVLine(rightLeft + 8, arrowCy - 2, 5, BLACK);
-    canvas.drawVLine(rightLeft + 7, arrowCy - 3, 7, BLACK);
-
     hitRegions.add({
       id: `win-hscroll-right-${win.id}`,
       x: rightLeft,
       y: hsby,
-      w: 15,
+      w: SCROLLBAR_WIDTH,
       h: SCROLLBAR_WIDTH,
       onMouseDown: () => {
         const maxScrollX = Math.max(0, win.contentWidth - contentW);
@@ -1256,13 +1307,24 @@ export class WindowManager {
     });
 
     if (needsScroll) {
-      canvas.fillPattern(
-        trackLeft,
-        hsby + 1,
-        trackWidth,
-        SCROLLBAR_WIDTH - 2,
-        "gray50"
-      );
+      const trackSprite = sprites.get("scrollbar-bg");
+      if (trackSprite) {
+        canvas.fillSpriteTile(
+          trackLeft,
+          hsby + 1,
+          trackWidth,
+          SCROLLBAR_WIDTH - 2,
+          trackSprite
+        );
+      } else {
+        canvas.fillPattern(
+          trackLeft,
+          hsby + 1,
+          trackWidth,
+          SCROLLBAR_WIDTH - 2,
+          "gray50"
+        );
+      }
 
       const maxScrollX = win.contentWidth - contentW;
       const thumbW = Math.max(
@@ -1303,19 +1365,23 @@ export class WindowManager {
   private _drawGrowBox(
     canvas: BitCanvas,
     win: WindowState,
+    sprites: SpriteRegistry,
     hitRegions: HitRegionMap,
-    callbacks: { scheduleRender: () => void }
+    _callbacks: { scheduleRender: () => void }
   ) {
     const headerH = this._headerHeight(win);
+    // Grow box is 16×16, bottom-right corner; outer edge overlaps window borders
     const gbx = win.x + win.width - GROW_BOX_SIZE;
     const gby = win.y + headerH + win.height - GROW_BOX_SIZE;
 
-    canvas.fillRect(gbx, gby, GROW_BOX_SIZE, GROW_BOX_SIZE, WHITE);
-    canvas.drawHLine(gbx, gby, GROW_BOX_SIZE, BLACK);
-    canvas.drawVLine(gbx, gby, GROW_BOX_SIZE, BLACK);
-    canvas.drawRect(gbx + 2, gby + 6, 7, 7, BLACK);
-    canvas.fillRect(gbx + 5, gby + 3, 7, 7, WHITE);
-    canvas.drawRect(gbx + 5, gby + 3, 7, 7, BLACK);
+    const resizeSprite = sprites.get("chrome/resize");
+    if (resizeSprite) {
+      canvas.blit(resizeSprite, gbx, gby);
+    } else {
+      canvas.fillRect(gbx, gby, GROW_BOX_SIZE, GROW_BOX_SIZE, WHITE);
+      canvas.drawHLine(gbx, gby, GROW_BOX_SIZE, BLACK);
+      canvas.drawVLine(gbx, gby, GROW_BOX_SIZE, BLACK);
+    }
 
     hitRegions.add({
       id: `win-growbox-${win.id}`,

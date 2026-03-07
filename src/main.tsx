@@ -13,6 +13,7 @@ import { registerAllSprites } from "../lib/canvas/sprites";
 import { HitRegionMap } from "../lib/canvas/HitRegion";
 import { loadFonts } from "../lib/canvas/fontAdapter";
 import { createOSServices } from "../lib/canvas/OSServices";
+import { animateZoomRect, AnimRect } from "../lib/canvas/ZoomAnimation";
 import {
   MenubarDefinition,
   createMenubarState,
@@ -29,6 +30,7 @@ import {
   FinderApp,
   FinderServices,
   FinderWindowInfo,
+  IconScreenRect,
   DESKTOP_WINDOW_ID,
   finderIsDragging,
   finderHandleMouseMove,
@@ -77,14 +79,10 @@ async function loadMarkdownFile(name: string): Promise<string> {
   }
 }
 
-async function populateDefaultFS(fs: MockFS): Promise<void> {
-  const root = fs.readDir(ROOT_ID);
-  if (root.length > 0) {
-    ensureDesktopFolder(fs);
-    await ensureDesktopShortcuts(fs);
-    return;
-  }
-
+/**
+ * Create the default volume and desktop from scratch (used on first boot and after Format Drive).
+ */
+async function bootstrapFreshFS(fs: MockFS): Promise<void> {
   const [readme, contributing] = await Promise.all([
     loadMarkdownFile("README.md"),
     loadMarkdownFile("CONTRIBUTING.md"),
@@ -97,7 +95,7 @@ async function populateDefaultFS(fs: MockFS): Promise<void> {
   await fs.writeFile(dev.id, "README.md", readme, "text");
   await fs.writeFile(dev.id, "CONTRIBUTING.md", contributing, "text");
 
-  const appsDir = fs.mkdir(hd.id, "Applications");
+  fs.mkdir(hd.id, "Applications");
 
   const desktop = fs.mkdir(hd.id, "Desktop Folder");
 
@@ -114,12 +112,28 @@ async function populateDefaultFS(fs: MockFS): Promise<void> {
   await fs.flush();
 }
 
+async function populateDefaultFS(fs: MockFS): Promise<void> {
+  const root = fs.readDir(ROOT_ID);
+  if (root.length > 0) {
+    ensureDesktopFolder(fs);
+    await ensureDesktopShortcuts(fs);
+    return;
+  }
+
+  await bootstrapFreshFS(fs);
+}
+
 function ensureDesktopFolder(fs: MockFS): void {
   const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
   if (!hd) return;
   fs.mkdir(hd.id, "Desktop Folder");
 }
 
+/**
+ * Single source of truth for which system apps get a desktop shortcut.
+ * When you add/rename/remove an app in code, update this list; ensureDesktopShortcuts
+ * will sync the Desktop Folder (add missing, remove ghosts and stale renames) on each boot.
+ */
 const DESKTOP_SHORTCUTS: Array<{ name: string; appId: string; icon: string }> =
   [
     {
@@ -134,11 +148,40 @@ const DESKTOP_SHORTCUTS: Array<{ name: string; appId: string; icon: string }> =
     { name: "Spotify Player", appId: "spotify", icon: "icon/spotify" },
   ];
 
+/** Canonical appId -> shortcut entry. Used to reconcile desktop with code. */
+const DESKTOP_SHORTCUTS_BY_APP_ID = new Map(
+  DESKTOP_SHORTCUTS.map((s) => [s.appId, s])
+);
+
+/**
+ * Sync desktop app-shortcuts to DESKTOP_SHORTCUTS (single source of truth).
+ * - Adds missing shortcuts.
+ * - Removes "ghost" shortcuts for apps no longer in the list (e.g. removed from code).
+ * - Removes stale shortcuts after renames (same appId, wrong name) so only one icon per app remains.
+ */
 async function ensureDesktopShortcuts(fs: MockFS): Promise<void> {
   const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
   if (!hd) return;
   const desktop = fs.findByName(hd.id, "Desktop Folder");
   if (!desktop) return;
+
+  const contents = fs.readDir(desktop.id);
+  for (const node of contents) {
+    if (node.kind !== "file") continue;
+    const file = node as FSFile;
+    if (file.fileType !== "app-shortcut") continue;
+
+    let appId: string | undefined;
+    try {
+      const raw = await fs.readFile(file.id);
+      if (raw) appId = JSON.parse(raw).appId;
+    } catch {}
+    const canonical = appId
+      ? DESKTOP_SHORTCUTS_BY_APP_ID.get(appId)
+      : undefined;
+    const remove = !canonical || canonical.name !== file.name;
+    if (remove) await fs.remove(file.id);
+  }
 
   for (const s of DESKTOP_SHORTCUTS) {
     const existing = fs.findByName(desktop.id, s.name);
@@ -340,7 +383,11 @@ async function main() {
     videoElement: video,
   });
 
-  function openFinderWindow(title: string, directoryId: string) {
+  async function openFinderWindow(
+    title: string,
+    directoryId: string,
+    fromRect?: AnimRect
+  ) {
     const windowId = title;
 
     const existing = windowManager.windows.find((w) => w.id === windowId);
@@ -361,15 +408,42 @@ async function main() {
       inst.winBuilder.setRenderFunction(scheduleRender);
     }
 
+    const winW = 340;
+    const winH = 180;
+    const leftMin = 3;
+    const topMin = MENUBAR_HEIGHT + 3;
+    const rightMax = resolution.width - 3;
+    // win.y is title-bar top; window bottom = win.y + TITLE_BAR_HEIGHT + win.height
+    const bottomMax = resolution.height - 3;
+    let winX = Math.max(leftMin, Math.min(pos.x ?? 20, rightMax - winW));
+    let winY = Math.max(
+      topMin,
+      Math.min(
+        (pos.y ?? 30) + MENUBAR_HEIGHT,
+        bottomMax - TITLE_BAR_HEIGHT - winH
+      )
+    );
+
+    // Zoom-open animation plays before the window appears (Mac ShowWindow order)
+    if (fromRect) {
+      const toRect: AnimRect = {
+        x: winX,
+        y: winY,
+        width: winW,
+        height: winH + TITLE_BAR_HEIGHT,
+      };
+      await playZoomAnimation(fromRect, toRect);
+    }
+
     windowManager.openWindow({
       id: windowId,
       title,
-      x: pos.x ?? 20,
-      y: (pos.y ?? 30) + MENUBAR_HEIGHT,
-      width: 340,
-      height: 180,
-      contentHeight: 180,
-      contentWidth: 340,
+      x: winX,
+      y: winY,
+      width: winW,
+      height: winH,
+      contentHeight: winH,
+      contentWidth: winW,
       appId: "finder",
       props,
       scrollable: true,
@@ -377,17 +451,19 @@ async function main() {
       minWidth: 160,
       minHeight: 80,
       windowKind: "document",
+      openedFromRect: fromRect,
     });
 
     updateMenubar();
     scheduleRender();
   }
 
-  function openWindow(
+  async function openWindow(
     appId: string,
     title?: string,
     props?: any,
-    defaultPosition?: any
+    defaultPosition?: any,
+    fromRect?: AnimRect
   ) {
     const appDef = appRegistry.get(appId);
     if (!appDef) return;
@@ -420,15 +496,46 @@ async function main() {
       instance.builder.setRenderFunction(scheduleRender);
     }
 
+    // Clamp size to desktop (gray region minus 3px), per original Mac Window Manager
+    const maxW = resolution.width - 6;
+    const maxH = resolution.height - MENUBAR_HEIGHT - 6;
+    const winW = Math.min(appDef.defaultSize.width, maxW);
+    const winH = Math.min(appDef.defaultSize.height, maxH);
+    // Keep position on screen: don't open with window extending past desktop (Mac: "don't open a window off of a user's screen")
+    // win.y is title-bar top; window bottom = win.y + TITLE_BAR_HEIGHT + win.height
+    const leftMin = 3;
+    const topMin = MENUBAR_HEIGHT + 3;
+    const rightMax = resolution.width - 3;
+    const bottomMax = resolution.height - 3;
+    const winX = Math.max(leftMin, Math.min(pos.x ?? 20, rightMax - winW));
+    const winY = Math.max(
+      topMin,
+      Math.min(
+        (pos.y ?? 30) + MENUBAR_HEIGHT,
+        bottomMax - TITLE_BAR_HEIGHT - winH
+      )
+    );
+
+    // Zoom-open animation plays before the window appears (Mac ShowWindow order)
+    if (fromRect) {
+      const toRect: AnimRect = {
+        x: winX,
+        y: winY,
+        width: winW,
+        height: winH + TITLE_BAR_HEIGHT,
+      };
+      await playZoomAnimation(fromRect, toRect);
+    }
+
     windowManager.openWindow({
       id: windowId,
       title: title ?? appDef.title,
-      x: pos.x ?? 20,
-      y: (pos.y ?? 30) + MENUBAR_HEIGHT,
-      width: appDef.defaultSize.width,
-      height: appDef.defaultSize.height,
-      contentHeight: appDef.defaultSize.height,
-      contentWidth: appDef.defaultSize.width,
+      x: winX,
+      y: winY,
+      width: winW,
+      height: winH,
+      contentHeight: winH,
+      contentWidth: winW,
       appId,
       props: props ?? {},
       scrollable: appDef.scrollable ?? false,
@@ -436,18 +543,19 @@ async function main() {
       minWidth: appDef.minSize?.width ?? 100,
       minHeight: appDef.minSize?.height ?? 60,
       windowKind: "document",
+      openedFromRect: fromRect,
     });
 
     updateMenubar();
     scheduleRender();
   }
 
-  async function openFSNode(nodeId: string) {
+  async function openFSNode(nodeId: string, iconRect?: IconScreenRect) {
     const node = mockFS.getNode(nodeId);
     if (!node) return;
 
     if (node.kind === "directory") {
-      openFinderWindow(node.name, node.id);
+      openFinderWindow(node.name, node.id, iconRect);
       return;
     }
 
@@ -458,7 +566,7 @@ async function main() {
       if (raw) {
         try {
           const { appId } = JSON.parse(raw);
-          openWindow(appId);
+          openWindow(appId, undefined, undefined, undefined, iconRect);
         } catch {}
       }
       return;
@@ -471,7 +579,7 @@ async function main() {
           const manifest: AppManifest = JSON.parse(raw);
           if (manifest.id && manifest.entry) {
             await appLoader.load(manifest);
-            openWindow(manifest.id);
+            openWindow(manifest.id, undefined, undefined, undefined, iconRect);
           }
         } catch {}
       }
@@ -479,17 +587,26 @@ async function main() {
     }
 
     if (file.fileType === "text") {
-      openWindow("file", file.name, { fileId: file.id, _fs: mockFS });
+      openWindow(
+        "file",
+        file.name,
+        { fileId: file.id, _fs: mockFS },
+        undefined,
+        iconRect
+      );
       return;
     }
 
     if (file.fileType === "image") {
       const sprite = await mockFS.loadSprite(file.id);
       if (sprite) {
-        openWindow("picture", file.name, {
-          src: `fs:${file.id}`,
-          title: file.name,
-        });
+        openWindow(
+          "picture",
+          file.name,
+          { src: `fs:${file.id}`, title: file.name },
+          undefined,
+          iconRect
+        );
       }
       return;
     }
@@ -648,6 +765,22 @@ async function main() {
   // Window chrome callbacks
   const windowCallbacks = {
     onClose: (id: string) => {
+      // Capture the window rect and its origin icon rect before closing
+      const win = windowManager.windows.find((w) => w.id === id);
+      const closeFromRect: AnimRect | null = win
+        ? {
+            x: win.x,
+            y: win.y,
+            width: win.width,
+            height: win.height + TITLE_BAR_HEIGHT,
+          }
+        : null;
+      // Retreat toward the icon the window was opened from (Mac behaviour)
+      const closeToRect: AnimRect | null = win?.openedFromRect
+        ? { ...win.openedFromRect }
+        : null;
+
+      // Remove the window first — animation plays over the closed screen state
       windowManager.closeWindow(id);
       if (appRegistry.isMultiWindowApp("finder")) {
         appRegistry.destroyWindowForApp("finder", id);
@@ -655,6 +788,10 @@ async function main() {
       appRegistry.destroyInstance(id);
       updateMenubar();
       scheduleRender();
+
+      if (closeFromRect && closeToRect) {
+        playZoomAnimation(closeFromRect, closeToRect);
+      }
     },
     onBringToFront: (id: string) => {
       windowManager.bringToFront(id);
@@ -826,6 +963,10 @@ async function main() {
         if (!consumedByScrollArea) {
           if (id.scrollable) {
             windowManager.handleScroll(id, event.deltaY ?? 0);
+            const deltaX = event.deltaX ?? 0;
+            if (deltaX !== 0) {
+              windowManager.handleHScroll(id, deltaX);
+            }
           } else {
             dispatchToApp(id.id, event);
           }
@@ -846,11 +987,25 @@ async function main() {
 
   // --- Render ---
   let renderScheduled = false;
+  /** True while a zoom animation owns the pixel buffer — blocks scheduleRender */
+  let animating = false;
 
   function scheduleRender() {
-    if (renderScheduled) return;
+    if (renderScheduled || animating) return;
     renderScheduled = true;
     requestAnimationFrame(render);
+  }
+
+  /** Wrapper around animateZoomRect that pauses/resumes the render loop. */
+  function playZoomAnimation(from: AnimRect, to: AnimRect): Promise<void> {
+    // Set animating immediately — before the first tick — so any RAF already
+    // queued by scheduleRender() is cancelled when it fires (render() checks
+    // animating at the top and bails out before clearing the canvas).
+    animating = true;
+    return animateZoomRect(bitCanvas, ctx2d, from, to, 4, 30, undefined, () => {
+      animating = false;
+      scheduleRender();
+    });
   }
 
   function drawCornerMasks() {
@@ -871,6 +1026,7 @@ async function main() {
 
   function render() {
     renderScheduled = false;
+    if (animating) return;
     bitCanvas.clear(WHITE);
     hitRegions.clear();
 
@@ -964,6 +1120,7 @@ async function main() {
             MENUBAR_HEIGHT,
             resolution.width,
             resolution.height - MENUBAR_HEIGHT,
+            0,
             0,
             hitRegions
           );
@@ -1110,7 +1267,8 @@ async function main() {
     sprites,
     fs: mockFS,
     os: osServices,
-    openFSNode: (nodeId: string) => openFSNode(nodeId),
+    openFSNode: (nodeId: string, iconRect?: IconScreenRect) =>
+      openFSNode(nodeId, iconRect),
     scheduleRender,
     screenWidth: resolution.width,
     screenHeight: resolution.height,
@@ -1133,9 +1291,36 @@ async function main() {
           contentW: contentRect.w,
           contentH: contentRect.h,
           scrollY: win.scrollY,
+          scrollX: win.scrollX,
         });
       }
       return result;
+    },
+    formatDrive: async (): Promise<void> => {
+      const result = await osServices.showDialog({
+        message:
+          "Erase Mockintosh HD and restore to factory state? This cannot be undone.",
+        buttons: ["Erase", "Cancel"],
+      });
+      if (result !== "Erase") return;
+
+      const toClose = windowManager.windows
+        .filter((w) => w.appId === "finder" && w.id !== DESKTOP_WINDOW_ID)
+        .map((w) => w.id);
+      for (const id of toClose) {
+        windowManager.closeWindow(id);
+        if (appRegistry.isMultiWindowApp("finder")) {
+          appRegistry.destroyWindowForApp("finder", id);
+        }
+        appRegistry.destroyInstance(id);
+      }
+
+      const rootChildren = mockFS.readDir(ROOT_ID);
+      for (const node of rootChildren) {
+        await mockFS.remove(node.id);
+      }
+      await bootstrapFreshFS(mockFS);
+      scheduleRender();
     },
   };
 

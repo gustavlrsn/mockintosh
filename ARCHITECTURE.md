@@ -271,6 +271,16 @@ Every window carries a `windowKind` field that is the single source of truth for
 
 `modal` and `chromeless` are derived from `windowKind` at `openWindow` time (`WindowManager.isModal()` / `WindowManager.isChromeless()`). Layering is enforced by `_insertInLayerOrder` and `bringToFront` in `WindowManager`.
 
+### Initial window size, position, and maximum size (open + resize)
+
+Apps can specify any `defaultSize`; the OS ensures no window ever exceeds the available space and that it opens fully on screen:
+
+- **Open (size):** `main.openWindow` clamps the app’s `defaultSize` to the desktop (gray region minus 3 px): `width ≤ screenWidth - 6`, `height ≤ screenHeight - menubarHeight - 6`.
+- **Open (position):** The initial position (from `getDefaultPosition` or default 20, 30) is clamped so the window stays within the desktop: `x` and `y` are adjusted so the window’s right and bottom edges do not extend past the gray region minus 3 px. This matches the Mac guideline “don’t open a window off of a user’s screen”; the original Mac could reset to upper-left when staggering would have gone off-screen.
+- **Resize:** When the user resizes via the size box, `WindowManager.handleMouseMove` clamps the prospective width/height to the same maximum (`_maxContentSize()`). Only minimum size is per-window (`minWidth` / `minHeight`); maximum is system-wide so no window can grow past the usable screen.
+
+On the original Mac, the application passed a `sizeRect` (min/max) to `GrowWindow` and was advised to cap the maximum at the display size; here the system enforces that cap so apps cannot specify or resize to a larger-than-desktop size.
+
 ### Zoom box (standard / user state)
 
 Document and utility windows support a zoom box in the right side of the title bar. Clicking it toggles between:

@@ -43,18 +43,30 @@ export interface FinderWindowInfo {
   contentW: number;
   contentH: number;
   scrollY: number;
+  scrollX: number;
+}
+
+export interface IconScreenRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface FinderServices {
   sprites: SpriteRegistry;
   fs: MockFS;
   os: OSServices;
-  openFSNode: (nodeId: string) => void;
+  /** Open a filesystem node. Pass iconRect (screen coords) to trigger the
+   *  zoom-open animation from the icon to the new window. */
+  openFSNode: (nodeId: string, iconRect?: IconScreenRect) => void;
   scheduleRender: () => void;
   screenWidth: number;
   screenHeight: number;
   menubarHeight: number;
   getOpenFolderWindows: () => FinderWindowInfo[];
+  /** Reset the drive to default state (confirmation shown inside). */
+  formatDrive: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +74,9 @@ export interface FinderServices {
 // ---------------------------------------------------------------------------
 
 const ICON_SIZE = 32;
+/** Original Mac: desktop icons were 32×32; hit region was the icon mask (same size). */
+const ICON_HIT_W = 32;
+const ICON_HIT_H = 32;
 const DESKTOP_PADDING_TOP = 8;
 
 const FOLDER_ICON_CELL_W = 80;
@@ -170,6 +185,20 @@ function snapToDesktopGrid(
   };
 }
 
+/** Returns the 32×32 icon hit rect (original Mac used icon mask = same size as icon). */
+function getIconHitRect(
+  cellX: number,
+  cellY: number,
+  cellW: number
+): { x: number; y: number; w: number; h: number } {
+  return {
+    x: cellX + Math.floor((cellW - ICON_HIT_W) / 2),
+    y: cellY,
+    w: ICON_HIT_W,
+    h: ICON_HIT_H,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Folder icon layout (left-to-right grid)
 // ---------------------------------------------------------------------------
@@ -202,6 +231,9 @@ function snapToFolderGrid(x: number, y: number): { x: number; y: number } {
 // ---------------------------------------------------------------------------
 // Shared icon position helpers
 // ---------------------------------------------------------------------------
+// Icons without a custom position are laid out by grid index (current list order).
+// "Clean up" assigns every icon a grid position and persists it, so only the
+// moved icon's position changes when the user drags.
 
 function getDesktopIconPos(
   icon: FinderIcon,
@@ -224,6 +256,46 @@ function getFolderIconPos(
 ): { x: number; y: number } {
   if (icon.position) return icon.position;
   return computeFolderIconPos(index, cols);
+}
+
+/** Default content width used when computing folder grid for Clean up (no window size in menu). */
+const DEFAULT_FOLDER_CONTENT_WIDTH = 400;
+
+/**
+ * Assign every icon in the container a grid position and persist it.
+ * After this, every icon has a custom position, so moving one never shifts others.
+ */
+function cleanUpAndPersistPositions(
+  svc: FinderServices,
+  isDesktop: boolean,
+  directoryId: string | undefined
+): void {
+  if (!directoryId) return;
+
+  if (isDesktop) {
+    const icons = buildDesktopIcons(svc.fs);
+    for (let i = 0; i < icons.length; i++) {
+      const pos = computeDesktopIconPos(
+        i,
+        svc.screenWidth,
+        svc.menubarHeight,
+        svc.screenHeight
+      );
+      svc.fs.setPosition(icons[i].nodeId, pos);
+    }
+  } else {
+    const icons = buildFolderIcons(svc.fs, directoryId);
+    const contentWidth = DEFAULT_FOLDER_CONTENT_WIDTH - 2 - SCROLLBAR_WIDTH;
+    const cols = Math.max(
+      1,
+      Math.floor((contentWidth - FOLDER_PADDING) / FOLDER_ICON_CELL_W)
+    );
+    for (let i = 0; i < icons.length; i++) {
+      const pos = computeFolderIconPos(i, cols);
+      svc.fs.setPosition(icons[i].nodeId, pos);
+    }
+  }
+  svc.scheduleRender();
 }
 
 // ---------------------------------------------------------------------------
@@ -385,19 +457,15 @@ export const FinderApp: MultiWindowSystemApp = {
             label: cleanUpLabel,
             disabled: !directoryId,
             onClick: () => {
-              if (!directoryId) return;
-              svc.fs.clearPositions(directoryId);
-              if (isDesktop) {
-                const rootChildren = svc.fs.readDir(ROOT_ID);
-                for (const vol of rootChildren) {
-                  if (vol.position) {
-                    svc.fs.setPosition(vol.id, undefined);
-                  }
-                }
-              }
+              cleanUpAndPersistPositions(svc, isDesktop, directoryId);
             },
           },
           { label: "Empty Trash", disabled: true },
+          { type: "separator" as const },
+          {
+            label: "Format Drive…",
+            onClick: () => void svc.formatDrive(),
+          },
           { type: "separator" as const },
           { label: "Restart", disabled: true },
           { label: "Shut Down", disabled: true },
@@ -546,7 +614,7 @@ export function finderHandleMouseUp(
       screenY >= fw.contentY &&
       screenY < fw.contentY + fw.contentH
     ) {
-      const localGhostX = ghostX - fw.contentX;
+      const localGhostX = ghostX - fw.contentX + fw.scrollX;
       const localGhostY = ghostY - fw.contentY + fw.scrollY;
 
       if (drag.sourceDirectoryId !== fw.directoryId) {
@@ -631,7 +699,7 @@ function findDropTargetAtScreen(
       screenY >= fw.contentY &&
       screenY < fw.contentY + fw.contentH
     ) {
-      const localX = screenX - fw.contentX;
+      const localX = screenX - fw.contentX + fw.scrollX;
       const localY = screenY - fw.contentY + fw.scrollY;
       const icons = buildFolderIcons(svc.fs, fw.directoryId);
       const cols = Math.max(
@@ -643,11 +711,12 @@ function findDropTargetAtScreen(
         if (icon.nodeId === drag.fsNodeId) continue;
         if (!icon.isDirectory) continue;
         const pos = getFolderIconPos(icon, i, cols);
+        const hit = getIconHitRect(pos.x, pos.y, FOLDER_ICON_CELL_W);
         if (
-          localX >= pos.x &&
-          localX < pos.x + FOLDER_ICON_CELL_W &&
-          localY >= pos.y &&
-          localY < pos.y + FOLDER_ICON_CELL_H
+          localX >= hit.x &&
+          localX < hit.x + hit.w &&
+          localY >= hit.y &&
+          localY < hit.y + hit.h
         ) {
           return { nodeId: icon.nodeId };
         }
@@ -664,11 +733,12 @@ function findDropTargetAtScreen(
     if (icon.nodeId === drag.fsNodeId) continue;
     if (!icon.isDirectory && !icon.isVolume) continue;
     const pos = getDesktopIconPos(icon, i, svc);
+    const hit = getIconHitRect(pos.x, pos.y, DESKTOP_ICON_CELL_W);
     if (
-      screenX >= pos.x &&
-      screenX < pos.x + DESKTOP_ICON_CELL_W &&
-      localScreenY >= pos.y &&
-      localScreenY < pos.y + DESKTOP_ICON_CELL_H
+      screenX >= hit.x &&
+      screenX < hit.x + hit.w &&
+      localScreenY >= hit.y &&
+      localScreenY < hit.y + hit.h
     ) {
       return { nodeId: icon.nodeId };
     }
@@ -751,11 +821,12 @@ function handleDesktopEvent(
     let hitPos: { x: number; y: number } | null = null;
     for (let i = 0; i < icons.length; i++) {
       const pos = getDesktopIconPos(icons[i], i, svc);
+      const hit = getIconHitRect(pos.x, pos.y, DESKTOP_ICON_CELL_W);
       if (
-        mx >= pos.x &&
-        mx < pos.x + DESKTOP_ICON_CELL_W &&
-        localY >= pos.y &&
-        localY < pos.y + DESKTOP_ICON_CELL_H
+        mx >= hit.x &&
+        mx < hit.x + hit.w &&
+        localY >= hit.y &&
+        localY < hit.y + hit.h
       ) {
         hitIcon = icons[i];
         hitPos = pos;
@@ -796,13 +867,19 @@ function handleDesktopEvent(
 
     for (let i = 0; i < icons.length; i++) {
       const pos = getDesktopIconPos(icons[i], i, svc);
+      const hit = getIconHitRect(pos.x, pos.y, DESKTOP_ICON_CELL_W);
       if (
-        mx >= pos.x &&
-        mx < pos.x + DESKTOP_ICON_CELL_W &&
-        my >= pos.y &&
-        my < pos.y + DESKTOP_ICON_CELL_H
+        mx >= hit.x &&
+        mx < hit.x + hit.w &&
+        my >= hit.y &&
+        my < hit.y + hit.h
       ) {
-        svc.openFSNode(icons[i].nodeId);
+        svc.openFSNode(icons[i].nodeId, {
+          x: pos.x,
+          y: pos.y + svc.menubarHeight,
+          width: DESKTOP_ICON_CELL_W,
+          height: DESKTOP_ICON_CELL_H,
+        });
         return;
       }
     }
@@ -901,11 +978,12 @@ function handleFolderEvent(
     let hitPos: { x: number; y: number } | null = null;
     for (let i = 0; i < icons.length; i++) {
       const pos = getFolderIconPos(icons[i], i, cols);
+      const hit = getIconHitRect(pos.x, pos.y, FOLDER_ICON_CELL_W);
       if (
-        mx >= pos.x &&
-        mx < pos.x + FOLDER_ICON_CELL_W &&
-        my >= pos.y &&
-        my < pos.y + FOLDER_ICON_CELL_H
+        mx >= hit.x &&
+        mx < hit.x + hit.w &&
+        my >= hit.y &&
+        my < hit.y + hit.h
       ) {
         hitIcon = icons[i];
         hitPos = pos;
@@ -952,13 +1030,19 @@ function handleFolderEvent(
 
     for (let i = 0; i < icons.length; i++) {
       const pos = getFolderIconPos(icons[i], i, cols);
+      const hit = getIconHitRect(pos.x, pos.y, FOLDER_ICON_CELL_W);
       if (
-        mx >= pos.x &&
-        mx < pos.x + FOLDER_ICON_CELL_W &&
-        my >= pos.y &&
-        my < pos.y + FOLDER_ICON_CELL_H
+        mx >= hit.x &&
+        mx < hit.x + hit.w &&
+        my >= hit.y &&
+        my < hit.y + hit.h
       ) {
-        svc.openFSNode(icons[i].nodeId);
+        svc.openFSNode(icons[i].nodeId, {
+          x: originX + pos.x,
+          y: originY + pos.y,
+          width: FOLDER_ICON_CELL_W,
+          height: FOLDER_ICON_CELL_H,
+        });
         return;
       }
     }

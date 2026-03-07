@@ -15,6 +15,7 @@ export interface OSEvent {
   y?: number;
   button?: number;
   deltaY?: number;
+  deltaX?: number;
   key?: string;
   code?: string;
   shiftKey?: boolean;
@@ -109,7 +110,7 @@ export class EventManager {
       (e) => {
         e.preventDefault();
         const { x, y } = this.toLocal(e);
-        this.emit({ type: "scroll", x, y, deltaY: e.deltaY });
+        this.emit({ type: "scroll", x, y, deltaY: e.deltaY, deltaX: e.deltaX });
       },
       { passive: false }
     );

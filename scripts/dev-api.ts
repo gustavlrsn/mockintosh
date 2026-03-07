@@ -66,7 +66,15 @@ async function webToNodeResponse(webRes: Response, res: ServerResponse) {
   }
 }
 
-const { default: handler } = await import("../api/chat.js");
+const { default: chatHandler } = await import("../api/chat.js");
+const { default: generateImageHandler } = await import(
+  "../api/generate-image.js"
+);
+
+const routes: Record<string, (req: Request) => Promise<Response>> = {
+  "/api/chat": chatHandler,
+  "/api/generate-image": generateImageHandler,
+};
 
 const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
@@ -76,6 +84,15 @@ const server = createServer(async (req, res) => {
       "Access-Control-Allow-Headers": "Content-Type",
     });
     res.end();
+    return;
+  }
+
+  const path = new URL(req.url ?? "/", `http://localhost:${PORT}`).pathname;
+  const handler = routes[path];
+
+  if (!handler) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Not found" }));
     return;
   }
 

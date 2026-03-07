@@ -287,6 +287,27 @@ export class BitCanvas {
     }
   }
 
+  /** Tile a sprite as a repeating pattern over a rectangle. */
+  fillSpriteTile(x: number, y: number, w: number, h: number, sprite: Sprite) {
+    x = x | 0;
+    y = y | 0;
+    w = w | 0;
+    h = h | 0;
+    const { width: sw, height: sh, data } = sprite;
+    const x0 = Math.max(x, this.clip.x, 0);
+    const y0 = Math.max(y, this.clip.y, 0);
+    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
+    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
+    for (let py = y0; py < y1; py++) {
+      const row = py * this.width;
+      const sy = (((py - y) % sh) + sh) % sh;
+      for (let px = x0; px < x1; px++) {
+        const sx = (((px - x) % sw) + sw) % sw;
+        this.pixels[row + px] = data[sy * sw + sx];
+      }
+    }
+  }
+
   blit(sprite: Sprite, dx: number, dy: number) {
     dx = dx | 0;
     dy = dy | 0;

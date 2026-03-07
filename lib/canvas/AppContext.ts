@@ -42,6 +42,7 @@ export class AppContext {
   private w: number;
   private h: number;
   private scrollOffsetY: number;
+  private scrollOffsetX: number;
   private _hitRegions: HitRegionMap | undefined;
   private _onStartResize:
     | ((
@@ -62,6 +63,7 @@ export class AppContext {
     w: number,
     h: number,
     scrollY: number = 0,
+    scrollX: number = 0,
     hitRegions?: HitRegionMap,
     onStartResize?: (
       startX: number,
@@ -78,6 +80,7 @@ export class AppContext {
     this.w = w;
     this.h = h;
     this.scrollOffsetY = scrollY;
+    this.scrollOffsetX = scrollX;
     this._hitRegions = hitRegions;
     this._onStartResize = onStartResize;
     this._minSize = minSize;
@@ -94,22 +97,25 @@ export class AppContext {
   get scrollY() {
     return this.scrollOffsetY;
   }
+  get scrollX() {
+    return this.scrollOffsetX;
+  }
 
   release() {
     this.canvas.popClip();
   }
 
   setPixel(x: number, y: number, color: number = BLACK) {
-    this.canvas.setPixel(this.ox + x, this.oy + y - this.scrollOffsetY, color);
+    this.canvas.setPixel(this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY, color);
   }
 
   getPixel(x: number, y: number): number {
-    return this.canvas.getPixel(this.ox + x, this.oy + y - this.scrollOffsetY);
+    return this.canvas.getPixel(this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY);
   }
 
   drawHLine(x: number, y: number, w: number, color: number = BLACK) {
     this.canvas.drawHLine(
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY,
       w,
       color
@@ -118,7 +124,7 @@ export class AppContext {
 
   drawVLine(x: number, y: number, h: number, color: number = BLACK) {
     this.canvas.drawVLine(
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY,
       h,
       color
@@ -127,7 +133,7 @@ export class AppContext {
 
   drawDottedHLine(x: number, y: number, w: number, color: number = BLACK) {
     this.canvas.drawDottedHLine(
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY,
       w,
       color
@@ -136,7 +142,7 @@ export class AppContext {
 
   drawDottedVLine(x: number, y: number, h: number, color: number = BLACK) {
     this.canvas.drawDottedVLine(
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY,
       h,
       color
@@ -145,7 +151,7 @@ export class AppContext {
 
   drawRect(x: number, y: number, w: number, h: number, color: number = BLACK) {
     this.canvas.drawRect(
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY,
       w,
       h,
@@ -155,7 +161,7 @@ export class AppContext {
 
   fillRect(x: number, y: number, w: number, h: number, color: number = BLACK) {
     this.canvas.fillRect(
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY,
       w,
       h,
@@ -171,7 +177,7 @@ export class AppContext {
     pattern: PatternName | Uint8Array
   ) {
     this.canvas.fillPattern(
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY,
       w,
       h,
@@ -180,17 +186,17 @@ export class AppContext {
   }
 
   invertRect(x: number, y: number, w: number, h: number) {
-    this.canvas.invertRect(this.ox + x, this.oy + y - this.scrollOffsetY, w, h);
+    this.canvas.invertRect(this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY, w, h);
   }
 
   blit(sprite: Sprite, x: number, y: number) {
-    this.canvas.blit(sprite, this.ox + x, this.oy + y - this.scrollOffsetY);
+    this.canvas.blit(sprite, this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY);
   }
 
   blitInverted(sprite: Sprite, x: number, y: number) {
     this.canvas.blitInverted(
       sprite,
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY
     );
   }
@@ -198,7 +204,7 @@ export class AppContext {
   blitShadowOutline(sprite: Sprite, x: number, y: number) {
     this.canvas.blitShadowOutline(
       sprite,
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY
     );
   }
@@ -206,7 +212,7 @@ export class AppContext {
   blitImageData(imageData: ImageData, x: number, y: number) {
     this.canvas.blitImageData(
       imageData,
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY
     );
   }
@@ -226,7 +232,7 @@ export class AppContext {
     const pixels = this.canvas.pixels;
     const dstW = this.canvas.width;
     const dstH = this.canvas.height;
-    const dx = this.ox + x;
+    const dx = this.ox + x - this.scrollOffsetX;
     const dy = this.oy + y - this.scrollOffsetY;
 
     const clip = this.canvas.getClip();
@@ -250,7 +256,7 @@ export class AppContext {
   }
 
   pushClip(x: number, y: number, w: number, h: number) {
-    this.canvas.pushClip(this.ox + x, this.oy + y, w, h);
+    this.canvas.pushClip(this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY, w, h);
   }
 
   popClip() {
@@ -261,7 +267,7 @@ export class AppContext {
     drawBitmapText(
       this.canvas,
       text,
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY,
       opts
     );
@@ -278,7 +284,7 @@ export class AppContext {
   ) {
     const absRect = _drawButton(this.canvas, {
       ...btn,
-      x: this.ox + btn.x,
+      x: this.ox + btn.x - this.scrollOffsetX,
       y: this.oy + btn.y - this.scrollOffsetY,
     });
     const localRect = { x: btn.x, y: btn.y, w: absRect.w, h: absRect.h };
@@ -312,7 +318,7 @@ export class AppContext {
     _drawTextInput(
       this.canvas,
       state,
-      this.ox + x,
+      this.ox + x - this.scrollOffsetX,
       this.oy + y - this.scrollOffsetY,
       width,
       h
@@ -333,7 +339,7 @@ export class AppContext {
             onChange?.();
           },
           onDrag: (absX: number) => {
-            const localX = absX - (this.ox + x);
+            const localX = absX - (this.ox + x - this.scrollOffsetX);
             if (_handleTextInputDrag(state, localX)) {
               onChange?.();
             }
@@ -367,7 +373,7 @@ export class AppContext {
       drawBitmapText(
         this.canvas,
         lines[i],
-        this.ox + opts.x,
+        this.ox + opts.x - this.scrollOffsetX,
         this.oy + ly - this.scrollOffsetY,
         { font, color }
       );
@@ -417,7 +423,7 @@ export class AppContext {
     const contentW = rect.w - sbW;
 
     // Screen-absolute origin of the scroll area (accounting for parent window scroll)
-    const absX = this.ox + rect.x;
+    const absX = this.ox + rect.x - this.scrollOffsetX;
     const absY = this.oy + rect.y - this.scrollOffsetY;
 
     // --- Draw content (clipped, offset by scroll) ---
@@ -428,6 +434,7 @@ export class AppContext {
       contentW,
       rect.h,
       clampedOffset,
+      0,
       this._hitRegions
     );
     drawContent(contentCtx);
@@ -600,7 +607,7 @@ export class AppContext {
     if (!this._hitRegions) return;
     this._hitRegions.add({
       id,
-      x: this.ox + rect.x,
+      x: this.ox + rect.x - this.scrollOffsetX,
       y: this.oy + rect.y - this.scrollOffsetY,
       w: rect.w,
       h: rect.h,
