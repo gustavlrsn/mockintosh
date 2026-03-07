@@ -5,6 +5,7 @@ import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { OSEvent } from "../lib/canvas/EventManager";
 import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
 import { measureText, getLineHeight } from "../lib/canvas/fontAdapter";
+import { encodeQR } from "@paulmillr/qr";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -64,6 +65,23 @@ interface DitherState {
   ctx: OffscreenCanvasRenderingContext2D;
   pixels: Uint8Array;
   luminance: Float32Array;
+}
+
+// ---------------------------------------------------------------------------
+// Device Flow (QR login) types
+// ---------------------------------------------------------------------------
+
+type DeviceFlowStatus = "loading" | "qr" | "expired" | "denied" | "error";
+
+interface DeviceFlowState {
+  status: DeviceFlowStatus;
+  pollId: string;
+  verificationUri: string;
+  userCode: string;
+  interval: number;
+  expiresAt: number;
+  /** Pre-computed boolean matrix from encodeQR */
+  qrMatrix: boolean[][] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +383,7 @@ async function ditherImageFromUrl(
 let messageListener: ((e: MessageEvent) => void) | null = null;
 let spotifyPlayer: any = null;
 let deviceId: string | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 // ---------------------------------------------------------------------------
 // UI helpers
@@ -413,12 +432,19 @@ export const SpotifyPlayerApp: SystemApp = {
     const [sdkReady, setSdkReady] = app.useState(false);
     const [sidebarScroll, setSidebarScroll] = app.useState(0);
     const [error, setError] = app.useState<string>("");
+    const [deviceFlow, setDeviceFlow] = app.useState<DeviceFlowState | null>(
+      null
+    );
 
     const tokensRef = app.useRef<SpotifyTokens | null>(tokens);
     const codeVerifierRef = app.useRef<string>("");
     const ditherRef = app.useRef<DitherState | null>(null);
     const initRef = app.useRef(false);
     const artLoadingRef = app.useRef<string>("");
+    const pollTimerRef = app.useRef<ReturnType<typeof setInterval> | null>(
+      null
+    );
+    const deviceFlowRef = app.useRef<DeviceFlowState | null>(deviceFlow);
 
     tokensRef.current = tokens;
 
@@ -426,6 +452,9 @@ export const SpotifyPlayerApp: SystemApp = {
       setTokens(t);
       saveTokens(t);
     };
+
+    // Keep deviceFlowRef in sync
+    deviceFlowRef.current = deviceFlow;
 
     // --- Effects ---
 
@@ -565,6 +594,91 @@ export const SpotifyPlayerApp: SystemApp = {
       };
     }, []);
 
+    // --- Device flow polling ---
+    app.useEffect(() => {
+      if (!deviceFlow || deviceFlow.status !== "qr") return;
+
+      // Clear any existing timer
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      pollTimerRef.current = null;
+
+      const intervalMs = (deviceFlow.interval ?? 5) * 1000;
+
+      pollTimer = setInterval(async () => {
+        pollTimerRef.current = pollTimer;
+        const current = deviceFlowRef.current;
+        if (!current || current.status !== "qr") {
+          if (pollTimer !== null) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+          return;
+        }
+
+        if (Date.now() > current.expiresAt) {
+          if (pollTimer !== null) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+          setDeviceFlow({ ...current, status: "expired" });
+          scheduleRender();
+          return;
+        }
+
+        try {
+          const resp = await fetch(
+            `/api/spotify/device-poll?poll_id=${encodeURIComponent(
+              current.pollId
+            )}`
+          );
+          const data = await resp.json();
+
+          if (data.status === "ready") {
+            if (pollTimer !== null) {
+              clearInterval(pollTimer);
+              pollTimer = null;
+            }
+            setDeviceFlow(null);
+            const newTokens: SpotifyTokens = {
+              access_token: data.access_token,
+              refresh_token: data.refresh_token,
+              expires_at: Date.now() + data.expires_in * 1000,
+            };
+            saveTokens(newTokens);
+            setTokens(newTokens);
+          } else if (data.status === "expired") {
+            if (pollTimer !== null) {
+              clearInterval(pollTimer);
+              pollTimer = null;
+            }
+            setDeviceFlow({ ...current, status: "expired" });
+          } else if (data.status === "denied") {
+            if (pollTimer !== null) {
+              clearInterval(pollTimer);
+              pollTimer = null;
+            }
+            setDeviceFlow({ ...current, status: "denied" });
+          }
+          // "pending" → keep polling silently
+        } catch {
+          // Network error: keep polling, will time out naturally
+        }
+        scheduleRender();
+      }, intervalMs);
+      pollTimerRef.current = pollTimer;
+
+      return () => {
+        if (pollTimer !== null) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        pollTimerRef.current = null;
+      };
+    }, [deviceFlow?.pollId, deviceFlow?.status]);
+
     // --- Render ---
     ctx.clear(WHITE);
 
@@ -581,7 +695,16 @@ export const SpotifyPlayerApp: SystemApp = {
     }
 
     if (!tokens) {
-      renderLoginScreen(ctx, sprites, app, codeVerifierRef, setError);
+      renderLoginScreen(
+        ctx,
+        sprites,
+        app,
+        codeVerifierRef,
+        setError,
+        deviceFlow,
+        setDeviceFlow,
+        scheduleRender
+      );
       if (error) {
         ctx.drawText(error, 8, ctx.height - 16, {
           font: "Geneva9",
@@ -634,6 +757,7 @@ export const SpotifyPlayerApp: SystemApp = {
     app.useState(false);
     const [sidebarScroll, setSidebarScroll] = app.useState(0);
     app.useState<string>("");
+    app.useState<DeviceFlowState | null>(null);
 
     // Ref alignment
     app.useRef<SpotifyTokens | null>(null);
@@ -641,6 +765,8 @@ export const SpotifyPlayerApp: SystemApp = {
     app.useRef<DitherState | null>(null);
     app.useRef(false);
     app.useRef<string>("");
+    app.useRef<ReturnType<typeof setInterval> | null>(null);
+    app.useRef<DeviceFlowState | null>(null);
 
     if (event.type === "scroll") {
       if (event.x !== undefined && event.x < SIDEBAR_W) {
@@ -655,6 +781,10 @@ export const SpotifyPlayerApp: SystemApp = {
       window.removeEventListener("message", messageListener);
       messageListener = null;
     }
+    if (pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
     if (spotifyPlayer) {
       spotifyPlayer.disconnect();
       spotifyPlayer = null;
@@ -667,15 +797,148 @@ export const SpotifyPlayerApp: SystemApp = {
 // Render: Login screen
 // ---------------------------------------------------------------------------
 
+/** Render a QR code matrix at (x, y) with each module being `moduleSize` pixels. */
+function renderQRCode(
+  ctx: AppContext,
+  matrix: boolean[][],
+  x: number,
+  y: number,
+  moduleSize: number
+) {
+  const size = matrix.length;
+  // White quiet zone background
+  ctx.fillRect(x, y, size * moduleSize, size * moduleSize, WHITE);
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      if (matrix[row][col]) {
+        ctx.fillRect(
+          x + col * moduleSize,
+          y + row * moduleSize,
+          moduleSize,
+          moduleSize,
+          BLACK
+        );
+      }
+    }
+  }
+}
+
 function renderLoginScreen(
   ctx: AppContext,
   sprites: SpriteRegistry,
   app: AppBuilder,
   codeVerifierRef: { current: string },
-  setError: (e: string) => void
+  setError: (e: string) => void,
+  deviceFlow: DeviceFlowState | null,
+  setDeviceFlow: (s: DeviceFlowState | null) => void,
+  scheduleRender: () => void
 ) {
   ctx.fillRect(0, 0, ctx.width, ctx.height, BLACK);
 
+  // --- QR / device flow active ---
+  if (deviceFlow) {
+    if (deviceFlow.status === "loading") {
+      const msg = "Connecting to Spotify...";
+      const tw = measureText(msg, "Geneva9");
+      ctx.drawText(
+        msg,
+        Math.floor((ctx.width - tw) / 2),
+        Math.floor(ctx.height / 2),
+        { font: "Geneva9", color: WHITE }
+      );
+      return;
+    }
+
+    if (deviceFlow.status === "expired" || deviceFlow.status === "denied") {
+      const msg =
+        deviceFlow.status === "expired" ? "QR code expired." : "Access denied.";
+      const tw = measureText(msg, "Geneva9");
+      ctx.drawText(
+        msg,
+        Math.floor((ctx.width - tw) / 2),
+        Math.floor(ctx.height / 2) - 20,
+        { font: "Geneva9", color: WHITE }
+      );
+      const btnW = 80;
+      const btnH = 18;
+      const btnX = Math.floor((ctx.width - btnW) / 2);
+      const btnY = Math.floor(ctx.height / 2);
+      ctx.fillRect(btnX, btnY, btnW, btnH, WHITE);
+      ctx.drawRect(btnX, btnY, btnW, btnH, BLACK);
+      const label = "Try Again";
+      const lw = measureText(label, "Geneva9");
+      ctx.drawText(label, btnX + Math.floor((btnW - lw) / 2), btnY + 4, {
+        font: "Geneva9",
+        color: BLACK,
+      });
+      ctx.hitRegion(
+        "spotify-qr-retry",
+        { x: btnX, y: btnY, w: btnW, h: btnH },
+        { onClick: () => setDeviceFlow(null) }
+      );
+      return;
+    }
+
+    // status === "qr"
+    if (deviceFlow.qrMatrix) {
+      const qrSize = deviceFlow.qrMatrix.length;
+      // Pick the largest module size that fits with some padding
+      const availW = ctx.width - 16;
+      const availH = ctx.height - 50;
+      const moduleSize = Math.max(
+        1,
+        Math.floor(Math.min(availW, availH) / qrSize)
+      );
+      const totalPx = qrSize * moduleSize;
+      const qrX = Math.floor((ctx.width - totalPx) / 2);
+      const qrY = Math.floor((ctx.height - totalPx) / 2) - 8;
+
+      renderQRCode(ctx, deviceFlow.qrMatrix, qrX, qrY, moduleSize);
+      ctx.drawRect(qrX - 1, qrY - 1, totalPx + 2, totalPx + 2, WHITE);
+
+      // User code below the QR
+      const code = deviceFlow.userCode;
+      const cw = measureText(code, "ChiKareGo");
+      ctx.drawText(code, Math.floor((ctx.width - cw) / 2), qrY + totalPx + 4, {
+        font: "ChiKareGo",
+        color: WHITE,
+      });
+
+      // "Scan with your phone" hint
+      const hint = "Scan with your phone";
+      const hw = measureText(hint, "Geneva9");
+      ctx.drawText(hint, Math.floor((ctx.width - hw) / 2), qrY - 12, {
+        font: "Geneva9",
+        color: WHITE,
+      });
+    }
+
+    // Cancel link at the bottom
+    const cancelLabel = "Cancel";
+    const clw = measureText(cancelLabel, "Geneva9");
+    ctx.drawText(
+      cancelLabel,
+      Math.floor((ctx.width - clw) / 2),
+      ctx.height - 14,
+      {
+        font: "Geneva9",
+        color: WHITE,
+      }
+    );
+    ctx.hitRegion(
+      "spotify-qr-cancel",
+      {
+        x: Math.floor((ctx.width - clw) / 2) - 2,
+        y: ctx.height - 16,
+        w: clw + 4,
+        h: 12,
+      },
+      { onClick: () => setDeviceFlow(null) }
+    );
+    return;
+  }
+
+  // --- Default login screen ---
   const centerX = Math.floor(ctx.width / 2);
   const centerY = Math.floor(ctx.height / 2) - 20;
 
@@ -691,22 +954,86 @@ function renderLoginScreen(
     ctx.blitInverted(logo, centerX - Math.floor(logo.width / 2), centerY - 16);
   }
 
-  const btnW = 60;
+  // Primary: QR login button
+  const btnW = 80;
   const btnH = 18;
   const btnX = centerX - Math.floor(btnW / 2);
   const btnY = centerY + 24;
   ctx.fillRect(btnX, btnY, btnW, btnH, WHITE);
   ctx.drawRect(btnX, btnY, btnW, btnH, BLACK);
-  const loginLabel = "Login";
-  const loginW = measureText(loginLabel, "ChiKareGo");
-  ctx.drawText(loginLabel, btnX + Math.floor((btnW - loginW) / 2), btnY + 2, {
-    font: "ChiKareGo",
+  const qrLabel = "Log in with QR";
+  const qrLabelW = measureText(qrLabel, "Geneva9");
+  ctx.drawText(qrLabel, btnX + Math.floor((btnW - qrLabelW) / 2), btnY + 4, {
+    font: "Geneva9",
     color: BLACK,
   });
 
   ctx.hitRegion(
-    "spotify-login",
+    "spotify-qr-login",
     { x: btnX, y: btnY, w: btnW, h: btnH },
+    {
+      onClick: () => {
+        if (!CLIENT_ID) {
+          setError("No client ID configured");
+          return;
+        }
+        setDeviceFlow({
+          status: "loading",
+          pollId: "",
+          verificationUri: "",
+          userCode: "",
+          interval: 5,
+          expiresAt: 0,
+          qrMatrix: null,
+        });
+        scheduleRender();
+        fetch("/api/spotify/device-request", { method: "POST" })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.error) {
+              setError(data.error);
+              setDeviceFlow(null);
+              scheduleRender();
+              return;
+            }
+            const uri = data.verification_uri_complete ?? data.verification_uri;
+            const matrix = buildQRMatrix(uri);
+            setDeviceFlow({
+              status: "qr",
+              pollId: data.poll_id,
+              verificationUri: uri,
+              userCode: data.user_code,
+              interval: data.interval ?? 5,
+              expiresAt: Date.now() + (data.expires_in ?? 300) * 1000,
+              qrMatrix: matrix,
+            });
+            scheduleRender();
+          })
+          .catch((e) => {
+            setError(e.message ?? "Failed to start login");
+            setDeviceFlow(null);
+            scheduleRender();
+          });
+      },
+    }
+  );
+
+  // Secondary: browser login link
+  const browserLabel = "Log in via browser";
+  const blw = measureText(browserLabel, "Geneva9");
+  const browserY = btnY + btnH + 8;
+  ctx.drawText(browserLabel, centerX - Math.floor(blw / 2), browserY, {
+    font: "Geneva9",
+    color: WHITE,
+  });
+  ctx.hitRegion(
+    "spotify-browser-login",
+    {
+      x: centerX - Math.floor(blw / 2) - 2,
+      y: browserY - 2,
+      w: blw + 4,
+      h: 12,
+    },
     {
       onClick: () => {
         if (!CLIENT_ID) {
@@ -733,6 +1060,24 @@ function renderLoginScreen(
       },
     }
   );
+}
+
+// ---------------------------------------------------------------------------
+// QR matrix helpers
+// ---------------------------------------------------------------------------
+
+function buildQRMatrix(url: string): boolean[][] | null {
+  try {
+    const raw = encodeQR(url, "raw");
+    const size = Object.keys(raw).length;
+    const matrix: boolean[][] = [];
+    for (let r = 0; r < size; r++) {
+      matrix.push(Array.from(raw[r]) as boolean[]);
+    }
+    return matrix;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

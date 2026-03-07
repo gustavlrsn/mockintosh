@@ -13,6 +13,7 @@
     "build:content": "tsx scripts/build-content.ts"
   },
   "dependencies": {
+    "@paulmillr/qr": "^0.3.0",
     "canvas-dither": "^1.0.1",
     "canvas-flatten": "^1.0.1",
     "codepage-encoder": "^1.0.0",

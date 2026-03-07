@@ -106,11 +106,18 @@ export class AppContext {
   }
 
   setPixel(x: number, y: number, color: number = BLACK) {
-    this.canvas.setPixel(this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY, color);
+    this.canvas.setPixel(
+      this.ox + x - this.scrollOffsetX,
+      this.oy + y - this.scrollOffsetY,
+      color
+    );
   }
 
   getPixel(x: number, y: number): number {
-    return this.canvas.getPixel(this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY);
+    return this.canvas.getPixel(
+      this.ox + x - this.scrollOffsetX,
+      this.oy + y - this.scrollOffsetY
+    );
   }
 
   drawHLine(x: number, y: number, w: number, color: number = BLACK) {
@@ -169,6 +176,48 @@ export class AppContext {
     );
   }
 
+  /**
+   * Draw a rounded rectangle outline. radius is 1-bit pixel-perfect (clamped to half w/h).
+   */
+  drawRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    color: number = BLACK
+  ) {
+    this.canvas.drawRoundRect(
+      this.ox + x - this.scrollOffsetX,
+      this.oy + y - this.scrollOffsetY,
+      w,
+      h,
+      radius,
+      color
+    );
+  }
+
+  /**
+   * Fill a rounded rectangle. radius is 1-bit pixel-perfect (clamped to half w/h).
+   */
+  fillRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    color: number = BLACK
+  ) {
+    this.canvas.fillRoundRect(
+      this.ox + x - this.scrollOffsetX,
+      this.oy + y - this.scrollOffsetY,
+      w,
+      h,
+      radius,
+      color
+    );
+  }
+
   fillPattern(
     x: number,
     y: number,
@@ -186,11 +235,20 @@ export class AppContext {
   }
 
   invertRect(x: number, y: number, w: number, h: number) {
-    this.canvas.invertRect(this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY, w, h);
+    this.canvas.invertRect(
+      this.ox + x - this.scrollOffsetX,
+      this.oy + y - this.scrollOffsetY,
+      w,
+      h
+    );
   }
 
   blit(sprite: Sprite, x: number, y: number) {
-    this.canvas.blit(sprite, this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY);
+    this.canvas.blit(
+      sprite,
+      this.ox + x - this.scrollOffsetX,
+      this.oy + y - this.scrollOffsetY
+    );
   }
 
   blitInverted(sprite: Sprite, x: number, y: number) {
@@ -256,7 +314,12 @@ export class AppContext {
   }
 
   pushClip(x: number, y: number, w: number, h: number) {
-    this.canvas.pushClip(this.ox + x - this.scrollOffsetX, this.oy + y - this.scrollOffsetY, w, h);
+    this.canvas.pushClip(
+      this.ox + x - this.scrollOffsetX,
+      this.oy + y - this.scrollOffsetY,
+      w,
+      h
+    );
   }
 
   popClip() {
@@ -280,6 +343,8 @@ export class AppContext {
       id?: string;
       onClick?: () => void;
       onMouseDown?: () => void;
+      onMouseUp?: () => void;
+      onMouseLeave?: () => void;
     }
   ) {
     const absRect = _drawButton(this.canvas, {
@@ -289,10 +354,16 @@ export class AppContext {
     });
     const localRect = { x: btn.x, y: btn.y, w: absRect.w, h: absRect.h };
 
-    if (this._hitRegions && (btn.onClick || btn.onMouseDown) && btn.id) {
+    if (
+      this._hitRegions &&
+      (btn.onClick || btn.onMouseDown || btn.onMouseUp || btn.onMouseLeave) &&
+      btn.id
+    ) {
       this.hitRegion(btn.id, localRect, {
         onClick: btn.onClick ? () => btn.onClick!() : undefined,
         onMouseDown: btn.onMouseDown ? () => btn.onMouseDown!() : undefined,
+        onMouseUp: btn.onMouseUp ? () => btn.onMouseUp!() : undefined,
+        onMouseLeave: btn.onMouseLeave ? () => btn.onMouseLeave!() : undefined,
       });
     }
 

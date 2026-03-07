@@ -403,7 +403,7 @@ export const FinderApp: MultiWindowSystemApp = {
               if (!directoryId) return;
               const name = await svc.os.showDialog({
                 message: "Name for new folder:",
-                buttons: ["OK", "Cancel"],
+                buttons: ["Cancel", "OK"],
                 showInput: true,
                 inputDefault: "untitled folder",
               });
@@ -419,7 +419,7 @@ export const FinderApp: MultiWindowSystemApp = {
               if (!directoryId) return;
               const name = await svc.os.showDialog({
                 message: "Name for new file:",
-                buttons: ["OK", "Cancel"],
+                buttons: ["Cancel", "OK"],
                 showInput: true,
                 inputDefault: "untitled.txt",
               });

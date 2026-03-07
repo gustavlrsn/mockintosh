@@ -57,7 +57,7 @@ export const DialogApp: SystemApp = {
     const [inputState] = app.useState<TextInputState>(
       createTextInputState(props.inputDefault ?? "")
     );
-    const [activeButton] = app.useState<number | null>(null);
+    const [activeButton, setActiveButton] = app.useState<number | null>(null);
     const isInitRef = app.useRef(false);
 
     if (!isInitRef.current) {
@@ -118,15 +118,20 @@ export const DialogApp: SystemApp = {
     for (let i = buttons.length - 1; i >= 0; i--) {
       const label = buttons[i];
       const bw = measureText(label, "ChiKareGo") + 24;
-      bx -= bw + (i < buttons.length - 1 ? 8 : 0);
+      bx -= bw + (i < buttons.length - 1 ? 12 : 0);
       const btnIdx = i;
+      const isDefaultButton = btnIdx === buttons.length - 1;
       ctx.drawButton({
         x: bx,
         y: ty,
         width: bw,
         label,
+        default: isDefaultButton,
         active: activeButton === btnIdx,
         id: `dialog-btn-${btnIdx}`,
+        onMouseDown: () => setActiveButton(btnIdx),
+        onMouseUp: () => setActiveButton(null),
+        onMouseLeave: () => setActiveButton(null),
         onClick: () => {
           const resolve = props._resolve as (val: string | null) => void;
           const val = showInput ? inputState.value : label;
@@ -149,11 +154,12 @@ export const DialogApp: SystemApp = {
     if (event.type === "keyDown") {
       if (event.key === "Enter") {
         const resolve = props._resolve as (val: string | null) => void;
-        const val = showInput ? inputState.value : buttons[0];
+        const defaultLabel = buttons[buttons.length - 1];
+        const val = showInput ? inputState.value : defaultLabel;
         resolve(val);
         return;
       }
-      if (event.key === "Escape") {
+      if (event.key === "Escape" || (event.metaKey && event.key === ".")) {
         const resolve = props._resolve as (val: string | null) => void;
         const cancelBtn = buttons.find((b: string) => b === "Cancel");
         if (cancelBtn) {

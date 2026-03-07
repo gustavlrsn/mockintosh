@@ -138,6 +138,108 @@ export class BitCanvas {
     this.drawVLine(x + w - 1, y, h, color);
   }
 
+  /**
+   * Draw a rounded rectangle outline (1-bit pixel-perfect corners).
+   * radius is clamped to half width/height; 0 delegates to drawRect.
+   */
+  drawRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    color: number = BLACK
+  ) {
+    x = x | 0;
+    y = y | 0;
+    w = w | 0;
+    h = h | 0;
+    let r = radius | 0;
+    r = Math.max(0, Math.min(r, Math.floor(w / 2), Math.floor(h / 2)));
+    if (r === 0) {
+      this.drawRect(x, y, w, h, color);
+      return;
+    }
+    // Straight edges (leave corner quadrants to arcs)
+    this.drawHLine(x + r, y, w - 2 * r, color);
+    this.drawHLine(x + r, y + h - 1, w - 2 * r, color);
+    this.drawVLine(x, y + r, h - 2 * r, color);
+    this.drawVLine(x + w - 1, y + r, h - 2 * r, color);
+    // Corner arcs: pixel (i,j) on arc if at/outside quarter-circle (bias -0.5 for fuller 1-bit curve)
+    const r2 = r * r - 0.5;
+    for (let j = 0; j <= r; j++) {
+      for (let i = 0; i <= r; i++) {
+        if ((i + 0.5) ** 2 + (j + 0.5) ** 2 >= r2) {
+          this.setPixel(x + i, y + j, color);
+          this.setPixel(x + w - 1 - i, y + j, color);
+          this.setPixel(x + i, y + h - 1 - j, color);
+          this.setPixel(x + w - 1 - i, y + h - 1 - j, color);
+        }
+      }
+    }
+  }
+
+  /**
+   * Fill a rounded rectangle (1-bit pixel-perfect: inside = quarter-circles at corners).
+   * radius is clamped; 0 delegates to fillRect.
+   */
+  fillRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    color: number = BLACK
+  ) {
+    x = x | 0;
+    y = y | 0;
+    w = w | 0;
+    h = h | 0;
+    let r = radius | 0;
+    r = Math.max(0, Math.min(r, Math.floor(w / 2), Math.floor(h / 2)));
+    if (r === 0) {
+      this.fillRect(x, y, w, h, color);
+      return;
+    }
+    const r2 = r * r;
+    const x0 = Math.max(x, this.clip.x, 0);
+    const y0 = Math.max(y, this.clip.y, 0);
+    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
+    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
+    for (let py = y0; py < y1; py++) {
+      const row = py * this.width;
+      for (let px = x0; px < x1; px++) {
+        const lx = px - x;
+        const ly = py - y;
+        let inside = false;
+        if (lx >= r && lx < w - r) {
+          inside = true;
+        } else if (ly >= r && ly < h - r) {
+          inside = true;
+        } else {
+          const inTL =
+            lx < r && ly < r && (lx + 0.5) ** 2 + (ly + 0.5) ** 2 <= r2;
+          const inTR =
+            lx >= w - r &&
+            ly < r &&
+            (w - 1 - lx + 0.5) ** 2 + (ly + 0.5) ** 2 <= r2;
+          const inBL =
+            lx < r &&
+            ly >= h - r &&
+            (lx + 0.5) ** 2 + (h - 1 - ly + 0.5) ** 2 <= r2;
+          const inBR =
+            lx >= w - r &&
+            ly >= h - r &&
+            (w - 1 - lx + 0.5) ** 2 + (h - 1 - ly + 0.5) ** 2 <= r2;
+          inside = inTL || inTR || inBL || inBR;
+        }
+        if (inside) {
+          this.pixels[row + px] = color;
+        }
+      }
+    }
+  }
+
   fillRect(x: number, y: number, w: number, h: number, color: number = BLACK) {
     x = x | 0;
     y = y | 0;

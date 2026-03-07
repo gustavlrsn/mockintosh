@@ -70,10 +70,18 @@ const { default: chatHandler } = await import("../api/chat.js");
 const { default: generateImageHandler } = await import(
   "../api/generate-image.js"
 );
+const { default: spotifyDeviceRequestHandler } = await import(
+  "../api/spotify/device-request.js"
+);
+const { default: spotifyDevicePollHandler } = await import(
+  "../api/spotify/device-poll.js"
+);
 
 const routes: Record<string, (req: Request) => Promise<Response>> = {
   "/api/chat": chatHandler,
   "/api/generate-image": generateImageHandler,
+  "/api/spotify/device-request": spotifyDeviceRequestHandler,
+  "/api/spotify/device-poll": spotifyDevicePollHandler,
 };
 
 const server = createServer(async (req, res) => {

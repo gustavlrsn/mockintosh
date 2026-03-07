@@ -218,9 +218,13 @@ export interface ButtonOptions {
   id?: string;
   onClick?: () => void;
   onMouseDown?: () => void;
+  onMouseUp?: () => void;
+  onMouseLeave?: () => void;
   width?: number;
   disabled?: boolean;
   pressed?: boolean;
+  /** Default (primary) button: double border per classic Mac (e.g. OK in dialogs). */
+  default?: boolean;
 }
 
 export interface TextBlockOptions {
@@ -247,6 +251,22 @@ export interface AppContext {
   drawDottedVLine(x: number, y: number, h: number, color?: number): void;
   drawRect(x: number, y: number, w: number, h: number, color?: number): void;
   fillRect(x: number, y: number, w: number, h: number, color?: number): void;
+  drawRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    color?: number
+  ): void;
+  fillRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    color?: number
+  ): void;
   fillPattern(
     x: number,
     y: number,
