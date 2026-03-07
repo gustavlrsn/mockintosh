@@ -10,7 +10,8 @@
     "build": "npm run build:content && vite build",
     "preview": "vite preview",
     "dev:api": "tsx scripts/dev-api.ts",
-    "build:content": "tsx scripts/build-content.ts"
+    "build:content": "tsx scripts/build-content.ts",
+    "knip": "knip"
   },
   "dependencies": {
     "@paulmillr/qr": "^0.3.0",
@@ -30,6 +31,7 @@
     "@types/lodash": "^4.17.0",
     "@types/node": "20.12.8",
     "@types/sharp": "^0.31.1",
+    "knip": "^5.86.0",
     "sharp": "^0.34.5",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0",

@@ -1,17 +1,23 @@
 import { BitCanvas, BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppRegistry } from "../lib/canvas/AppRegistry";
-import { EventManager, OSEvent } from "../lib/canvas/EventManager";
-import {
-  WindowManager,
-  TITLE_BAR_HEIGHT,
-  WindowKind,
-} from "../lib/canvas/WindowManager";
-import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
+import { EventManager, OSEvent } from "../lib/toolbox/EventManager";
+import { WindowManager, TITLE_BAR_HEIGHT } from "../lib/toolbox/WindowManager";
+import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { registerAllSprites } from "../lib/canvas/sprites";
 import { HitRegionMap } from "../lib/canvas/HitRegion";
-import { loadFonts } from "../lib/canvas/fontAdapter";
+import { drawBitmapTextToPixels, measureText } from "../lib/canvas/fontAdapter";
+import { InitFonts } from "../lib/toolbox/FontManager";
+import {
+  InitGraf,
+  __injectFontFunctions,
+  newGrafPort,
+  OpenPort,
+} from "@mockintosh/quickdraw";
+import type { GrafPort } from "@mockintosh/quickdraw";
+import { blitSprite } from "../lib/canvas/SpriteManager";
+import { qdFillPattern, qdFillRect } from "../lib/canvas/qdDraw";
 import { createOSServices } from "../lib/canvas/OSServices";
 import { animateZoomRect, AnimRect } from "../lib/canvas/ZoomAnimation";
 import {
@@ -19,13 +25,14 @@ import {
   createMenubarState,
   drawMenubar,
   MENUBAR_HEIGHT,
-} from "../lib/canvas/ui/drawMenubar";
-import { TEXT_CURSOR_BLINK_MS } from "../lib/canvas/ui/TextInput";
-import { MockFS, ROOT_ID, FSFile } from "../lib/canvas/fs/MockFS";
+} from "../lib/toolbox/MenuManager";
+import { TEXT_CURSOR_BLINK_MS } from "../lib/toolbox/TextEdit";
+import { InitDialogs } from "../lib/toolbox/DialogManager";
+import { FileManager, ROOT_ID, FSFile } from "../lib/toolbox/FileManager";
 import { OPFSBackend } from "../lib/canvas/fs/OPFSBackend";
 import { AppLoader, AppManifest } from "../lib/canvas/AppLoader";
 
-import { SplashscreenApp, setSplashSpriteRegistry } from "../apps/Splashscreen";
+import { SplashscreenApp, setSplashResources } from "../apps/Splashscreen";
 import {
   FinderApp,
   FinderServices,
@@ -82,7 +89,7 @@ async function loadMarkdownFile(name: string): Promise<string> {
 /**
  * Create the default volume and desktop from scratch (used on first boot and after Format Drive).
  */
-async function bootstrapFreshFS(fs: MockFS): Promise<void> {
+async function bootstrapFreshFS(fs: FileManager): Promise<void> {
   const [readme, contributing] = await Promise.all([
     loadMarkdownFile("README.md"),
     loadMarkdownFile("CONTRIBUTING.md"),
@@ -113,7 +120,7 @@ async function bootstrapFreshFS(fs: MockFS): Promise<void> {
   await fs.flush();
 }
 
-async function populateDefaultFS(fs: MockFS): Promise<void> {
+async function populateDefaultFS(fs: FileManager): Promise<void> {
   const root = fs.readDir(ROOT_ID);
   if (root.length > 0) {
     ensureDesktopFolder(fs);
@@ -124,7 +131,7 @@ async function populateDefaultFS(fs: MockFS): Promise<void> {
   await bootstrapFreshFS(fs);
 }
 
-function ensureDesktopFolder(fs: MockFS): void {
+function ensureDesktopFolder(fs: FileManager): void {
   const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
   if (!hd) return;
   fs.mkdir(hd.id, "Desktop Folder");
@@ -161,7 +168,7 @@ const DESKTOP_SHORTCUTS_BY_APP_ID = new Map(
  * - Removes "ghost" shortcuts for apps no longer in the list (e.g. removed from code).
  * - Removes stale shortcuts after renames (same appId, wrong name) so only one icon per app remains.
  */
-async function ensureDesktopShortcuts(fs: MockFS): Promise<void> {
+async function ensureDesktopShortcuts(fs: FileManager): Promise<void> {
   const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
   if (!hd) return;
   const desktop = fs.findByName(hd.id, "Desktop Folder");
@@ -200,11 +207,14 @@ async function ensureDesktopShortcuts(fs: MockFS): Promise<void> {
 }
 
 /**
- * Load persisted third-party app manifests from MockFS and dynamically
+ * Load persisted third-party app manifests from FileManager and dynamically
  * register them via the AppLoader. Manifests are stored as JSON files
  * with fileType "app" under /Mockintosh HD/System/InstalledApps/.
  */
-async function loadPersistedApps(fs: MockFS, loader: AppLoader): Promise<void> {
+async function loadPersistedApps(
+  fs: FileManager,
+  loader: AppLoader
+): Promise<void> {
   const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
   if (!hd) return;
 
@@ -254,7 +264,25 @@ async function main() {
 
   const ctx2d = canvas.getContext("2d", { alpha: false })!;
   const bitCanvas = new BitCanvas(resolution.width, resolution.height);
-  const sprites = new SpriteRegistry();
+  // Initialize QuickDraw with a shared view of the pixel buffer.
+  // QuickDraw and BitCanvas write to the same Uint8Array, so BitCanvas.flush()
+  // correctly outputs any pixels written through QuickDraw GrafPorts.
+  InitGraf({
+    width: resolution.width,
+    height: resolution.height,
+    pixels: bitCanvas.pixels,
+  });
+
+  // Create the screen-level GrafPort — used by WindowManager, menubar, and
+  // other OS-level drawing that targets the full screen.
+  const screenPort = newGrafPort();
+  OpenPort(screenPort);
+  InitGraf({
+    width: resolution.width,
+    height: resolution.height,
+    pixels: bitCanvas.pixels,
+  });
+  const sprites = new ResourceManager();
   const appRegistry = new AppRegistry();
   const hitRegions = new HitRegionMap();
   const windowManager = new WindowManager({
@@ -294,14 +322,14 @@ async function main() {
 
   const appLoader = new AppLoader(sprites, appRegistry);
 
-  setSplashSpriteRegistry(sprites);
+  setSplashResources(sprites);
 
   let menubarState = createMenubarState([]);
   let showingSplashscreen = true;
   let cursorX = 0;
   let cursorY = 0;
   let zoom = 1;
-  let mockFS!: MockFS;
+  let mockFS!: FileManager;
   let finderAppBuilder!: AppBuilder;
   let finderServices!: FinderServices;
 
@@ -384,6 +412,9 @@ async function main() {
     },
     videoElement: video,
   });
+
+  // Wire DialogManager so Alert() / ModalDialog() can be used from any manager/app
+  InitDialogs((options) => osServices.showDialog(options));
 
   async function openFinderWindow(
     title: string,
@@ -1015,10 +1046,19 @@ async function main() {
     // queued by scheduleRender() is cancelled when it fires (render() checks
     // animating at the top and bails out before clearing the canvas).
     animating = true;
-    return animateZoomRect(bitCanvas, ctx2d, from, to, 4, 30, undefined, () => {
-      animating = false;
-      scheduleRender();
-    });
+    return animateZoomRect(
+      screenPort,
+      ctx2d,
+      from,
+      to,
+      4,
+      30,
+      undefined,
+      () => {
+        animating = false;
+        scheduleRender();
+      }
+    );
   }
 
   function drawCornerMasks() {
@@ -1026,11 +1066,12 @@ async function main() {
     const rt = sprites.get("corner-rt");
     const lb = sprites.get("corner-lb");
     const rb = sprites.get("corner-rb");
-    if (lt) bitCanvas.blit(lt, 0, 0);
-    if (rt) bitCanvas.blit(rt, resolution.width - rt.width, 0);
-    if (lb) bitCanvas.blit(lb, 0, resolution.height - lb.height);
+    if (lt) blitSprite(screenPort, lt, 0, 0);
+    if (rt) blitSprite(screenPort, rt, resolution.width - rt.width, 0);
+    if (lb) blitSprite(screenPort, lb, 0, resolution.height - lb.height);
     if (rb)
-      bitCanvas.blit(
+      blitSprite(
+        screenPort,
         rb,
         resolution.width - rb.width,
         resolution.height - rb.height
@@ -1040,11 +1081,16 @@ async function main() {
   function render() {
     renderScheduled = false;
     if (animating) return;
-    bitCanvas.clear(WHITE);
+    // Clear the screen using the screen GrafPort (writes through shared pixel buffer)
+    {
+      const { baseAddr, rowBytes } = screenPort.portBits;
+      baseAddr.fill(WHITE);
+    }
     hitRegions.clear();
 
     if (showingSplashscreen) {
-      bitCanvas.fillPattern(
+      qdFillPattern(
+        screenPort,
         0,
         0,
         resolution.width,
@@ -1053,13 +1099,14 @@ async function main() {
       );
       const sprite = sprites.get("icon/happy");
       if (sprite)
-        bitCanvas.blit(
+        blitSprite(
+          screenPort,
           sprite,
           Math.floor((resolution.width - sprite.width) / 2),
           Math.floor((resolution.height - sprite.height) / 2)
         );
       const cur = sprites.get("cursor/default-1x");
-      if (cur) bitCanvas.blit(cur, cursorX, cursorY);
+      if (cur) blitSprite(screenPort, cur, cursorX, cursorY);
       drawCornerMasks();
       bitCanvas.flush(ctx2d);
       return;
@@ -1146,8 +1193,8 @@ async function main() {
       if (win.id === DESKTOP_WINDOW_ID) {
         const mwInst = appRegistry.getMultiWindowInstance("finder", win.id);
         if (mwInst) {
-          const desktopCtx = new AppContext(
-            bitCanvas,
+          const desktopCtx = new WindowContext(
+            screenPort,
             0,
             MENUBAR_HEIGHT,
             resolution.width,
@@ -1210,15 +1257,15 @@ async function main() {
       }
 
       windowManager.drawWindowChrome(
-        bitCanvas,
+        screenPort,
         win,
         sprites,
         hitRegions,
         windowCallbacks
       );
 
-      const contentCtx = windowManager.createAppContext(
-        bitCanvas,
+      const contentCtx = windowManager.createWindowContext(
+        screenPort,
         win,
         hitRegions
       );
@@ -1252,14 +1299,14 @@ async function main() {
     // Draw drag ghost on top of everything (except menubar and cursor)
     if (finderAppBuilder) {
       finderAppBuilder.resetForRender();
-      finderRenderDragGhost(finderAppBuilder, bitCanvas, finderServices);
+      finderRenderDragGhost(finderAppBuilder, screenPort, finderServices);
     }
 
     // Draw drag/resize outline over all windows (Mac DragGrayRgn behaviour)
-    windowManager.drawDragOutline(bitCanvas);
+    windowManager.drawDragOutline(screenPort);
 
     drawMenubar(
-      bitCanvas,
+      screenPort,
       menubarState,
       sprites.get("eaten_apple"),
       resolution.width,
@@ -1268,7 +1315,7 @@ async function main() {
     );
 
     const cur = sprites.get("cursor/default-1x");
-    if (cur) bitCanvas.blit(cur, cursorX, cursorY);
+    if (cur) blitSprite(screenPort, cur, cursorX, cursorY);
 
     drawCornerMasks();
 
@@ -1282,10 +1329,49 @@ async function main() {
 
   const bootStart = Date.now();
 
-  await loadFonts();
+  await InitFonts();
+
+  // Inject font functions into QuickDraw so DrawString/DrawText can render
+  // using the same bitmap font system used by BitCanvas.
+  __injectFontFunctions(
+    (text) => measureText(text, "ChiKareGo"),
+    (text: string, x: number, y: number, port: GrafPort) => {
+      const { baseAddr, rowBytes } = port.portBits;
+      const cl = port.clipRgn?.rgn.rgnBBox;
+      const vis = port.visRgn?.rgn.rgnBBox;
+      const pr = port.portRect;
+      const clipLeft = Math.max(cl?.left ?? 0, vis?.left ?? 0, pr.left, 0);
+      const clipTop = Math.max(cl?.top ?? 0, vis?.top ?? 0, pr.top, 0);
+      const clipRight = Math.min(
+        cl?.right ?? rowBytes,
+        vis?.right ?? rowBytes,
+        pr.right,
+        rowBytes
+      );
+      const clipBottom = Math.min(
+        cl?.bottom ?? baseAddr.length / rowBytes,
+        vis?.bottom ?? baseAddr.length / rowBytes,
+        pr.bottom,
+        (baseAddr.length / rowBytes) | 0
+      );
+      drawBitmapTextToPixels(
+        baseAddr,
+        rowBytes,
+        clipLeft,
+        clipTop,
+        clipRight,
+        clipBottom,
+        text,
+        x,
+        y,
+        "ChiKareGo",
+        1
+      );
+    }
+  );
 
   const fsBackend = new OPFSBackend();
-  mockFS = new MockFS(fsBackend, sprites);
+  mockFS = new FileManager(fsBackend, sprites);
   await mockFS.init();
   await populateDefaultFS(mockFS);
 
@@ -1390,7 +1476,7 @@ async function main() {
   mockFS.onChange(() => scheduleRender());
   updateMenubar();
 
-  // Load persisted third-party apps from MockFS
+  // Load persisted third-party apps from FileManager
   await loadPersistedApps(mockFS, appLoader);
 
   const elapsed = Date.now() - bootStart;

@@ -1,7 +1,7 @@
 import { AppBuilder } from "./AppBuilder";
-import { AppContext } from "./AppContext";
-import { OSEvent } from "./EventManager";
-import { MenubarDefinition } from "./ui/drawMenubar";
+import { WindowContext } from "../toolbox/WindowContext";
+import { OSEvent } from "../toolbox/EventManager";
+import { MenubarDefinition } from "../toolbox/MenuManager";
 
 export interface WindowSize {
   width: number;
@@ -27,7 +27,7 @@ export interface SystemApp {
   scrollable?: boolean;
   resizable?: boolean;
   minSize?: { width: number; height: number };
-  render: (app: AppBuilder, ctx: AppContext, props: any) => void;
+  render: (app: AppBuilder, ctx: WindowContext, props: any) => void;
   onEvent?: (
     app: AppBuilder,
     event: OSEvent,
@@ -69,7 +69,7 @@ export interface MultiWindowSystemApp {
   renderWindow(
     app: AppBuilder,
     win: AppBuilder,
-    ctx: AppContext,
+    ctx: WindowContext,
     windowId: string,
     props: any
   ): void;

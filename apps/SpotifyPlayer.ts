@@ -1,9 +1,9 @@
 import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { OSEvent } from "../lib/canvas/EventManager";
-import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
+import { OSEvent } from "../lib/toolbox/EventManager";
+import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { measureText, getLineHeight } from "../lib/canvas/fontAdapter";
 import { encodeQR } from "@paulmillr/qr";
 
@@ -413,8 +413,8 @@ export const SpotifyPlayerApp: SystemApp = {
   defaultSize: { width: 380, height: 280 },
   scrollable: false,
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
-    const sprites: SpriteRegistry = props._sprites;
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
+    const sprites: ResourceManager = props._sprites;
     const scheduleRender = () => app.scheduleRender();
 
     // --- State hooks (order matters, must match onEvent) ---
@@ -799,7 +799,7 @@ export const SpotifyPlayerApp: SystemApp = {
 
 /** Render a QR code matrix at (x, y) with each module being `moduleSize` pixels. */
 function renderQRCode(
-  ctx: AppContext,
+  ctx: WindowContext,
   matrix: boolean[][],
   x: number,
   y: number,
@@ -824,8 +824,8 @@ function renderQRCode(
 }
 
 function renderLoginScreen(
-  ctx: AppContext,
-  sprites: SpriteRegistry,
+  ctx: WindowContext,
+  sprites: ResourceManager,
   app: AppBuilder,
   codeVerifierRef: { current: string },
   setError: (e: string) => void,
@@ -1085,7 +1085,7 @@ function buildQRMatrix(url: string): boolean[][] | null {
 // ---------------------------------------------------------------------------
 
 function renderSidebar(
-  ctx: AppContext,
+  ctx: WindowContext,
   playlists: SpotifyPlaylist[],
   selectedIdx: number,
   sidebarScroll: number,
@@ -1157,10 +1157,10 @@ function computeArtSize(winW: number, winH: number): number {
 }
 
 function renderMainArea(
-  ctx: AppContext,
+  ctx: WindowContext,
   playerState: PlayerState | null,
   artPixels: Uint8Array | null,
-  sprites: SpriteRegistry,
+  sprites: ResourceManager,
   tokensRef: { current: SpotifyTokens | null },
   onTokenUpdate: (t: SpotifyTokens) => void,
   volume: number,

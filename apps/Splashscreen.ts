@@ -1,12 +1,12 @@
 import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
+import { ResourceManager } from "../lib/toolbox/ResourceManager";
 
-let spriteRegistry: SpriteRegistry | null = null;
+let spriteRegistry: ResourceManager | null = null;
 
-export function setSplashSpriteRegistry(reg: SpriteRegistry) {
+export function setSplashResources(reg: ResourceManager) {
   spriteRegistry = reg;
 }
 
@@ -16,7 +16,7 @@ export const SplashscreenApp: SystemApp = {
   icon: "",
   defaultSize: { width: 512, height: 342 },
 
-  render(app: AppBuilder, ctx: AppContext) {
+  render(app: AppBuilder, ctx: WindowContext) {
     ctx.clear(WHITE);
     // Draw happy Mac icon centered
     const sprite = spriteRegistry?.get("icon/happy");

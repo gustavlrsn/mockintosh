@@ -1,8 +1,8 @@
 import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
+import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { measureText } from "../lib/canvas/fontAdapter";
 import pkg from "../package.json";
 
@@ -16,8 +16,8 @@ export const AboutApp: SystemApp = {
   defaultSize: { width: 343, height: 160 },
   scrollable: false,
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
-    const sprites: SpriteRegistry = props._sprites;
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
+    const sprites: ResourceManager = props._sprites;
     ctx.clear(WHITE);
 
     const computerSprite = sprites?.get("icon/computer");

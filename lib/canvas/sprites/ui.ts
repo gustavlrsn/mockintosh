@@ -1,5 +1,5 @@
 import { Sprite } from "../BitCanvas";
-import { defineSprite } from "../SpriteRegistry";
+import { defineSprite } from "../../toolbox/ResourceManager";
 
 const EATEN_APPLE = defineSprite(9, 11, "ACgAKAAIAKioqqqqqgqqgqqqqqqKqoCigA==");
 const USER2 = defineSprite(

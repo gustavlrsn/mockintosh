@@ -1,8 +1,11 @@
-// Text routines — from QuickDraw.p Text Routines section
-// and reference/QuickDraw/DrawText.a / Text.a implementations.
-//
-// Text rendering bridges to the injected font functions from globals.
-// Without injection, text drawing is a no-op (falls back gracefully).
+/**
+ * Text routines — from `QuickDraw.p` Text Routines section and
+ * `reference/QuickDraw/DrawText.a` / `Text.a` implementations.
+ *
+ * Text rendering delegates to injected font functions registered via
+ * {@link __injectFontFunctions} in `globals.ts`.  Without injection, text
+ * measurement falls back to 6 pixels per character and drawing is a no-op.
+ */
 
 import { FontInfo, Point, Style, GrafPort } from "./types";
 import { globals } from "./globals";
@@ -11,36 +14,51 @@ import { globals } from "./globals";
 // Text attribute setters
 // -------------------------------------------------------------------------
 
-// PROCEDURE TextFont(font: INTEGER);
+/**
+ * Set the font number for the current port.
+ * `PROCEDURE TextFont(font: INTEGER)` — `0` = system font.
+ */
 export function TextFont(font: number): void {
   const port = globals.thePort;
   if (!port) return;
   port.txFont = font;
 }
 
-// PROCEDURE TextFace(face: Style);
+/**
+ * Set the text style flags (bold, italic, underline, etc.) for the current port.
+ * `PROCEDURE TextFace(face: Style)`.
+ */
 export function TextFace(face: Style): void {
   const port = globals.thePort;
   if (!port) return;
   port.txFace = face;
 }
 
-// PROCEDURE TextMode(mode: INTEGER);
+/**
+ * Set the text transfer mode for the current port.
+ * `PROCEDURE TextMode(mode: INTEGER)` — typically `srcOr` (1).
+ */
 export function TextMode(mode: number): void {
   const port = globals.thePort;
   if (!port) return;
   port.txMode = mode;
 }
 
-// PROCEDURE TextSize(size: INTEGER);
+/**
+ * Set the font size in points for the current port.
+ * `PROCEDURE TextSize(size: INTEGER)` — `0` = system default.
+ */
 export function TextSize(size: number): void {
   const port = globals.thePort;
   if (!port) return;
   port.txSize = size;
 }
 
-// PROCEDURE SpaceExtra(extra: LongInt);
-// extra is a Fixed-point value — additional pixels between words.
+/**
+ * Set the inter-word extra space for the current port.
+ * `extra` is a 16.16 Fixed-point value (additional pixels per space character).
+ * `PROCEDURE SpaceExtra(extra: LongInt)`.
+ */
 export function SpaceExtra(extra: number): void {
   const port = globals.thePort;
   if (!port) return;
@@ -51,18 +69,31 @@ export function SpaceExtra(extra: number): void {
 // Text drawing
 // -------------------------------------------------------------------------
 
-// PROCEDURE DrawChar(ch: CHAR);
+/**
+ * Draw a single character at the current pen position and advance the pen.
+ * `PROCEDURE DrawChar(ch: CHAR)`.
+ */
 export function DrawChar(ch: string): void {
   DrawString(ch);
 }
 
-// PROCEDURE DrawString(s: Str255);
+/**
+ * Draw a Pascal-style string at the current pen position and advance the pen.
+ * `PROCEDURE DrawString(s: Str255)`.
+ */
 export function DrawString(s: string): void {
   DrawText(s, 0, s.length);
 }
 
-// PROCEDURE DrawText(textBuf: QDPtr; firstByte, byteCount: INTEGER);
-// In our implementation textBuf is the string itself.
+/**
+ * Draw `byteCount` bytes of `textBuf` starting at `firstByte` at the current
+ * pen position, then advance the pen by the rendered width.
+ *
+ * `textBuf` may be a JavaScript string or a byte array of character codes.
+ * Routes through `globals._fontDraw` if injected.
+ *
+ * `PROCEDURE DrawText(textBuf: QDPtr; firstByte, byteCount: INTEGER)`.
+ */
 export function DrawText(
   textBuf: string | number[],
   firstByte: number,
@@ -93,21 +124,31 @@ export function DrawText(
 // Text measurement
 // -------------------------------------------------------------------------
 
-// FUNCTION CharWidth(ch: CHAR): INTEGER;
+/**
+ * Return the pixel width of a single character in the current port's font.
+ * `FUNCTION CharWidth(ch: CHAR): INTEGER`.
+ */
 export function CharWidth(ch: string): number {
   const port = globals.thePort;
   if (!port) return 0;
   return _measureString(ch, port);
 }
 
-// FUNCTION StringWidth(s: Str255): INTEGER;
+/**
+ * Return the pixel width of a string in the current port's font.
+ * `FUNCTION StringWidth(s: Str255): INTEGER`.
+ */
 export function StringWidth(s: string): number {
   const port = globals.thePort;
   if (!port) return 0;
   return _measureString(s, port);
 }
 
-// FUNCTION TextWidth(textBuf: QDPtr; firstByte, byteCount: INTEGER): INTEGER;
+/**
+ * Return the pixel width of `byteCount` bytes of `textBuf` starting at
+ * `firstByte`.  Matches {@link DrawText} in its string/array duality.
+ * `FUNCTION TextWidth(textBuf: QDPtr; firstByte, byteCount: INTEGER): INTEGER`.
+ */
 export function TextWidth(
   textBuf: string | number[],
   firstByte: number,
@@ -126,7 +167,13 @@ export function TextWidth(
   return _measureString(text, port);
 }
 
-// PROCEDURE GetFontInfo(VAR info: FontInfo);
+/**
+ * Fill `info` with vertical font metrics for the current port's font.
+ * Returns approximate values for the classic Mac system font (Chicago/Geneva
+ * 9pt, ~12px tall) when no font injection is available.
+ *
+ * `PROCEDURE GetFontInfo(VAR info: FontInfo)`.
+ */
 export function GetFontInfo(info: FontInfo): void {
   // Defaults: classic Mac system font (Chicago/Geneva 9pt ~12px tall)
   info.ascent = 9;
@@ -151,6 +198,12 @@ function _measureString(text: string, _port: GrafPort): number {
 // StdText bottleneck
 // -------------------------------------------------------------------------
 
+/**
+ * Default text bottleneck.  Converts the `textAddr` byte array to a string
+ * and delegates to {@link DrawText}.
+ *
+ * `numer` and `denom` are scaling factors (unused in this implementation).
+ */
 export function StdText(
   count: number,
   textAddr: number[],
@@ -163,7 +216,13 @@ export function StdText(
   DrawText(text, 0, count);
 }
 
-// StdTxMeas
+/**
+ * Default text-measurement bottleneck.  Returns the pixel width of `count`
+ * bytes of `textAddr`.
+ *
+ * `numer`, `denom`, and `info` are unused scaling/metric parameters included
+ * for API compatibility.
+ */
 export function StdTxMeas(
   count: number,
   textAddr: number[],

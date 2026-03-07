@@ -1,4 +1,12 @@
-// BitMap operations — from QuickDraw.p Graphical Operations on BitMaps section
+/**
+ * BitMap operations — from `QuickDraw.p` Graphical Operations on BitMaps
+ * section.
+ *
+ * {@link CopyBits} is the primary entry point for blitting between bitmaps
+ * (or from an offscreen buffer to the screen) with scaling and clipping.
+ * {@link ScrollRect} provides hardware-scroll semantics with automatic
+ * update-region tracking.
+ */
 
 import { BitMap, Rect, RgnHandle, GrafPort, Pattern, cloneRect } from "./types";
 import { globals } from "./globals";
@@ -10,13 +18,25 @@ import { SetRectRgn } from "./regions";
 // CopyBits
 // -------------------------------------------------------------------------
 
-// PROCEDURE CopyBits(srcBits, dstBits: BitMap;
-//                   srcRect, dstRect: Rect;
-//                   mode: INTEGER;
-//                   maskRgn: RgnHandle);
-//
-// Stretches/copies a rectangle from srcBits to dstBits.
-// When maskRgn is non-null, only pixels inside the mask region are updated.
+/**
+ * Copy (and optionally scale) pixels from `srcBits[srcRect]` to
+ * `dstBits[dstRect]` using the given transfer `mode`.
+ *
+ * - Supports arbitrary scaling (nearest-neighbour interpolation).
+ * - Clips to `port.visRgn`, `port.clipRgn`, and `port.portRect` when
+ *   `dstBits` is the current port's bitmap.
+ * - If `maskRgn` is non-null, only pixels inside the mask are updated.
+ *
+ * `PROCEDURE CopyBits(srcBits, dstBits: BitMap; srcRect, dstRect: Rect;
+ *                     mode: INTEGER; maskRgn: RgnHandle)`.
+ *
+ * @param srcBits  Source bitmap.
+ * @param dstBits  Destination bitmap (may equal the current port's portBits).
+ * @param srcRect  Source area in `srcBits` coordinates.
+ * @param dstRect  Destination area in `dstBits` coordinates.
+ * @param mode     QuickDraw transfer mode (0–7).
+ * @param maskRgn  Optional mask region; `null` means no mask.
+ */
 export function CopyBits(
   srcBits: BitMap,
   dstBits: BitMap,
@@ -124,8 +144,18 @@ export function CopyBits(
 // ScrollRect
 // -------------------------------------------------------------------------
 
-// PROCEDURE ScrollRect(dstRect: Rect; dh, dv: INTEGER; updateRgn: RgnHandle);
-// Scrolls the pixels in dstRect by (dh, dv) and records the exposed region.
+/**
+ * Scroll the pixels inside `dstRect` by `(dh, dv)` pixels, erase the
+ * exposed strip using the port's background pattern, and record the exposed
+ * area in `updateRgn`.
+ *
+ * `PROCEDURE ScrollRect(dstRect: Rect; dh, dv: INTEGER; updateRgn: RgnHandle)`.
+ *
+ * @param dstRect   The rectangle to scroll (in local port coordinates).
+ * @param dh        Horizontal scroll amount (positive = right).
+ * @param dv        Vertical scroll amount (positive = down).
+ * @param updateRgn Receives the bounding rectangle of the newly exposed area.
+ */
 export function ScrollRect(
   dstRect: Rect,
   dh: number,

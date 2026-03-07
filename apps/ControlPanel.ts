@@ -1,9 +1,9 @@
 import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
-import { OSEvent } from "../lib/canvas/EventManager";
+import { ResourceManager } from "../lib/toolbox/ResourceManager";
+import { OSEvent } from "../lib/toolbox/EventManager";
 
 const SIDEBAR_WIDTH = 64;
 
@@ -14,8 +14,8 @@ export const ControlPanelApp: SystemApp = {
   defaultSize: { width: 320, height: 200 },
   scrollable: false,
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
-    const sprites: SpriteRegistry = props._sprites;
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
+    const sprites: ResourceManager = props._sprites;
     const [selectedPane] = app.useState("General");
 
     ctx.clear(WHITE);

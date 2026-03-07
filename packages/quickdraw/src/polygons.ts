@@ -1,8 +1,12 @@
-// Polygon routines — from QuickDraw.p Polygon Routines section
-// and reference/QuickDraw/Polygons.a implementation.
-//
-// Polygons are recorded as a sequence of LineTo calls and then drawn
-// using the same scanline rasterizer as regions.
+/**
+ * Polygon routines — from `QuickDraw.p` Polygon Routines section and
+ * `reference/QuickDraw/Polygons.a` implementation.
+ *
+ * Polygons are recorded as a sequence of {@link LineTo} calls bracketed by
+ * {@link OpenPoly} and {@link ClosePoly}, then drawn with the `Frame/Paint/…Poly`
+ * family.  Filling uses an even-odd scanline rasterizer that matches the
+ * behaviour of the original QuickDraw.
+ */
 
 import { Polygon, PolyHandle, Rect, Pattern, Point, cloneRect } from "./types";
 import { globals } from "./globals";
@@ -22,7 +26,15 @@ import { StdLine } from "./lines";
 // OpenPoly / ClosePoly / KillPoly
 // -------------------------------------------------------------------------
 
-// FUNCTION OpenPoly: PolyHandle;
+/**
+ * Begin recording a polygon.  All subsequent {@link LineTo} calls add
+ * vertices to the polygon instead of (or in addition to) drawing pixels.
+ * Call {@link ClosePoly} to finalise.
+ *
+ * `FUNCTION OpenPoly: PolyHandle`.
+ *
+ * @returns A handle to the new polygon being recorded.
+ */
 export function OpenPoly(): PolyHandle {
   const port = globals.thePort;
   const poly: Polygon = {
@@ -36,7 +48,11 @@ export function OpenPoly(): PolyHandle {
   return handle;
 }
 
-// PROCEDURE ClosePoly;
+/**
+ * Finish recording the current polygon.  Recomputes the bounding box from
+ * the accumulated vertices and clears `port.polySave`.
+ * `PROCEDURE ClosePoly`.
+ */
 export function ClosePoly(): void {
   const port = globals.thePort;
   if (!port) return;
@@ -65,7 +81,10 @@ export function ClosePoly(): void {
   globals.thePoly = null;
 }
 
-// PROCEDURE KillPoly(poly: PolyHandle);
+/**
+ * Release a polygon handle.  In JS this is a no-op — the GC reclaims memory.
+ * `PROCEDURE KillPoly(poly: PolyHandle)`.
+ */
 export function KillPoly(_poly: PolyHandle): void {
   // GC handles memory in JS
 }
@@ -74,7 +93,10 @@ export function KillPoly(_poly: PolyHandle): void {
 // Geometric transformations
 // -------------------------------------------------------------------------
 
-// PROCEDURE OffsetPoly(poly: PolyHandle; dh, dv: INTEGER);
+/**
+ * Translate all vertices of `poly` by `(dh, dv)` pixels and update the
+ * bounding box.  `PROCEDURE OffsetPoly(poly: PolyHandle; dh, dv: INTEGER)`.
+ */
 export function OffsetPoly(poly: PolyHandle, dh: number, dv: number): void {
   poly.poly.polyBBox.top += dv;
   poly.poly.polyBBox.left += dh;
@@ -86,7 +108,11 @@ export function OffsetPoly(poly: PolyHandle, dh: number, dv: number): void {
   }
 }
 
-// PROCEDURE MapPoly(poly: PolyHandle; fromRect, toRect: Rect);
+/**
+ * Map all vertices of `poly` from the coordinate space of `fromRect` to
+ * `toRect`, proportionally scaling and translating each point.
+ * `PROCEDURE MapPoly(poly: PolyHandle; fromRect, toRect: Rect)`.
+ */
 export function MapPoly(poly: PolyHandle, fromRect: Rect, toRect: Rect): void {
   const fW = fromRect.right - fromRect.left;
   const fH = fromRect.bottom - fromRect.top;
@@ -203,6 +229,13 @@ function callPoly(verb: number, poly: PolyHandle, fillPat?: Pattern): void {
   StdPoly(verb, poly, fillPat);
 }
 
+/**
+ * Default polygon rasterizer.  Called by the `Frame/Paint/…Poly` family.
+ *
+ * @param verb     Drawing operation (FRAME=0, PAINT=1, ERASE=2, INVERT=3, FILL=4).
+ * @param poly     The polygon to draw.
+ * @param fillPat  Pattern to use for FILL; ignored for other verbs.
+ */
 export function StdPoly(
   verb: number,
   poly: PolyHandle,
@@ -243,23 +276,23 @@ export function StdPoly(
   fillPolyImpl(p, pat, mode, port);
 }
 
-// PROCEDURE FramePoly(poly: PolyHandle);
+/** Draw the outline of `poly` using the current pen. `PROCEDURE FramePoly`. */
 export function FramePoly(poly: PolyHandle): void {
   callPoly(FRAME, poly);
 }
-// PROCEDURE PaintPoly(poly: PolyHandle);
+/** Fill `poly` with the current pen pattern. `PROCEDURE PaintPoly`. */
 export function PaintPoly(poly: PolyHandle): void {
   callPoly(PAINT, poly);
 }
-// PROCEDURE ErasePoly(poly: PolyHandle);
+/** Fill `poly` with the background pattern. `PROCEDURE ErasePoly`. */
 export function ErasePoly(poly: PolyHandle): void {
   callPoly(ERASE, poly);
 }
-// PROCEDURE InvertPoly(poly: PolyHandle);
+/** Invert every pixel inside `poly`. `PROCEDURE InvertPoly`. */
 export function InvertPoly(poly: PolyHandle): void {
   callPoly(INVERT, poly);
 }
-// PROCEDURE FillPoly(poly: PolyHandle; pat: Pattern);
+/** Fill `poly` with the explicit pattern `pat`. `PROCEDURE FillPoly`. */
 export function FillPoly(poly: PolyHandle, pat: Pattern): void {
   callPoly(FILL, poly, pat);
 }

@@ -78,7 +78,7 @@ async function convertGroup(group: SpriteGroup): Promise<string> {
 
   const lines: string[] = [
     `import { Sprite } from "../BitCanvas";`,
-    `import { defineSprite } from "../SpriteRegistry";`,
+    `import { defineSprite } from "../../toolbox/ResourceManager";`,
     ``,
   ];
 
@@ -112,7 +112,7 @@ async function convertGroup(group: SpriteGroup): Promise<string> {
 async function convertRootSprites(): Promise<string> {
   const lines: string[] = [
     `import { Sprite } from "../BitCanvas";`,
-    `import { defineSprite } from "../SpriteRegistry";`,
+    `import { defineSprite } from "../../toolbox/ResourceManager";`,
     ``,
   ];
 
@@ -146,7 +146,7 @@ async function convertRootSprites(): Promise<string> {
 async function convertChromeSprites(): Promise<string> {
   const lines: string[] = [
     `import { Sprite } from "../BitCanvas";`,
-    `import { defineSprite } from "../SpriteRegistry";`,
+    `import { defineSprite } from "../../toolbox/ResourceManager";`,
     ``,
   ];
 

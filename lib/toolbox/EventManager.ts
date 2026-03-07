@@ -10,7 +10,11 @@ export interface OSEvent {
     /** Sent to the app whose window just became the active (frontmost) window. */
     | "activate"
     /** Sent to the app whose window just lost active status. */
-    | "deactivate";
+    | "deactivate"
+    /** App's tab/page is being hidden (maps to Mac osEvt suspend). */
+    | "suspend"
+    /** App's tab/page is becoming visible again (maps to Mac osEvt resume). */
+    | "resume";
   x?: number;
   y?: number;
   /** When window has content top inset: "fixed" = click in non-scrolling strip (y 0..inset), "scrollable" = in scrollable region (y in scrollable-content space). */

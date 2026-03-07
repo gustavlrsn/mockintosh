@@ -1,20 +1,72 @@
-import { BitCanvas, Sprite, BLACK, WHITE } from "./BitCanvas";
-import { PatternName } from "./patterns";
-import { drawBitmapText, TextOptions, getLineHeight } from "./fontAdapter";
-import { ButtonDef, drawButton as _drawButton } from "./ui/drawButton";
+/**
+ * WindowContext.ts — Thin app drawing context (replaces AppContext)
+ *
+ * Provides coordinate translation, hit region registration, scroll areas,
+ * and convenience drawing methods that delegate to qdDraw.ts + SpriteManager.
+ *
+ * Unlike the former AppContext, there is no BitCanvas fallback — all drawing
+ * goes through QuickDraw's GrafPort.
+ */
+
+import { BitCanvas, Sprite, BLACK, WHITE } from "../canvas/BitCanvas";
+import { PatternName } from "../canvas/patterns";
+import {
+  drawBitmapText,
+  TextOptions,
+  getLineHeight,
+} from "../canvas/fontAdapter";
+import { HitRegion, HitRegionMap } from "../canvas/HitRegion";
+import type { GrafPort } from "@mockintosh/quickdraw";
+import {
+  qdFillRect,
+  qdDrawRect,
+  qdDrawHLine,
+  qdDrawVLine,
+  qdDrawDottedHLine,
+  qdDrawDottedVLine,
+  qdFillPattern,
+  qdFillRoundRect,
+  qdFrameRoundRect,
+  qdInvertRect,
+  qdSetPixel,
+} from "../canvas/qdDraw";
+import {
+  blitSprite,
+  blitSpriteInverted,
+  blitSpriteShadowOutline,
+  blitImageData as _blitImageData,
+  blit1bitPixels as _blit1bitPixels,
+  fillSpriteTile as _fillSpriteTile,
+} from "../canvas/SpriteManager";
+import {
+  drawButton as drawControl,
+  type ButtonDef as ControlDef,
+} from "./ControlManager";
+import { drawTextEditField } from "./TextEdit";
 import {
   TextInputState,
-  drawTextInput as _drawTextInput,
   handleTextInputClick as _handleTextInputClick,
   handleTextInputDoubleClick as _handleTextInputDoubleClick,
   handleTextInputDrag as _handleTextInputDrag,
-} from "./ui/TextInput";
+} from "../canvas/ui/TextInput";
 import {
   TextBlockOptions as _TextBlockOptions,
   getWrappedLines,
   measureTextBlock as _measureTextBlock,
-} from "./ui/TextBlock";
-import { HitRegion, HitRegionMap } from "./HitRegion";
+} from "../canvas/ui/TextBlock";
+
+// -------------------------------------------------------------------------
+// Helper: wrap a GrafPort in a temporary BitCanvas shim (shares pixel buffer)
+// Needed for legacy drawing code (font rendering, text input) that still
+// operates on BitCanvas. Will be eliminated when those paths move to QD.
+// -------------------------------------------------------------------------
+function _portToBitCanvas(port: GrafPort): BitCanvas {
+  const { baseAddr, rowBytes } = port.portBits;
+  const height = (baseAddr.length / rowBytes) | 0;
+  const bc = new BitCanvas(rowBytes, height);
+  (bc as any).pixels = baseAddr;
+  return bc;
+}
 
 const SCROLL_AREA_BAR_WIDTH = 15;
 const SCROLL_AREA_ARROW_HEIGHT = 15;
@@ -25,18 +77,12 @@ export interface ScrollAreaOptions {
   contentHeight: number;
   scrollOffset: number;
   onScroll: (newOffset: number) => void;
-  /** When set, a resize handle is drawn at the bottom-right corner of the scroll
-   *  area. Dragging it resizes the window. Requires the window to have been
-   *  created with the AppContext resize callback (standard windows always have it). */
   resize?: "both" | "vertical" | "horizontal";
 }
 
-/**
- * A scoped drawing context for an app, clipped and offset to the window's
- * content area. Apps draw in local coordinates (0,0 is top-left of their area).
- */
-export class AppContext {
-  private canvas: BitCanvas;
+export class WindowContext {
+  readonly port: GrafPort;
+  private bc: BitCanvas;
   private ox: number;
   private oy: number;
   private w: number;
@@ -53,16 +99,13 @@ export class AppContext {
       ) => void)
     | undefined;
   private _minSize: { width: number; height: number } | undefined;
-  /** Full window dimensions at context creation time, for grow-box resize baseline. */
   private _windowSize: { width: number; height: number } | undefined;
-  /** Height of the non-scrolling strip at the top; when > 0, drawScrollableContent is used for the part below. */
   private _contentTopInset: number;
-  /** Window scroll Y/X used for the scrollable sub-context when _contentTopInset > 0. */
   private _windowScrollY: number;
   private _windowScrollX: number;
 
   constructor(
-    canvas: BitCanvas,
+    port: GrafPort,
     x: number,
     y: number,
     w: number,
@@ -82,7 +125,8 @@ export class AppContext {
     windowScrollY: number = 0,
     windowScrollX: number = 0
   ) {
-    this.canvas = canvas;
+    this.port = port;
+    this.bc = _portToBitCanvas(port);
     this.ox = x;
     this.oy = y;
     this.w = w;
@@ -96,8 +140,12 @@ export class AppContext {
     this._contentTopInset = contentTopInset;
     this._windowScrollY = windowScrollY;
     this._windowScrollX = windowScrollX;
-    canvas.pushClip(x, y, w, h);
+    this.bc.pushClip(x, y, w, h);
   }
+
+  // -----------------------------------------------------------------------
+  // Accessors
+  // -----------------------------------------------------------------------
 
   get width() {
     return this.w;
@@ -113,84 +161,61 @@ export class AppContext {
   }
 
   release() {
-    this.canvas.popClip();
+    this.bc.popClip();
   }
 
+  // -----------------------------------------------------------------------
+  // Coordinate translation
+  // -----------------------------------------------------------------------
+
+  private tx(x: number): number {
+    return this.ox + x - this.scrollOffsetX;
+  }
+  private ty(y: number): number {
+    return this.oy + y - this.scrollOffsetY;
+  }
+
+  // -----------------------------------------------------------------------
+  // Drawing primitives — all delegate to qdDraw via GrafPort
+  // -----------------------------------------------------------------------
+
   setPixel(x: number, y: number, color: number = BLACK) {
-    this.canvas.setPixel(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      color
-    );
+    qdSetPixel(this.port, this.tx(x), this.ty(y), color);
   }
 
   getPixel(x: number, y: number): number {
-    return this.canvas.getPixel(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY
-    );
+    const px = this.tx(x);
+    const py = this.ty(y);
+    const { baseAddr, rowBytes } = this.port.portBits;
+    const idx = py * rowBytes + px;
+    if (idx < 0 || idx >= baseAddr.length) return 0;
+    return baseAddr[idx];
   }
 
   drawHLine(x: number, y: number, w: number, color: number = BLACK) {
-    this.canvas.drawHLine(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      w,
-      color
-    );
+    qdDrawHLine(this.port, this.tx(x), this.ty(y), w, color);
   }
 
   drawVLine(x: number, y: number, h: number, color: number = BLACK) {
-    this.canvas.drawVLine(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      h,
-      color
-    );
+    qdDrawVLine(this.port, this.tx(x), this.ty(y), h, color);
   }
 
   drawDottedHLine(x: number, y: number, w: number, color: number = BLACK) {
-    this.canvas.drawDottedHLine(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      w,
-      color
-    );
+    qdDrawDottedHLine(this.port, this.tx(x), this.ty(y), w, color);
   }
 
   drawDottedVLine(x: number, y: number, h: number, color: number = BLACK) {
-    this.canvas.drawDottedVLine(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      h,
-      color
-    );
+    qdDrawDottedVLine(this.port, this.tx(x), this.ty(y), h, color);
   }
 
   drawRect(x: number, y: number, w: number, h: number, color: number = BLACK) {
-    this.canvas.drawRect(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      w,
-      h,
-      color
-    );
+    qdDrawRect(this.port, this.tx(x), this.ty(y), w, h, color);
   }
 
   fillRect(x: number, y: number, w: number, h: number, color: number = BLACK) {
-    this.canvas.fillRect(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      w,
-      h,
-      color
-    );
+    qdFillRect(this.port, this.tx(x), this.ty(y), w, h, color);
   }
 
-  /**
-   * Draw a rounded rectangle outline, 1 pixel wide. Kept for backward compatibility.
-   * Prefer frameRoundRect for new code.
-   */
   drawRoundRect(
     x: number,
     y: number,
@@ -199,21 +224,19 @@ export class AppContext {
     radius: number,
     color: number = BLACK
   ) {
-    this.canvas.drawRoundRect(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
+    qdFrameRoundRect(
+      this.port,
+      this.tx(x),
+      this.ty(y),
       w,
       h,
       radius,
+      radius,
+      1,
       color
     );
   }
 
-  /**
-   * Fill a rounded rectangle using QuickDraw-style inset quarter-ovals.
-   * ovalWidth/ovalHeight are diameters; defaults to a square corner (radius).
-   * Equivalent to QuickDraw PaintRoundRect / FillRoundRect.
-   */
   fillRoundRect(
     x: number,
     y: number,
@@ -222,22 +245,18 @@ export class AppContext {
     radius: number,
     color: number = BLACK
   ) {
-    this.canvas.fillRoundRect(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
+    qdFillRoundRect(
+      this.port,
+      this.tx(x),
+      this.ty(y),
       w,
       h,
+      radius,
       radius,
       color
     );
   }
 
-  /**
-   * Draw a rounded rectangle outline with configurable pen width (thickness).
-   * ovalWidth/ovalHeight are the curvature diameters (e.g. 16 = classic Mac button).
-   * penWidth defaults to 1 (like QuickDraw's 1×1 pen / FrameRoundRect).
-   * Equivalent to QuickDraw's FrameRoundRect with a larger pen size.
-   */
   frameRoundRect(
     x: number,
     y: number,
@@ -248,9 +267,10 @@ export class AppContext {
     penWidth: number = 1,
     color: number = BLACK
   ) {
-    this.canvas.frameRoundRect(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
+    qdFrameRoundRect(
+      this.port,
+      this.tx(x),
+      this.ty(y),
       w,
       h,
       ovalWidth,
@@ -267,61 +287,44 @@ export class AppContext {
     h: number,
     pattern: PatternName | Uint8Array
   ) {
-    this.canvas.fillPattern(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
+    qdFillPattern(
+      this.port,
+      this.tx(x),
+      this.ty(y),
       w,
       h,
-      pattern
+      pattern as PatternName
     );
   }
 
   invertRect(x: number, y: number, w: number, h: number) {
-    this.canvas.invertRect(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      w,
-      h
-    );
+    qdInvertRect(this.port, this.tx(x), this.ty(y), w, h);
   }
 
+  clear(color: number = WHITE) {
+    qdFillRect(this.port, this.ox, this.oy, this.w, this.h, color);
+  }
+
+  // -----------------------------------------------------------------------
+  // Sprite / bitmap operations
+  // -----------------------------------------------------------------------
+
   blit(sprite: Sprite, x: number, y: number) {
-    this.canvas.blit(
-      sprite,
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY
-    );
+    blitSprite(this.port, sprite, this.tx(x), this.ty(y));
   }
 
   blitInverted(sprite: Sprite, x: number, y: number) {
-    this.canvas.blitInverted(
-      sprite,
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY
-    );
+    blitSpriteInverted(this.port, sprite, this.tx(x), this.ty(y));
   }
 
   blitShadowOutline(sprite: Sprite, x: number, y: number) {
-    this.canvas.blitShadowOutline(
-      sprite,
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY
-    );
+    blitSpriteShadowOutline(this.port, sprite, this.tx(x), this.ty(y));
   }
 
   blitImageData(imageData: ImageData, x: number, y: number) {
-    this.canvas.blitImageData(
-      imageData,
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY
-    );
+    _blitImageData(this.port, imageData, this.tx(x), this.ty(y));
   }
 
-  /**
-   * Bulk-copy a pre-dithered 1-bit pixel buffer (0=white, 1=black) into the
-   * BitCanvas using row-level Uint8Array.set(). Much faster than blitImageData
-   * for cases where the source is already in the native pixel format.
-   */
   blit1bitPixels(
     src: Uint8Array,
     srcW: number,
@@ -329,57 +332,35 @@ export class AppContext {
     x: number,
     y: number
   ) {
-    const pixels = this.canvas.pixels;
-    const dstW = this.canvas.width;
-    const dstH = this.canvas.height;
-    const dx = this.ox + x - this.scrollOffsetX;
-    const dy = this.oy + y - this.scrollOffsetY;
-
-    const clip = this.canvas.getClip();
-    const clipR = clip.x + clip.w;
-    const clipB = clip.y + clip.h;
-
-    const sx0 = Math.max(0, clip.x - dx, -dx);
-    const sy0 = Math.max(0, clip.y - dy, -dy);
-    const sx1 = Math.min(srcW, clipR - dx, dstW - dx);
-    const sy1 = Math.min(srcH, clipB - dy, dstH - dy);
-
-    if (sx0 >= sx1 || sy0 >= sy1) return;
-    const copyW = sx1 - sx0;
-
-    for (let sy = sy0; sy < sy1; sy++) {
-      pixels.set(
-        src.subarray(sy * srcW + sx0, sy * srcW + sx0 + copyW),
-        (dy + sy) * dstW + dx + sx0
-      );
-    }
+    _blit1bitPixels(this.port, src, srcW, srcH, this.tx(x), this.ty(y));
   }
 
+  // -----------------------------------------------------------------------
+  // Clip stack (legacy shim for TextEdit)
+  // -----------------------------------------------------------------------
+
   pushClip(x: number, y: number, w: number, h: number) {
-    this.canvas.pushClip(
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      w,
-      h
-    );
+    this.bc.pushClip(this.tx(x), this.ty(y), w, h);
   }
 
   popClip() {
-    this.canvas.popClip();
+    this.bc.popClip();
   }
+
+  // -----------------------------------------------------------------------
+  // Text
+  // -----------------------------------------------------------------------
 
   drawText(text: string, x: number, y: number, opts: TextOptions = {}) {
-    drawBitmapText(
-      this.canvas,
-      text,
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      opts
-    );
+    drawBitmapText(this.bc, text, this.tx(x), this.ty(y), opts);
   }
 
+  // -----------------------------------------------------------------------
+  // High-level widgets
+  // -----------------------------------------------------------------------
+
   drawButton(
-    btn: Omit<ButtonDef, "x" | "y"> & {
+    btn: Omit<ControlDef, "x" | "y"> & {
       x: number;
       y: number;
       id?: string;
@@ -389,10 +370,10 @@ export class AppContext {
       onMouseLeave?: () => void;
     }
   ) {
-    const absRect = _drawButton(this.canvas, {
+    const absRect = drawControl(this.port, {
       ...btn,
-      x: this.ox + btn.x - this.scrollOffsetX,
-      y: this.oy + btn.y - this.scrollOffsetY,
+      x: this.tx(btn.x),
+      y: this.ty(btn.y),
     });
     const localRect = { x: btn.x, y: btn.y, w: absRect.w, h: absRect.h };
 
@@ -419,23 +400,12 @@ export class AppContext {
     width: number,
     height?: number,
     options?: {
-      /** Unique id for hit-region registration. When provided (and hit regions
-       *  are available), click / double-click / drag interactions are handled
-       *  automatically so the caller doesn't need to wire them up. */
       id?: string;
-      /** Called after any mouse interaction mutates the state. */
       onChange?: () => void;
     }
   ) {
     const h = height ?? 16;
-    _drawTextInput(
-      this.canvas,
-      state,
-      this.ox + x - this.scrollOffsetX,
-      this.oy + y - this.scrollOffsetY,
-      width,
-      h
-    );
+    drawTextEditField(this.port, state, this.tx(x), this.ty(y), width, h);
 
     if (this._hitRegions && options?.id) {
       const onChange = options.onChange;
@@ -452,7 +422,7 @@ export class AppContext {
             onChange?.();
           },
           onDrag: (absX: number) => {
-            const localX = absX - (this.ox + x - this.scrollOffsetX);
+            const localX = absX - this.tx(x);
             if (_handleTextInputDrag(state, localX)) {
               onChange?.();
             }
@@ -462,11 +432,6 @@ export class AppContext {
     }
   }
 
-  /**
-   * Draw a block of word-wrapped text with automatic viewport culling.
-   * Coordinates are in app-local content space.
-   * Returns the total content height of the text block.
-   */
   drawTextBlock(
     opts: Omit<_TextBlockOptions, "x" | "y"> & { x: number; y: number }
   ): number {
@@ -484,7 +449,7 @@ export class AppContext {
       if (ly + lineH <= visibleTop || ly >= visibleBottom) continue;
       if (!lines[i]) continue;
       drawBitmapText(
-        this.canvas,
+        this.bc,
         lines[i],
         this.ox + opts.x - this.scrollOffsetX,
         this.oy + ly - this.scrollOffsetY,
@@ -495,9 +460,6 @@ export class AppContext {
     return totalHeight;
   }
 
-  /**
-   * Measure the total height of a text block without drawing it.
-   */
   measureTextBlock(
     text: string,
     maxWidth: number,
@@ -507,21 +469,15 @@ export class AppContext {
     return _measureTextBlock(text, maxWidth, font, lineSpacing);
   }
 
-  /**
-   * Draw a scrollable region within the app's content area.
-   *
-   * The app owns the scroll state and passes it via `opts`. The ScrollArea
-   * handles clipping, scrollbar rendering, and all hit regions — the app
-   * only needs to draw content inside `drawContent(scrollCtx)` as if it
-   * starts at (0,0) with unlimited height.
-   *
-   * The content width available inside `drawContent` is `rect.w - 15` (scrollbar).
-   */
+  // -----------------------------------------------------------------------
+  // Scroll area
+  // -----------------------------------------------------------------------
+
   scrollArea(
     id: string,
     rect: { x: number; y: number; w: number; h: number },
     opts: ScrollAreaOptions,
-    drawContent: (ctx: AppContext) => void
+    drawContent: (ctx: WindowContext) => void
   ) {
     if (!this._hitRegions) return;
 
@@ -535,13 +491,11 @@ export class AppContext {
     const sbW = SCROLL_AREA_BAR_WIDTH;
     const contentW = rect.w - sbW;
 
-    // Screen-absolute origin of the scroll area (accounting for parent window scroll)
     const absX = this.ox + rect.x - this.scrollOffsetX;
     const absY = this.oy + rect.y - this.scrollOffsetY;
 
-    // --- Draw content (clipped, offset by scroll) ---
-    const contentCtx = new AppContext(
-      this.canvas,
+    const contentCtx = new WindowContext(
+      this.port,
       absX,
       absY,
       contentW,
@@ -553,51 +507,52 @@ export class AppContext {
     drawContent(contentCtx);
     contentCtx.release();
 
-    // --- Draw scrollbar chrome directly on BitCanvas (no extra offset) ---
+    // Scrollbar chrome
     const sbx = absX + contentW;
     const sby = absY;
-    // When there's a grow box, the scrollbar track is shorter by GROW_BOX_SIZE
     const bodyH = rect.h - growBoxSize;
 
-    this.canvas.drawVLine(sbx, sby, rect.h, BLACK);
+    qdDrawVLine(this.port, sbx, sby, rect.h, BLACK);
 
     const trackTop = sby + SCROLL_AREA_ARROW_HEIGHT;
     const trackH = bodyH - SCROLL_AREA_ARROW_HEIGHT * 2;
     const arrowCx = sbx + 7;
 
     // Up arrow
-    this.canvas.fillRect(
+    qdFillRect(
+      this.port,
       sbx + 1,
       sby,
       sbW - 1,
       SCROLL_AREA_ARROW_HEIGHT,
       WHITE
     );
-    this.canvas.drawHLine(sbx, sby + SCROLL_AREA_ARROW_HEIGHT - 1, sbW, BLACK);
-    this.canvas.setPixel(arrowCx, sby + 4, BLACK);
-    this.canvas.drawHLine(arrowCx - 1, sby + 5, 3, BLACK);
-    this.canvas.drawHLine(arrowCx - 2, sby + 6, 5, BLACK);
-    this.canvas.drawHLine(arrowCx - 3, sby + 7, 7, BLACK);
+    qdDrawHLine(this.port, sbx, sby + SCROLL_AREA_ARROW_HEIGHT - 1, sbW, BLACK);
+    qdSetPixel(this.port, arrowCx, sby + 4, BLACK);
+    qdDrawHLine(this.port, arrowCx - 1, sby + 5, 3, BLACK);
+    qdDrawHLine(this.port, arrowCx - 2, sby + 6, 5, BLACK);
+    qdDrawHLine(this.port, arrowCx - 3, sby + 7, 7, BLACK);
 
-    // Down arrow — sits directly above grow box (or at bottom of full height)
+    // Down arrow
     const downTop = sby + bodyH - SCROLL_AREA_ARROW_HEIGHT;
-    this.canvas.fillRect(
+    qdFillRect(
+      this.port,
       sbx + 1,
       downTop,
       sbW - 1,
       SCROLL_AREA_ARROW_HEIGHT,
       WHITE
     );
-    this.canvas.drawHLine(sbx, downTop, sbW, BLACK);
-    this.canvas.setPixel(arrowCx, downTop + 10, BLACK);
-    this.canvas.drawHLine(arrowCx - 1, downTop + 9, 3, BLACK);
-    this.canvas.drawHLine(arrowCx - 2, downTop + 8, 5, BLACK);
-    this.canvas.drawHLine(arrowCx - 3, downTop + 7, 7, BLACK);
+    qdDrawHLine(this.port, sbx, downTop, sbW, BLACK);
+    qdSetPixel(this.port, arrowCx, downTop + 10, BLACK);
+    qdDrawHLine(this.port, arrowCx - 1, downTop + 9, 3, BLACK);
+    qdDrawHLine(this.port, arrowCx - 2, downTop + 8, 5, BLACK);
+    qdDrawHLine(this.port, arrowCx - 3, downTop + 7, 7, BLACK);
 
     // Track
     const needsScroll = contentHeight > rect.h;
     if (needsScroll) {
-      this.canvas.fillPattern(sbx + 1, trackTop, sbW - 1, trackH, "gray50");
+      qdFillPattern(this.port, sbx + 1, trackTop, sbW - 1, trackH, "gray50");
 
       const thumbH = Math.max(
         12,
@@ -605,26 +560,24 @@ export class AppContext {
       );
       const thumbY =
         trackTop + Math.floor((clampedOffset / maxScroll) * (trackH - thumbH));
-      this.canvas.fillRect(sbx + 1, thumbY, sbW - 2, thumbH, WHITE);
-      this.canvas.drawRect(sbx + 1, thumbY, sbW - 2, thumbH, BLACK);
+      qdFillRect(this.port, sbx + 1, thumbY, sbW - 2, thumbH, WHITE);
+      qdDrawRect(this.port, sbx + 1, thumbY, sbW - 2, thumbH, BLACK);
     } else {
-      this.canvas.fillRect(sbx + 1, trackTop, sbW - 1, trackH, WHITE);
+      qdFillRect(this.port, sbx + 1, trackTop, sbW - 1, trackH, WHITE);
     }
 
-    // Grow box (replaces the bottom section of the scrollbar)
+    // Grow box
     if (hasGrowBox) {
       const gbx = sbx;
       const gby = sby + bodyH;
-      this.canvas.fillRect(gbx, gby, GROW_BOX_SIZE, GROW_BOX_SIZE, WHITE);
-      this.canvas.drawHLine(gbx, gby, GROW_BOX_SIZE, BLACK);
-      this.canvas.drawRect(gbx + 2, gby + 6, 7, 7, BLACK);
-      this.canvas.fillRect(gbx + 5, gby + 3, 7, 7, WHITE);
-      this.canvas.drawRect(gbx + 5, gby + 3, 7, 7, BLACK);
+      qdFillRect(this.port, gbx, gby, GROW_BOX_SIZE, GROW_BOX_SIZE, WHITE);
+      qdDrawHLine(this.port, gbx, gby, GROW_BOX_SIZE, BLACK);
+      qdDrawRect(this.port, gbx + 2, gby + 6, 7, 7, BLACK);
+      qdFillRect(this.port, gbx + 5, gby + 3, 7, 7, WHITE);
+      qdDrawRect(this.port, gbx + 5, gby + 3, 7, 7, BLACK);
     }
 
-    // --- Hit regions ---
-
-    // Scroll up arrow
+    // Hit regions
     this._hitRegions.add({
       id: `${id}-scroll-up`,
       x: sbx,
@@ -636,7 +589,6 @@ export class AppContext {
       },
     });
 
-    // Scroll down arrow
     this._hitRegions.add({
       id: `${id}-scroll-down`,
       x: sbx,
@@ -648,7 +600,6 @@ export class AppContext {
       },
     });
 
-    // Scroll track (thumb drag)
     if (needsScroll) {
       const thumbH = Math.max(
         12,
@@ -667,7 +618,6 @@ export class AppContext {
       });
     }
 
-    // Scroll wheel — covers the full rect (content + scrollbar)
     this._hitRegions.add({
       id: `${id}-scroll-wheel`,
       x: absX,
@@ -679,7 +629,6 @@ export class AppContext {
       },
     });
 
-    // Grow box hit region
     if (hasGrowBox) {
       const gbx = sbx;
       const gby = sby + bodyH;
@@ -699,18 +648,13 @@ export class AppContext {
     }
   }
 
-  /**
-   * When the window has a content top inset, draw the scrollable content (the part below the fixed strip) here.
-   * The callback receives a context with origin at the top of the scrollable region and the window's scroll applied.
-   * No-op when contentTopInset is 0.
-   */
-  drawScrollableContent(drawContent: (scrollCtx: AppContext) => void): void {
+  drawScrollableContent(drawContent: (scrollCtx: WindowContext) => void): void {
     if (this._contentTopInset <= 0 || !this._hitRegions) return;
     const inset = this._contentTopInset;
     const scrollH = this.h - inset;
     if (scrollH <= 0) return;
-    const scrollCtx = new AppContext(
-      this.canvas,
+    const scrollCtx = new WindowContext(
+      this.port,
       this.ox,
       this.oy + inset,
       this.w,
@@ -726,19 +670,10 @@ export class AppContext {
     scrollCtx.release();
   }
 
-  clear(color: number = WHITE) {
-    this.canvas.fillRect(this.ox, this.oy, this.w, this.h, color);
-  }
+  // -----------------------------------------------------------------------
+  // Hit regions
+  // -----------------------------------------------------------------------
 
-  /** Direct access to the underlying BitCanvas (for native apps that need it). */
-  getBitCanvas(): BitCanvas {
-    return this.canvas;
-  }
-
-  /**
-   * Register a hit region in local (app-content) coordinates.
-   * Translates to screen coordinates internally.
-   */
   hitRegion(
     id: string,
     rect: { x: number; y: number; w: number; h: number },
@@ -747,11 +682,19 @@ export class AppContext {
     if (!this._hitRegions) return;
     this._hitRegions.add({
       id,
-      x: this.ox + rect.x - this.scrollOffsetX,
-      y: this.oy + rect.y - this.scrollOffsetY,
+      x: this.tx(rect.x),
+      y: this.ty(rect.y),
       w: rect.w,
       h: rect.h,
       ...callbacks,
     });
+  }
+
+  // -----------------------------------------------------------------------
+  // Direct access — legacy escape hatch
+  // -----------------------------------------------------------------------
+
+  getBitCanvas(): BitCanvas {
+    return this.bc;
   }
 }

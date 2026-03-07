@@ -1,4 +1,5 @@
-import { MockFS } from "./fs/MockFS";
+import { FileManager } from "../toolbox/FileManager";
+import { ZeroScrap, PutScrap, GetScrap } from "../toolbox/ScrapManager";
 
 /**
  * OS-level services exposed to apps.
@@ -25,7 +26,7 @@ export interface OSServices {
     write(key: string, value: string): Promise<void>;
     list(): Promise<string[]>;
   };
-  fs: MockFS | null;
+  fs: FileManager | null;
 }
 
 export interface DialogOptions {
@@ -46,7 +47,6 @@ export function createOSServices(dependencies: {
   videoElement?: HTMLVideoElement;
   ditherWorker?: Worker;
 }): OSServices {
-  let clipboardData = "";
   let cameraStream: MediaStream | null = null;
   let cameraCanvas: OffscreenCanvas | null = null;
   let cameraCtx: OffscreenCanvasRenderingContext2D | null = null;
@@ -59,10 +59,12 @@ export function createOSServices(dependencies: {
 
     clipboard: {
       read() {
-        return clipboardData;
+        const data = GetScrap("TEXT");
+        return typeof data === "string" ? data : "";
       },
       write(text: string) {
-        clipboardData = text;
+        ZeroScrap();
+        PutScrap("TEXT", text);
       },
     },
 

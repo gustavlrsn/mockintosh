@@ -1,9 +1,9 @@
 import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { OSEvent } from "../lib/canvas/EventManager";
-import { MenubarDefinition } from "../lib/canvas/ui/drawMenubar";
+import { OSEvent } from "../lib/toolbox/EventManager";
+import { MenubarDefinition } from "../lib/toolbox/MenuManager";
 import { AppManifest } from "../lib/canvas/AppLoader";
 
 interface RegistryEntry {
@@ -67,7 +67,7 @@ export const AppStoreApp: SystemApp = {
   resizable: true,
   minSize: { width: 240, height: 180 },
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
     const [tab, setTab] = app.useState<Tab>("browse");
     const [registry, setRegistry] = app.useState<RegistryEntry[]>([]);
     const [loading, setLoading] = app.useState(true);

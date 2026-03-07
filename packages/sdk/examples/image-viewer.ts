@@ -6,7 +6,7 @@
 import {
   App,
   AppBuilder,
-  AppContext,
+  WindowContext,
   AppProps,
   Sprite,
   fromGrid,
@@ -66,7 +66,7 @@ const ImageViewerApp: App = {
   resizable: true,
   minSize: { width: 120, height: 80 },
 
-  render(app: AppBuilder, ctx: AppContext, props: AppProps) {
+  render(app: AppBuilder, ctx: WindowContext, props: AppProps) {
     const [fillMode, setFillMode] = app.useState<FillMode>("fit");
     const [showBorder, setShowBorder] = app.useState(true);
 

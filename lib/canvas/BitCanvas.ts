@@ -1,4 +1,14 @@
-import { PatternName, getPattern, samplePattern } from "./patterns";
+/**
+ * BitCanvas.ts — Minimal kernel
+ *
+ * Owns the 1-byte-per-pixel buffer and provides flush-to-canvas2d.
+ * All higher-level drawing has migrated to QuickDraw GrafPort via qdDraw.ts.
+ *
+ * Retained methods beyond the kernel (fillRect, drawRect, drawHLine,
+ * drawVLine) exist solely to support the fontAdapter / TextInput / TextEdit
+ * shim path that wraps a GrafPort's baseAddr in a BitCanvas. These will be
+ * removed once text rendering moves to native QuickDraw DrawString.
+ */
 
 export const BLACK = 1;
 export const WHITE = 0;
@@ -6,8 +16,8 @@ export const WHITE = 0;
 export interface Sprite {
   width: number;
   height: number;
-  data: Uint8Array; // 1 byte per pixel, 0=white, 1=black
-  mask?: Uint8Array; // 1=opaque, 0=transparent
+  data: Uint8Array;
+  mask?: Uint8Array;
 }
 
 interface ClipRect {
@@ -32,34 +42,12 @@ export class BitCanvas {
     this.clip = { x: 0, y: 0, w: width, h: height };
   }
 
-  clear(color: number = WHITE) {
-    this.pixels.fill(color);
-  }
-
-  setPixel(x: number, y: number, color: number = BLACK) {
-    x = x | 0;
-    y = y | 0;
-    if (
-      x < this.clip.x ||
-      y < this.clip.y ||
-      x >= this.clip.x + this.clip.w ||
-      y >= this.clip.y + this.clip.h
-    )
-      return;
-    if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
-    this.pixels[y * this.width + x] = color;
-  }
-
-  getPixel(x: number, y: number): number {
-    x = x | 0;
-    y = y | 0;
-    if (x < 0 || y < 0 || x >= this.width || y >= this.height) return 0;
-    return this.pixels[y * this.width + x];
-  }
+  // -----------------------------------------------------------------------
+  // Clip stack
+  // -----------------------------------------------------------------------
 
   pushClip(x: number, y: number, w: number, h: number) {
     this.clipStack.push({ ...this.clip });
-    // Intersect with current clip
     const nx = Math.max(this.clip.x, x);
     const ny = Math.max(this.clip.y, y);
     const nx2 = Math.min(this.clip.x + this.clip.w, x + w);
@@ -81,546 +69,10 @@ export class BitCanvas {
     return { ...this.clip };
   }
 
-  drawHLine(x: number, y: number, w: number, color: number = BLACK) {
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    if (y < this.clip.y || y >= this.clip.y + this.clip.h) return;
-    const x0 = Math.max(x, this.clip.x, 0);
-    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
-    const row = y * this.width;
-    for (let px = x0; px < x1; px++) {
-      this.pixels[row + px] = color;
-    }
-  }
+  // -----------------------------------------------------------------------
+  // Flush — convert 1bpp buffer to RGBA and put on real canvas
+  // -----------------------------------------------------------------------
 
-  drawVLine(x: number, y: number, h: number, color: number = BLACK) {
-    x = x | 0;
-    y = y | 0;
-    h = h | 0;
-    if (x < this.clip.x || x >= this.clip.x + this.clip.w) return;
-    const y0 = Math.max(y, this.clip.y, 0);
-    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
-    for (let py = y0; py < y1; py++) {
-      this.pixels[py * this.width + x] = color;
-    }
-  }
-
-  drawDottedHLine(x: number, y: number, w: number, color: number = BLACK) {
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    if (y < this.clip.y || y >= this.clip.y + this.clip.h) return;
-    const x0 = Math.max(x, this.clip.x, 0);
-    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
-    const row = y * this.width;
-    for (let px = x0; px < x1; px++) {
-      if ((px - x) % 2 === 0) this.pixels[row + px] = color;
-    }
-  }
-
-  drawDottedVLine(x: number, y: number, h: number, color: number = BLACK) {
-    x = x | 0;
-    y = y | 0;
-    h = h | 0;
-    if (x < this.clip.x || x >= this.clip.x + this.clip.w) return;
-    const y0 = Math.max(y, this.clip.y, 0);
-    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
-    for (let py = y0; py < y1; py++) {
-      if ((py - y) % 2 === 0) this.pixels[py * this.width + x] = color;
-    }
-  }
-
-  drawRect(x: number, y: number, w: number, h: number, color: number = BLACK) {
-    this.drawHLine(x, y, w, color);
-    this.drawHLine(x, y + h - 1, w, color);
-    this.drawVLine(x, y, h, color);
-    this.drawVLine(x + w - 1, y, h, color);
-  }
-
-  /**
-   * Returns true if the pixel at local coordinate (lx, ly) is inside the filled area
-   * of a rounded rect with dimensions (w, h) and corner radius (rx, ry).
-   *
-   * Geometry (QuickDraw-style):
-   *  - Corner ovals are inset by (rx, ry) from each corner, tangent to both edges.
-   *  - Centers: TL=(rx,ry), TR=(w-rx,ry), BL=(rx,h-ry), BR=(w-rx,h-ry).
-   *
-   * We use pixel-center inclusion (lx+0.5, ly+0.5) so that top and bottom corners
-   * have the same visual radius: with grid-point rule the top row has one pixel
-   * and the bottom row a chord, which looks asymmetric. Pixel-center gives symmetric
-   * curvature. Integer-only: (2*lx+1-2*cx)²*ry² + (2*ly+1-2*cy)²*rx² <= 4*rx²*ry².
-   */
-  private isInsideRoundRect(
-    lx: number,
-    ly: number,
-    w: number,
-    h: number,
-    rx: number,
-    ry: number
-  ): boolean {
-    // Central bands (not in any corner quadrant): always inside
-    if (lx >= rx && lx < w - rx) return true;
-    if (ly >= ry && ly < h - ry) return true;
-    // Corner quadrant: test pixel center (lx+0.5, ly+0.5) against inset quarter-oval.
-    // Scaled to integers: u = 2*lx+1 - 2*cx, v = 2*ly+1 - 2*cy; u²*ry² + v²*rx² <= 4*rx²*ry²
-    const rx2 = rx * rx;
-    const ry2 = ry * ry;
-    const threshold = 4 * rx2 * ry2;
-    let cx: number, cy: number;
-    if (lx < rx && ly < ry) {
-      cx = rx;
-      cy = ry; // TL
-    } else if (lx >= w - rx && ly < ry) {
-      cx = w - rx;
-      cy = ry; // TR
-    } else if (lx < rx && ly >= h - ry) {
-      cx = rx;
-      cy = h - ry; // BL
-    } else {
-      cx = w - rx;
-      cy = h - ry; // BR
-    }
-    const u = 2 * lx + 1 - 2 * cx;
-    const v = 2 * ly + 1 - 2 * cy;
-    return u * u * ry2 + v * v * rx2 <= threshold;
-  }
-
-  /**
-   * Fill a rounded rectangle using QuickDraw-style inset quarter-ovals.
-   * ovalWidth and ovalHeight are diameters (rx = ovalWidth/2, ry = ovalHeight/2).
-   * With a single radius argument the corners are quarter-circles.
-   * Degrades to fillRect when radius is 0 or omitted.
-   *
-   * Equivalent to QuickDraw's PaintRoundRect / FillRoundRect.
-   */
-  fillRoundRect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    radius: number,
-    color: number = BLACK
-  ): void;
-  fillRoundRect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    ovalWidth: number,
-    ovalHeight: number,
-    color: number
-  ): void;
-  fillRoundRect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    ovWdOrRadius: number,
-    ovHtOrColor: number = BLACK,
-    colorArg?: number
-  ) {
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-    let rx: number, ry: number, color: number;
-    if (colorArg !== undefined) {
-      // 7-arg overload: ovalWidth, ovalHeight, color
-      rx = Math.floor(ovWdOrRadius / 2);
-      ry = Math.floor(ovHtOrColor / 2);
-      color = colorArg;
-    } else {
-      // 6-arg overload: radius, color
-      rx = ry = ovWdOrRadius | 0;
-      color = ovHtOrColor;
-    }
-    rx = Math.max(0, Math.min(rx, Math.floor(w / 2)));
-    ry = Math.max(0, Math.min(ry, Math.floor(h / 2)));
-    if (rx === 0 || ry === 0) {
-      this.fillRect(x, y, w, h, color);
-      return;
-    }
-    const x0 = Math.max(x, this.clip.x, 0);
-    const y0 = Math.max(y, this.clip.y, 0);
-    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
-    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
-    for (let py = y0; py < y1; py++) {
-      const row = py * this.width;
-      for (let px = x0; px < x1; px++) {
-        if (this.isInsideRoundRect(px - x, py - y, w, h, rx, ry)) {
-          this.pixels[row + px] = color;
-        }
-      }
-    }
-  }
-
-  /**
-   * Draw a rounded rectangle outline with a given pen width (thickness).
-   * Equivalent to QuickDraw's FrameRoundRect (penWidth = 1) with optional thicker pens.
-   *
-   * Implementation: fill the outer rounded rect with color, then erase the interior
-   * by filling the inner rounded rect (inset by penWidth) with the background (WHITE).
-   * This guarantees inner and outer edges are both proper QuickDraw-style round arcs.
-   *
-   * ovalWidth/ovalHeight: diameters of curvature (default 16×16 = classic Mac button).
-   * penWidth: outline thickness in pixels (default 1, same as QuickDraw 1×1 pen).
-   */
-  frameRoundRect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    ovalWidth: number,
-    ovalHeight: number,
-    penWidth: number = 1,
-    color: number = BLACK
-  ) {
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-    ovalWidth = ovalWidth | 0;
-    ovalHeight = ovalHeight | 0;
-    penWidth = Math.max(1, penWidth | 0);
-    if (penWidth * 2 >= w || penWidth * 2 >= h) {
-      // Pen is so thick the rect is fully filled
-      this.fillRoundRect(x, y, w, h, ovalWidth, ovalHeight, color);
-      return;
-    }
-    // Fill outer shape
-    this.fillRoundRect(x, y, w, h, ovalWidth, ovalHeight, color);
-    // Erase inner (inset by penWidth); inner oval diameters shrink by penWidth on each side
-    const innerOvWd = Math.max(0, ovalWidth - penWidth * 2);
-    const innerOvHt = Math.max(0, ovalHeight - penWidth * 2);
-    this.fillRoundRect(
-      x + penWidth,
-      y + penWidth,
-      w - penWidth * 2,
-      h - penWidth * 2,
-      innerOvWd,
-      innerOvHt,
-      WHITE
-    );
-  }
-
-  /**
-   * Draw a rounded rectangle outline, 1 pixel wide.
-   * Alias for frameRoundRect(..., ovalSize, ovalSize, 1, color).
-   * Kept for backward compatibility; prefer frameRoundRect for new code.
-   */
-  drawRoundRect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    radius: number,
-    color: number = BLACK
-  ) {
-    const ovWd = (radius | 0) * 2;
-    this.frameRoundRect(x, y, w, h, ovWd, ovWd, 1, color);
-  }
-
-  fillRect(x: number, y: number, w: number, h: number, color: number = BLACK) {
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-    const x0 = Math.max(x, this.clip.x, 0);
-    const y0 = Math.max(y, this.clip.y, 0);
-    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
-    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
-    for (let py = y0; py < y1; py++) {
-      const row = py * this.width;
-      for (let px = x0; px < x1; px++) {
-        this.pixels[row + px] = color;
-      }
-    }
-  }
-
-  fillPattern(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    pattern: PatternName | Uint8Array,
-    originX?: number,
-    originY?: number
-  ) {
-    const pat = typeof pattern === "string" ? getPattern(pattern) : pattern;
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-    const ox = (originX ?? x) | 0;
-    const oy = (originY ?? y) | 0;
-    const x0 = Math.max(x, this.clip.x, 0);
-    const y0 = Math.max(y, this.clip.y, 0);
-    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
-    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
-    for (let py = y0; py < y1; py++) {
-      const row = py * this.width;
-      for (let px = x0; px < x1; px++) {
-        this.pixels[row + px] = samplePattern(pat, px - ox, py - oy);
-      }
-    }
-  }
-
-  /** Erase black pixels where the pattern is white (AND mask). */
-  maskPattern(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    pattern: PatternName | Uint8Array,
-    originX?: number,
-    originY?: number
-  ) {
-    const pat = typeof pattern === "string" ? getPattern(pattern) : pattern;
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-    const ox = (originX ?? x) | 0;
-    const oy = (originY ?? y) | 0;
-    const x0 = Math.max(x, this.clip.x, 0);
-    const y0 = Math.max(y, this.clip.y, 0);
-    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
-    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
-    for (let py = y0; py < y1; py++) {
-      const row = py * this.width;
-      for (let px = x0; px < x1; px++) {
-        this.pixels[row + px] &= samplePattern(pat, px - ox, py - oy);
-      }
-    }
-  }
-
-  /**
-   * XOR a pattern along the perimeter of a rectangle, 1 pixel wide.
-   *
-   * This matches the Mac Window Manager's notPatXor pen mode used by
-   * DragGrayRgn / GrowWindow: the outline is always visible regardless of
-   * what is underneath because XOR with a 50% gray pattern inverts every
-   * other pixel, breaking any coincidence with a uniform background.
-   * Drawing the same outline twice restores the original pixels exactly.
-   */
-  xorPatternRect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    pattern: PatternName | Uint8Array = "gray50"
-  ) {
-    const pat = typeof pattern === "string" ? getPattern(pattern) : pattern;
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-
-    const xorRow = (row: number, px0: number, px1: number) => {
-      if (row < this.clip.y || row >= this.clip.y + this.clip.h) return;
-      if (row < 0 || row >= this.height) return;
-      const r = row * this.width;
-      const cx0 = Math.max(px0, this.clip.x, 0);
-      const cx1 = Math.min(px1, this.clip.x + this.clip.w, this.width);
-      for (let px = cx0; px < cx1; px++) {
-        if (samplePattern(pat, px, row)) {
-          this.pixels[r + px] ^= 1;
-        }
-      }
-    };
-
-    const xorCol = (col: number, py0: number, py1: number) => {
-      if (col < this.clip.x || col >= this.clip.x + this.clip.w) return;
-      if (col < 0 || col >= this.width) return;
-      const cy0 = Math.max(py0, this.clip.y, 0);
-      const cy1 = Math.min(py1, this.clip.y + this.clip.h, this.height);
-      for (let py = cy0; py < cy1; py++) {
-        if (samplePattern(pat, col, py)) {
-          this.pixels[py * this.width + col] ^= 1;
-        }
-      }
-    };
-
-    // Top and bottom edges (full width)
-    xorRow(y, x, x + w);
-    xorRow(y + h - 1, x, x + w);
-    // Left and right edges (interior rows to avoid double-drawing corners)
-    xorCol(x, y + 1, y + h - 1);
-    xorCol(x + w - 1, y + 1, y + h - 1);
-  }
-
-  /**
-   * Invert a rectangular region (black <-> white).
-   */
-  invertRect(x: number, y: number, w: number, h: number) {
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-    const x0 = Math.max(x, this.clip.x, 0);
-    const y0 = Math.max(y, this.clip.y, 0);
-    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
-    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
-    for (let py = y0; py < y1; py++) {
-      const row = py * this.width;
-      for (let px = x0; px < x1; px++) {
-        this.pixels[row + px] ^= 1;
-      }
-    }
-  }
-
-  /** Tile a sprite as a repeating pattern over a rectangle. */
-  fillSpriteTile(x: number, y: number, w: number, h: number, sprite: Sprite) {
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-    const { width: sw, height: sh, data } = sprite;
-    const x0 = Math.max(x, this.clip.x, 0);
-    const y0 = Math.max(y, this.clip.y, 0);
-    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
-    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
-    for (let py = y0; py < y1; py++) {
-      const row = py * this.width;
-      const sy = (((py - y) % sh) + sh) % sh;
-      for (let px = x0; px < x1; px++) {
-        const sx = (((px - x) % sw) + sw) % sw;
-        this.pixels[row + px] = data[sy * sw + sx];
-      }
-    }
-  }
-
-  blit(sprite: Sprite, dx: number, dy: number) {
-    dx = dx | 0;
-    dy = dy | 0;
-    const { width: sw, height: sh, data, mask } = sprite;
-    for (let sy = 0; sy < sh; sy++) {
-      const ty = dy + sy;
-      if (ty < this.clip.y || ty >= this.clip.y + this.clip.h) continue;
-      if (ty < 0 || ty >= this.height) continue;
-      for (let sx = 0; sx < sw; sx++) {
-        const tx = dx + sx;
-        if (tx < this.clip.x || tx >= this.clip.x + this.clip.w) continue;
-        if (tx < 0 || tx >= this.width) continue;
-        const si = sy * sw + sx;
-        if (mask && !mask[si]) continue; // transparent
-        this.pixels[ty * this.width + tx] = data[si];
-      }
-    }
-  }
-
-  blitInverted(sprite: Sprite, dx: number, dy: number) {
-    dx = dx | 0;
-    dy = dy | 0;
-    const { width: sw, height: sh, data, mask } = sprite;
-    for (let sy = 0; sy < sh; sy++) {
-      const ty = dy + sy;
-      if (ty < this.clip.y || ty >= this.clip.y + this.clip.h) continue;
-      if (ty < 0 || ty >= this.height) continue;
-      for (let sx = 0; sx < sw; sx++) {
-        const tx = dx + sx;
-        if (tx < this.clip.x || tx >= this.clip.x + this.clip.w) continue;
-        if (tx < 0 || tx >= this.width) continue;
-        const si = sy * sw + sx;
-        if (mask && !mask[si]) continue;
-        this.pixels[ty * this.width + tx] = data[si] ^ 1;
-      }
-    }
-  }
-
-  /**
-   * Blit with a shadow-outline effect: opaque pixels get a dithered pattern
-   * (same logic as the existing canvas-image.tsx shadowOutline).
-   */
-  blitShadowOutline(sprite: Sprite, dx: number, dy: number) {
-    dx = dx | 0;
-    dy = dy | 0;
-    const { width: sw, height: sh, mask } = sprite;
-    if (!mask) return this.blit(sprite, dx, dy);
-    for (let sy = 0; sy < sh; sy++) {
-      const ty = dy + sy;
-      if (ty < this.clip.y || ty >= this.clip.y + this.clip.h) continue;
-      if (ty < 0 || ty >= this.height) continue;
-      for (let sx = 0; sx < sw; sx++) {
-        const tx = dx + sx;
-        if (tx < this.clip.x || tx >= this.clip.x + this.clip.w) continue;
-        if (tx < 0 || tx >= this.width) continue;
-        const si = sy * sw + sx;
-        if (!mask[si]) continue;
-        const color =
-          (tx % 4 === 0 && ty % 2 === 0) ||
-          (tx % 2 === 0 && tx % 4 !== 0 && ty % 2 !== 0)
-            ? BLACK
-            : WHITE;
-        this.pixels[ty * this.width + tx] = color;
-      }
-    }
-  }
-
-  /**
-   * Blit only the outline (contour) of a sprite's opaque region.
-   * A pixel is drawn if it is opaque and at least one 4-connected neighbor
-   * is transparent or outside the sprite bounds.
-   */
-  blitOutline(sprite: Sprite, dx: number, dy: number, color: number = BLACK) {
-    dx = dx | 0;
-    dy = dy | 0;
-    const { width: sw, height: sh, mask } = sprite;
-    if (!mask) return;
-    for (let sy = 0; sy < sh; sy++) {
-      const ty = dy + sy;
-      if (ty < this.clip.y || ty >= this.clip.y + this.clip.h) continue;
-      if (ty < 0 || ty >= this.height) continue;
-      for (let sx = 0; sx < sw; sx++) {
-        const si = sy * sw + sx;
-        if (!mask[si]) continue;
-        const hasTransparentNeighbor =
-          sx === 0 ||
-          !mask[si - 1] ||
-          sx === sw - 1 ||
-          !mask[si + 1] ||
-          sy === 0 ||
-          !mask[(sy - 1) * sw + sx] ||
-          sy === sh - 1 ||
-          !mask[(sy + 1) * sw + sx];
-        if (!hasTransparentNeighbor) continue;
-        const tx = dx + sx;
-        if (tx < this.clip.x || tx >= this.clip.x + this.clip.w) continue;
-        if (tx < 0 || tx >= this.width) continue;
-        this.pixels[ty * this.width + tx] = color;
-      }
-    }
-  }
-
-  /**
-   * Copy raw RGBA ImageData into the BitCanvas, thresholding to 1-bit.
-   * Useful for blitting dithered camera/video frames.
-   */
-  blitImageData(imageData: ImageData, dx: number, dy: number) {
-    const { width: sw, height: sh, data } = imageData;
-    dx = dx | 0;
-    dy = dy | 0;
-    for (let sy = 0; sy < sh; sy++) {
-      const ty = dy + sy;
-      if (ty < this.clip.y || ty >= this.clip.y + this.clip.h) continue;
-      if (ty < 0 || ty >= this.height) continue;
-      for (let sx = 0; sx < sw; sx++) {
-        const tx = dx + sx;
-        if (tx < this.clip.x || tx >= this.clip.x + this.clip.w) continue;
-        if (tx < 0 || tx >= this.width) continue;
-        const si = (sy * sw + sx) * 4;
-        const alpha = data[si + 3];
-        if (alpha < 128) continue;
-        // Threshold: < 128 = black, >= 128 = white
-        this.pixels[ty * this.width + tx] = data[si] < 128 ? BLACK : WHITE;
-      }
-    }
-  }
-
-  /**
-   * Expand the 1-bit buffer to RGBA ImageData and put it on a real canvas context.
-   */
   flush(ctx: CanvasRenderingContext2D) {
     if (
       !this.imageData ||
@@ -632,7 +84,7 @@ export class BitCanvas {
     const rgba = this.imageData.data;
     const len = this.width * this.height;
     for (let i = 0; i < len; i++) {
-      const color = this.pixels[i] ? 0 : 255; // 1=black->0, 0=white->255
+      const color = this.pixels[i] ? 0 : 255;
       const j = i * 4;
       rgba[j] = color;
       rgba[j + 1] = color;
@@ -642,10 +94,10 @@ export class BitCanvas {
     ctx.putImageData(this.imageData, 0, 0);
   }
 
-  /**
-   * Capture a rectangular region of the 1-bit buffer as a PNG data URL.
-   * Uses an offscreen canvas to encode the pixels.
-   */
+  // -----------------------------------------------------------------------
+  // captureRegion — screenshot to PNG data URL
+  // -----------------------------------------------------------------------
+
   captureRegion(x: number, y: number, w: number, h: number): string {
     x = Math.max(0, x | 0);
     y = Math.max(0, y | 0);
@@ -674,5 +126,60 @@ export class BitCanvas {
 
     ctx.putImageData(imgData, 0, 0);
     return offscreen.toDataURL("image/png");
+  }
+
+  // -----------------------------------------------------------------------
+  // Legacy drawing — kept for fontAdapter / TextInput / TextEdit shim path.
+  // These operate on the shared pixel buffer and respect the clip stack.
+  // Will be removed once text rendering uses native QuickDraw DrawString.
+  // -----------------------------------------------------------------------
+
+  drawHLine(x: number, y: number, w: number, color: number = BLACK) {
+    x = x | 0;
+    y = y | 0;
+    w = w | 0;
+    if (y < this.clip.y || y >= this.clip.y + this.clip.h) return;
+    const x0 = Math.max(x, this.clip.x, 0);
+    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
+    const row = y * this.width;
+    for (let px = x0; px < x1; px++) {
+      this.pixels[row + px] = color;
+    }
+  }
+
+  drawVLine(x: number, y: number, h: number, color: number = BLACK) {
+    x = x | 0;
+    y = y | 0;
+    h = h | 0;
+    if (x < this.clip.x || x >= this.clip.x + this.clip.w) return;
+    const y0 = Math.max(y, this.clip.y, 0);
+    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
+    for (let py = y0; py < y1; py++) {
+      this.pixels[py * this.width + x] = color;
+    }
+  }
+
+  drawRect(x: number, y: number, w: number, h: number, color: number = BLACK) {
+    this.drawHLine(x, y, w, color);
+    this.drawHLine(x, y + h - 1, w, color);
+    this.drawVLine(x, y, h, color);
+    this.drawVLine(x + w - 1, y, h, color);
+  }
+
+  fillRect(x: number, y: number, w: number, h: number, color: number = BLACK) {
+    x = x | 0;
+    y = y | 0;
+    w = w | 0;
+    h = h | 0;
+    const x0 = Math.max(x, this.clip.x, 0);
+    const y0 = Math.max(y, this.clip.y, 0);
+    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
+    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
+    for (let py = y0; py < y1; py++) {
+      const row = py * this.width;
+      for (let px = x0; px < x1; px++) {
+        this.pixels[row + px] = color;
+      }
+    }
   }
 }

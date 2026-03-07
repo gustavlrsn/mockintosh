@@ -1,8 +1,19 @@
-// Picture record/playback routines — from QuickDraw.p Picture Routines section.
-// Implements the QuickDraw picture opcode stream (PicFormat.txt).
-//
-// OpenPicture starts recording all drawing calls as opcodes.
-// DrawPicture replays those opcodes through the current port.
+/**
+ * Picture record/playback routines — from `QuickDraw.p` Picture Routines
+ * section.  Implements the QuickDraw picture opcode stream described in
+ * `reference/QuickDraw/PicFormat.txt`.
+ *
+ * ## Recording
+ * Call {@link OpenPicture} to begin recording.  While `port.picSave` is set,
+ * every drawing call also appends opcodes to the picture's internal byte
+ * stream.  Call {@link ClosePicture} to write the end opcode and seal the
+ * picture.
+ *
+ * ## Playback
+ * Call {@link DrawPicture} to replay a recorded picture into the current
+ * port.  The byte stream is interpreted sequentially; unknown opcodes
+ * terminate playback.
+ */
 
 import {
   Picture,
@@ -116,7 +127,15 @@ function readRegion(): RgnHandle {
 // OpenPicture / ClosePicture / KillPicture
 // -------------------------------------------------------------------------
 
-// FUNCTION OpenPicture(picFrame: Rect): PicHandle;
+/**
+ * Begin recording all drawing operations into a new picture.
+ *
+ * `picFrame` defines the coordinate frame for the picture (used when
+ * scaling during playback).  All subsequent drawing calls append opcodes
+ * to the returned handle until {@link ClosePicture} is called.
+ *
+ * `FUNCTION OpenPicture(picFrame: Rect): PicHandle`.
+ */
 export function OpenPicture(picFrame: Rect): PicHandle {
   const handle: PicHandle = {
     pic: {
@@ -131,7 +150,11 @@ export function OpenPicture(picFrame: Rect): PicHandle {
   return handle;
 }
 
-// PROCEDURE ClosePicture;
+/**
+ * Finish recording.  Appends the end-of-picture opcode, updates `picSize`,
+ * and clears `port.picSave`.
+ * `PROCEDURE ClosePicture`.
+ */
 export function ClosePicture(): void {
   const port = globals.thePort;
   if (!port || !port.picSave) return;
@@ -142,7 +165,10 @@ export function ClosePicture(): void {
   h.pic.picSize = h.pic._data.length + 10;
 }
 
-// PROCEDURE KillPicture(myPicture: PicHandle);
+/**
+ * Release a picture handle.  In JS this is a no-op — the GC reclaims memory.
+ * `PROCEDURE KillPicture(myPicture: PicHandle)`.
+ */
 export function KillPicture(_pic: PicHandle): void {
   // GC handles memory in JS
 }
@@ -151,7 +177,14 @@ export function KillPicture(_pic: PicHandle): void {
 // PicComment
 // -------------------------------------------------------------------------
 
-// PROCEDURE PicComment(kind, dataSize: INTEGER; dataHandle: QDHandle);
+/**
+ * Append a picture comment opcode to the current picture being recorded.
+ *
+ * Short comments (`dataSize = 0`) emit `PIC_SHORT_COMMENT + kind`.
+ * Long comments emit `PIC_LONG_COMMENT + kind + dataSize + data`.
+ *
+ * `PROCEDURE PicComment(kind, dataSize: INTEGER; dataHandle: QDHandle)`.
+ */
 export function PicComment(
   kind: number,
   dataSize: number,
@@ -177,6 +210,11 @@ export function PicComment(
 // StdGetPic / StdPutPic (bottleneck procedures)
 // -------------------------------------------------------------------------
 
+/**
+ * Default picture-data source bottleneck.  Reads `byteCount` bytes from the
+ * current playback stream into `dataPtr`.
+ */
+
 export function StdGetPic(dataPtr: number[], byteCount: number): void {
   if (!_playPic) return;
   for (let i = 0; i < byteCount; i++) {
@@ -184,6 +222,10 @@ export function StdGetPic(dataPtr: number[], byteCount: number): void {
   }
 }
 
+/**
+ * Default picture-data sink bottleneck.  Appends `byteCount` bytes from
+ * `dataPtr` to the current picture being recorded.
+ */
 export function StdPutPic(dataPtr: number[], byteCount: number): void {
   const port = globals.thePort;
   if (!port || !port.picSave) return;
@@ -196,7 +238,14 @@ export function StdPutPic(dataPtr: number[], byteCount: number): void {
 // DrawPicture — replay the picture stream
 // -------------------------------------------------------------------------
 
-// PROCEDURE DrawPicture(myPicture: PicHandle; dstRect: Rect);
+/**
+ * Replay a recorded picture into the current port, scaled to fit `dstRect`.
+ *
+ * Each opcode in `myPicture.pic._data` is decoded and the corresponding
+ * drawing call is invoked.  Unknown or malformed opcodes terminate playback.
+ *
+ * `PROCEDURE DrawPicture(myPicture: PicHandle; dstRect: Rect)`.
+ */
 export function DrawPicture(myPicture: PicHandle, dstRect: Rect): void {
   const port = globals.thePort;
   if (!port) return;

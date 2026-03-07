@@ -1,6 +1,25 @@
-import { BitCanvas, BLACK, WHITE, Sprite } from "../BitCanvas";
-import { drawBitmapText, measureText } from "../fontAdapter";
-import { HitRegionMap } from "../HitRegion";
+import { BitCanvas, BLACK, WHITE, Sprite } from "../canvas/BitCanvas";
+import { drawBitmapText, measureText } from "../canvas/fontAdapter";
+import { HitRegionMap } from "../canvas/HitRegion";
+import type { GrafPort } from "@mockintosh/quickdraw";
+import {
+  qdFillRect,
+  qdDrawHLine,
+  qdDrawDottedHLine,
+  qdDrawRect,
+  qdMaskPattern,
+  qdSetPixel,
+} from "../canvas/qdDraw";
+import { blitSprite, blitSpriteInverted } from "../canvas/SpriteManager";
+
+/** Wrap a GrafPort in a temporary BitCanvas shim for drawBitmapText (shares pixel buffer). */
+function _bc(port: GrafPort): BitCanvas {
+  const { baseAddr, rowBytes } = port.portBits;
+  const height = (baseAddr.length / rowBytes) | 0;
+  const bc = new BitCanvas(rowBytes, height);
+  (bc as any).pixels = baseAddr;
+  return bc;
+}
 
 export interface MenubarDefinition {
   label: string;
@@ -106,20 +125,22 @@ function flattenItems(menu: MenubarDefinition): FlatItem[] {
 }
 
 export function drawMenubar(
-  canvas: BitCanvas,
+  port: GrafPort,
   state: MenubarState,
   appleSprite: Sprite | undefined,
   screenWidth: number,
   hitRegions: HitRegionMap,
   scheduleRender: () => void
 ) {
+  const bc = _bc(port);
+
   // Background
-  canvas.fillRect(0, 0, screenWidth, MENUBAR_HEIGHT, WHITE);
-  canvas.drawHLine(0, MENUBAR_HEIGHT - 1, screenWidth, BLACK);
+  qdFillRect(port, 0, 0, screenWidth, MENUBAR_HEIGHT, WHITE);
+  qdDrawHLine(port, 0, MENUBAR_HEIGHT - 1, screenWidth, BLACK);
 
   // Apple icon
   if (appleSprite) {
-    canvas.blit(appleSprite, 10, 4);
+    blitSprite(port, appleSprite, 10, 4);
   }
 
   // Menubar background region (lowest z-order — catches clicks in empty menubar area)
@@ -156,9 +177,9 @@ export function drawMenubar(
 
     if (i === 0 && hasAppleMenu) {
       if (isOpen) {
-        canvas.fillRect(4, 0, APPLE_MENU_WIDTH, MENUBAR_HEIGHT - 1, BLACK);
+        qdFillRect(port, 4, 0, APPLE_MENU_WIDTH, MENUBAR_HEIGHT - 1, BLACK);
         if (appleSprite) {
-          canvas.blitInverted(appleSprite, 10, 4);
+          blitSpriteInverted(port, appleSprite, 10, 4);
         }
       }
       hitRegions.add({
@@ -196,13 +217,13 @@ export function drawMenubar(
     const labelW = textW + 14;
 
     if (isOpen) {
-      canvas.fillRect(labelX, 0, labelW, MENUBAR_HEIGHT - 1, BLACK);
-      drawBitmapText(canvas, menu.label, x, 2, {
+      qdFillRect(port, labelX, 0, labelW, MENUBAR_HEIGHT - 1, BLACK);
+      drawBitmapText(bc, menu.label, x, 2, {
         font: "ChiKareGo",
         color: WHITE,
       });
     } else {
-      drawBitmapText(canvas, menu.label, x, 2, {
+      drawBitmapText(bc, menu.label, x, 2, {
         font: "ChiKareGo",
         color: BLACK,
       });
@@ -249,13 +270,13 @@ export function drawMenubar(
       ) + 2;
 
     // Shadow
-    canvas.fillRect(mx + 1, MENUBAR_HEIGHT + mh, mw, 1, BLACK);
-    canvas.fillRect(mx + mw, MENUBAR_HEIGHT + 1, 1, mh, BLACK);
+    qdFillRect(port, mx + 1, MENUBAR_HEIGHT + mh, mw, 1, BLACK);
+    qdFillRect(port, mx + mw, MENUBAR_HEIGHT + 1, 1, mh, BLACK);
 
     // Background
-    canvas.fillRect(mx, MENUBAR_HEIGHT, mw, mh, WHITE);
-    canvas.drawRect(mx, MENUBAR_HEIGHT, mw, mh, BLACK);
-    canvas.drawHLine(mx, MENUBAR_HEIGHT, mw, WHITE);
+    qdFillRect(port, mx, MENUBAR_HEIGHT, mw, mh, WHITE);
+    qdDrawRect(port, mx, MENUBAR_HEIGHT, mw, mh, BLACK);
+    qdDrawHLine(port, mx, MENUBAR_HEIGHT, mw, WHITE);
 
     // Dropdown background (lowest z-order within dropdown — registered before items)
     hitRegions.add({
@@ -270,7 +291,8 @@ export function drawMenubar(
     for (let j = 0; j < items.length; j++) {
       const it = items[j];
       if (it.isSeparator) {
-        canvas.drawDottedHLine(
+        qdDrawDottedHLine(
+          port,
           mx + 1,
           iy + SEPARATOR_HEIGHT / 2,
           mw - 2,
@@ -283,12 +305,12 @@ export function drawMenubar(
       const itemIndex = j;
       const highlighted = state.highlightedItem === j && !it.disabled;
       if (highlighted) {
-        canvas.fillRect(mx + 1, iy, mw - 2, ITEM_HEIGHT, BLACK);
+        qdFillRect(port, mx + 1, iy, mw - 2, ITEM_HEIGHT, BLACK);
       }
 
       const textColor = highlighted ? WHITE : BLACK;
       const textX = mx + MENU_PADDING + (it.isRadio ? 16 : 0);
-      drawBitmapText(canvas, it.label, textX, iy, {
+      drawBitmapText(bc, it.label, textX, iy, {
         font: "ChiKareGo",
         color: textColor,
         height: ITEM_HEIGHT,
@@ -296,29 +318,23 @@ export function drawMenubar(
 
       if (it.shortcut) {
         const sw = measureText(it.shortcut, "ChiKareGo");
-        drawBitmapText(
-          canvas,
-          it.shortcut,
-          mx + mw - MENU_PADDING - sw - 2,
-          iy,
-          {
-            font: "ChiKareGo",
-            color: textColor,
-            height: ITEM_HEIGHT,
-          }
-        );
+        drawBitmapText(bc, it.shortcut, mx + mw - MENU_PADDING - sw - 2, iy, {
+          font: "ChiKareGo",
+          color: textColor,
+          height: ITEM_HEIGHT,
+        });
       }
 
       if (it.isRadio && it.radioChecked) {
         const bx = mx + MENU_PADDING + 4;
         const by = iy + 6;
-        canvas.setPixel(bx, by, textColor);
-        canvas.drawHLine(bx - 1, by + 1, 3, textColor);
-        canvas.setPixel(bx, by + 2, textColor);
+        qdSetPixel(port, bx, by, textColor);
+        qdDrawHLine(port, bx - 1, by + 1, 3, textColor);
+        qdSetPixel(port, bx, by + 2, textColor);
       }
 
       if (it.disabled && !highlighted) {
-        canvas.maskPattern(mx + 1, iy, mw - 2, ITEM_HEIGHT, "gray50");
+        qdMaskPattern(port, mx + 1, iy, mw - 2, ITEM_HEIGHT, "gray50");
       }
 
       hitRegions.add({

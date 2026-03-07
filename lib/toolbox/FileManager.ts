@@ -1,8 +1,31 @@
-import { Sprite } from "../BitCanvas";
-import { SpriteRegistry, defineSprite } from "../SpriteRegistry";
-import { OPFSBackend } from "./OPFSBackend";
+/**
+ * FileManager.ts — Macintosh Toolbox File Manager
+ *
+ * Single source of truth for all filesystem operations. Incorporates the
+ * former MockFS in-memory tree, OPFSBackend persistence, change listeners,
+ * and exposes both the low-level methods that apps use directly AND the
+ * Mac-aligned high-level API (FSpCreate, FSRead, etc.).
+ *
+ * Original Mac routines mapped:
+ *   FSpCreate    → FSpCreate(spec, creator, type)
+ *   FSpDelete    → FSpDelete(spec)
+ *   FSRead       → FSRead(spec)
+ *   FSWrite      → FSWrite(spec, data)
+ *   FSpGetFInfo  → FSpGetFInfo(spec)
+ *   FSpSetFInfo  → FSpSetFInfo(spec, info)
+ *   PBGetCatInfo → PBGetCatInfo(spec)
+ *   FSMakeFSSpec → FSMakeFSSpec(path)
+ *
+ * Dropped: ParamBlockRec, async callbacks, volume refs, resource forks.
+ */
 
-// ---- Types ----
+import type { Sprite } from "../canvas/BitCanvas";
+import { ResourceManager, defineSprite } from "./ResourceManager";
+import { OPFSBackend } from "../canvas/fs/OPFSBackend";
+
+// -------------------------------------------------------------------------
+// Types (formerly in MockFS.ts)
+// -------------------------------------------------------------------------
 
 export interface FSNode {
   id: string;
@@ -12,7 +35,6 @@ export interface FSNode {
   createdAt: number;
   modifiedAt: number;
   icon?: string;
-  /** Custom icon position within the parent container (desktop or folder window). */
   position?: { x: number; y: number };
 }
 
@@ -40,7 +62,11 @@ export interface SpriteFileContent {
 
 export type FSChangeCallback = () => void;
 
-// ---- Helpers ----
+export const ROOT_ID = "__root__";
+
+// -------------------------------------------------------------------------
+// Helpers
+// -------------------------------------------------------------------------
 
 const FILE_TYPE_ICONS: Record<string, string> = {
   text: "icon/file",
@@ -61,25 +87,68 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-// ---- MockFS ----
+// -------------------------------------------------------------------------
+// Mac-style type mappings
+// -------------------------------------------------------------------------
 
-export const ROOT_ID = "__root__";
+export interface FInfo {
+  fdType: string;
+  fdCreator: string;
+}
 
-export class MockFS {
+export interface FSSpec {
+  path: string;
+}
+
+export interface CatInfoRec {
+  name: string;
+  kind: "file" | "directory";
+  size: number;
+  createdAt: number;
+  modifiedAt: number;
+  fdType: string;
+  fdCreator: string;
+}
+
+const FILE_TYPE_MAP: Record<string, string> = {
+  text: "TEXT",
+  image: "PICT",
+  app: "APPL",
+  "app-shortcut": "ALIK",
+  binary: "BINA",
+};
+
+const REVERSE_TYPE_MAP: Record<string, FSFile["fileType"]> = {
+  TEXT: "text",
+  PICT: "image",
+  APPL: "app",
+  ALIK: "app-shortcut",
+  BINA: "binary",
+};
+
+// -------------------------------------------------------------------------
+// FileManager
+// -------------------------------------------------------------------------
+
+export class FileManager {
   private meta: FileSystemMetadata = { version: 1, nodes: {} };
   private backend: OPFSBackend;
-  private sprites: SpriteRegistry;
+  private sprites: ResourceManager;
   private listeners: FSChangeCallback[] = [];
   private metaDirty = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Monotonically increasing counter, bumped on every mutation. Use in useMemo deps to react to FS changes. */
+  /** Monotonically increasing counter, bumped on every mutation. */
   version = 0;
 
-  constructor(backend: OPFSBackend, sprites: SpriteRegistry) {
+  constructor(backend: OPFSBackend, sprites: ResourceManager) {
     this.backend = backend;
     this.sprites = sprites;
   }
+
+  // =====================================================================
+  // Lifecycle
+  // =====================================================================
 
   async init(): Promise<void> {
     await this.backend.init();
@@ -104,7 +173,9 @@ export class MockFS {
     }
   }
 
-  // ---- Reads ----
+  // =====================================================================
+  // Reads
+  // =====================================================================
 
   getNode(id: string): FSNode | undefined {
     return this.meta.nodes[id];
@@ -149,7 +220,9 @@ export class MockFS {
     return undefined;
   }
 
-  // ---- Writes ----
+  // =====================================================================
+  // Writes
+  // =====================================================================
 
   async writeFile(
     parentId: string,
@@ -292,7 +365,9 @@ export class MockFS {
     this.notify();
   }
 
-  // ---- Change subscriptions ----
+  // =====================================================================
+  // Change subscriptions
+  // =====================================================================
 
   onChange(callback: FSChangeCallback): () => void {
     this.listeners.push(callback);
@@ -310,7 +385,9 @@ export class MockFS {
     }
   }
 
-  // ---- Persistence ----
+  // =====================================================================
+  // Persistence
+  // =====================================================================
 
   private schedulePersist(): void {
     this.metaDirty = true;
@@ -321,7 +398,7 @@ export class MockFS {
         this.metaDirty = false;
         this.backend
           .writeMeta(JSON.stringify(this.meta))
-          .catch((e) => console.error("MockFS persist error:", e));
+          .catch((e) => console.error("FileManager persist error:", e));
       }
     }, 500);
   }
@@ -335,5 +412,125 @@ export class MockFS {
       this.metaDirty = false;
       await this.backend.writeMeta(JSON.stringify(this.meta));
     }
+  }
+
+  // =====================================================================
+  // Mac-style high-level API
+  // =====================================================================
+
+  FSMakeFSSpec(path: string): FSSpec {
+    return { path };
+  }
+
+  async FSpCreate(spec: FSSpec, creator: string, type: string): Promise<void> {
+    const { parentPath, name } = this._splitPath(spec.path);
+    const parent = this._resolveDir(parentPath);
+    if (!parent) throw new Error(`Directory not found: ${parentPath}`);
+
+    const fileType = REVERSE_TYPE_MAP[type] ?? "binary";
+    await this.writeFile(parent.id, name, "", fileType);
+  }
+
+  async FSpDelete(spec: FSSpec): Promise<void> {
+    const node = this.resolvePath(spec.path);
+    if (!node) throw new Error(`Not found: ${spec.path}`);
+    await this.remove(node.id);
+  }
+
+  async FSRead(spec: FSSpec): Promise<string | null> {
+    const node = this.resolvePath(spec.path);
+    if (!node || node.kind !== "file") return null;
+    return this.readFile(node.id);
+  }
+
+  async FSWrite(spec: FSSpec, data: string): Promise<void> {
+    const node = this.resolvePath(spec.path);
+    if (node && node.kind === "file") {
+      const file = node as FSFile;
+      const { parentPath, name } = this._splitPath(spec.path);
+      const parent = this._resolveDir(parentPath);
+      if (parent) {
+        await this.writeFile(parent.id, name, data, file.fileType);
+      }
+    } else {
+      const { parentPath, name } = this._splitPath(spec.path);
+      const parent = this._resolveDir(parentPath);
+      if (!parent) throw new Error(`Directory not found: ${parentPath}`);
+      await this.writeFile(parent.id, name, data, "text");
+    }
+  }
+
+  async FSpGetFInfo(spec: FSSpec): Promise<FInfo> {
+    const node = this.resolvePath(spec.path);
+    if (!node || node.kind !== "file") {
+      throw new Error(`File not found: ${spec.path}`);
+    }
+    const file = node as FSFile;
+    return {
+      fdType: FILE_TYPE_MAP[file.fileType] ?? "BINA",
+      fdCreator: "MOCK",
+    };
+  }
+
+  async FSpSetFInfo(spec: FSSpec, info: FInfo): Promise<void> {
+    const node = this.resolvePath(spec.path);
+    if (!node || node.kind !== "file") {
+      throw new Error(`File not found: ${spec.path}`);
+    }
+    const file = node as FSFile;
+    const newType = REVERSE_TYPE_MAP[info.fdType];
+    if (newType) {
+      (file as any).fileType = newType;
+    }
+  }
+
+  async PBGetCatInfo(spec: FSSpec): Promise<CatInfoRec> {
+    const node = this.resolvePath(spec.path);
+    if (!node) throw new Error(`Not found: ${spec.path}`);
+
+    if (node.kind === "file") {
+      const file = node as FSFile;
+      return {
+        name: node.name,
+        kind: "file",
+        size: file.size,
+        createdAt: node.createdAt,
+        modifiedAt: node.modifiedAt,
+        fdType: FILE_TYPE_MAP[file.fileType] ?? "BINA",
+        fdCreator: "MOCK",
+      };
+    }
+
+    return {
+      name: node.name,
+      kind: "directory",
+      size: 0,
+      createdAt: node.createdAt,
+      modifiedAt: node.modifiedAt,
+      fdType: "",
+      fdCreator: "",
+    };
+  }
+
+  DirCreate(spec: FSSpec): void {
+    const { parentPath, name } = this._splitPath(spec.path);
+    const parent = this._resolveDir(parentPath);
+    if (!parent) throw new Error(`Directory not found: ${parentPath}`);
+    this.mkdir(parent.id, name);
+  }
+
+  // ---- Internal helpers ----
+
+  private _splitPath(path: string): { parentPath: string; name: string } {
+    const parts = path.split("/").filter(Boolean);
+    const name = parts.pop() ?? "";
+    return { parentPath: "/" + parts.join("/"), name };
+  }
+
+  private _resolveDir(path: string): FSNode | null {
+    if (path === "/" || path === "") {
+      return this.getNode(ROOT_ID) ?? null;
+    }
+    return this.resolvePath(path);
   }
 }

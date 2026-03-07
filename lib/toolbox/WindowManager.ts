@@ -1,9 +1,22 @@
-import { BitCanvas, BLACK, WHITE } from "./BitCanvas";
-import { AppContext } from "./AppContext";
-import { drawBitmapText, measureText } from "./fontAdapter";
+import { BitCanvas, BLACK, WHITE } from "../canvas/BitCanvas";
+import { WindowContext } from "./WindowContext";
+import { drawBitmapText, measureText } from "../canvas/fontAdapter";
 import { OSEvent } from "./EventManager";
-import { SpriteRegistry } from "./SpriteRegistry";
-import { HitRegionMap } from "./HitRegion";
+import { ResourceManager } from "./ResourceManager";
+import { HitRegionMap } from "../canvas/HitRegion";
+import type { GrafPort } from "@mockintosh/quickdraw";
+import {
+  qdFillRect,
+  qdDrawRect,
+  qdDrawHLine,
+  qdDrawVLine,
+  qdInvertRect,
+  qdFillPattern,
+  qdFillRoundRect,
+  qdXorPatternRect,
+  qdSetPixel,
+} from "../canvas/qdDraw";
+import { blitSprite, fillSpriteTile } from "../canvas/SpriteManager";
 
 // ---------------------------------------------------------------------------
 // Window kind — Mac-aligned classification of every window
@@ -99,6 +112,21 @@ const CLOSE_BOX_SIZE = 11;
 const ZOOM_BOX_SIZE = 11;
 /** 16×16 per Mac spec */
 const GROW_BOX_SIZE = 16;
+
+// ---------------------------------------------------------------------------
+// Helper: wrap a GrafPort's pixel buffer in a temporary BitCanvas for
+// legacy drawing functions that still accept BitCanvas directly.
+// Both share the same Uint8Array so writes are immediately visible.
+// ---------------------------------------------------------------------------
+// TODO: Remove once we have the proper Font Manager
+function _portToBitCanvas(port: GrafPort): BitCanvas {
+  const { baseAddr, rowBytes } = port.portBits;
+  const height = (baseAddr.length / rowBytes) | 0;
+  const bc = new BitCanvas(rowBytes, height);
+  // Replace the internal pixel array with the port's (shared reference)
+  (bc as any).pixels = baseAddr;
+  return bc;
+}
 
 // ---------------------------------------------------------------------------
 // WindowManager
@@ -448,7 +476,7 @@ export class WindowManager {
     // Zoom box (right of title bar, active only)
     if (win.active && gy >= y && gy < y + TITLE_BAR_HEIGHT) {
       const zbx = x + width - 8 - ZOOM_BOX_SIZE;
-      const zby = y + (TITLE_BAR_HEIGHT - ZOOM_BOX_SIZE) / 2;
+      const zby = y + Math.floor((TITLE_BAR_HEIGHT - ZOOM_BOX_SIZE) / 2);
       if (gx >= zbx && gx < zbx + ZOOM_BOX_SIZE) {
         return "inZoom";
       }
@@ -457,7 +485,7 @@ export class WindowManager {
     // Close box (left of title bar, active only)
     if (win.active && gy >= y && gy < y + TITLE_BAR_HEIGHT) {
       const bx = x + 8;
-      const by = y + (TITLE_BAR_HEIGHT - CLOSE_BOX_SIZE) / 2;
+      const by = y + Math.floor((TITLE_BAR_HEIGHT - CLOSE_BOX_SIZE) / 2);
       if (gx >= bx && gx < bx + CLOSE_BOX_SIZE) {
         return "inGoAway";
       }
@@ -558,11 +586,11 @@ export class WindowManager {
     };
   }
 
-  createAppContext(
-    canvas: BitCanvas,
+  createWindowContext(
+    port: GrafPort,
     win: WindowState,
     hitRegions?: HitRegionMap
-  ): AppContext {
+  ): WindowContext {
     const r = this.getContentRect(win);
     const onStartResize = (
       startX: number,
@@ -581,11 +609,10 @@ export class WindowManager {
       };
     };
     const inset = win.contentTopInset ?? 0;
-    // When there's a content top inset, main context has no scroll so the fixed strip stays put (no vertical or horizontal scroll); real scroll is used in drawScrollableContent.
     const mainScrollY = inset > 0 ? 0 : win.scrollY;
     const mainScrollX = inset > 0 ? 0 : win.scrollX;
-    return new AppContext(
-      canvas,
+    return new WindowContext(
+      port,
       r.x,
       r.y,
       r.w,
@@ -817,9 +844,9 @@ export class WindowManager {
   // ---------------------------------------------------------------------------
 
   drawWindowChrome(
-    canvas: BitCanvas,
+    port: GrafPort,
     win: WindowState,
-    sprites: SpriteRegistry,
+    sprites: ResourceManager,
     hitRegions: HitRegionMap,
     callbacks: {
       onClose: (id: string) => void;
@@ -829,6 +856,27 @@ export class WindowManager {
       scheduleRender: () => void;
     }
   ) {
+    const fillR = (x: number, y: number, w: number, h: number, color: number) =>
+      qdFillRect(port, x, y, w, h, color);
+    const drawR = (
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      color: number = BLACK
+    ) => qdDrawRect(port, x, y, w, h, color);
+    const hLine = (x: number, y: number, w: number, color: number = BLACK) =>
+      qdDrawHLine(port, x, y, w, color);
+    const vLine = (x: number, y: number, h: number, color: number = BLACK) =>
+      qdDrawVLine(port, x, y, h, color);
+    const fillPat = (x: number, y: number, w: number, h: number, pat: any) =>
+      qdFillPattern(port, x, y, w, h, pat);
+    const invertR = (x: number, y: number, w: number, h: number) =>
+      qdInvertRect(port, x, y, w, h);
+    const blitS = (sprite: any, x: number, y: number) =>
+      blitSprite(port, sprite, x, y);
+    const drawTxt = (text: string, x: number, y: number, opts: any) =>
+      drawBitmapText(_portToBitCanvas(port), text, x, y, opts);
     const hasModal = this.hasModalWindow();
     const interactionBlocked = hasModal && !win.modal;
 
@@ -967,29 +1015,17 @@ export class WindowManager {
     // --- Draw visuals ---
 
     // Drop shadow
-    canvas.fillRect(
-      x + SHADOW_SIZE,
-      y + totalHeight,
-      width,
-      SHADOW_SIZE,
-      BLACK
-    );
-    canvas.fillRect(
-      x + width,
-      y + SHADOW_SIZE,
-      SHADOW_SIZE,
-      totalHeight,
-      BLACK
-    );
+    fillR(x + SHADOW_SIZE, y + totalHeight, width, SHADOW_SIZE, BLACK);
+    fillR(x + width, y + SHADOW_SIZE, SHADOW_SIZE, totalHeight, BLACK);
 
     // Window background
-    canvas.fillRect(x, y, width, totalHeight, WHITE);
+    fillR(x, y, width, totalHeight, WHITE);
 
     // Border
-    canvas.drawRect(x, y, width, totalHeight, BLACK);
+    drawR(x, y, width, totalHeight, BLACK);
 
     // Title bar bottom border
-    canvas.drawHLine(x, y + TITLE_BAR_HEIGHT - 1, width, BLACK);
+    hLine(x, y + TITLE_BAR_HEIGHT - 1, width, BLACK);
 
     // Title text
     const titleW = measureText(title, "ChiKareGo");
@@ -999,28 +1035,29 @@ export class WindowManager {
     if (active) {
       const stripeTop = y + 4;
       const stripeH = 11;
-      canvas.fillPattern(x + 1, stripeTop, width - 2, stripeH, "stripes");
+
+      // Draw exactly 6 black stripes (alternating rows) anchored to stripeTop,
+      // not to screen coordinates — so the count is consistent regardless of
+      // window position.
+      fillR(x + 1, stripeTop, width - 2, stripeH, WHITE);
+      for (let i = 0; i < stripeH; i += 2) {
+        hLine(x + 1, stripeTop + i, width - 2, BLACK);
+      }
 
       // --- Close box ---
       const bx = x + 8;
-      const by = y + (TITLE_BAR_HEIGHT - CLOSE_BOX_SIZE) / 2;
-      // White clearing pad so sprite sits cleanly against title bar stripes
-      canvas.fillRect(
-        bx - 1,
-        by - 1,
-        CLOSE_BOX_SIZE + 2,
-        CLOSE_BOX_SIZE + 2,
-        WHITE
-      );
+      const by = y + Math.floor((TITLE_BAR_HEIGHT - CLOSE_BOX_SIZE) / 2);
 
       const isClosePressed = this.closeBoxPressed === win.id;
       const closeSprite = sprites.get(
         isClosePressed ? "chrome/closing" : "chrome/close"
       );
+      // White border clears the stripes behind the box; the sprite fills on top
+      fillR(bx - 1, by - 1, CLOSE_BOX_SIZE + 2, CLOSE_BOX_SIZE + 2, WHITE);
       if (closeSprite) {
-        canvas.blit(closeSprite, bx, by);
+        blitS(closeSprite, bx, by);
       } else {
-        canvas.drawRect(bx, by, CLOSE_BOX_SIZE, CLOSE_BOX_SIZE, BLACK);
+        drawR(bx, by, CLOSE_BOX_SIZE, CLOSE_BOX_SIZE, BLACK);
       }
 
       if (!interactionBlocked) {
@@ -1046,30 +1083,20 @@ export class WindowManager {
 
       // --- Zoom box (right side of title bar) ---
       const zbx = x + width - 8 - ZOOM_BOX_SIZE;
-      const zby = y + (TITLE_BAR_HEIGHT - ZOOM_BOX_SIZE) / 2;
+      const zby = y + Math.floor((TITLE_BAR_HEIGHT - ZOOM_BOX_SIZE) / 2);
       const isZoomPressed = this.zoomBoxPressed === win.id;
 
-      canvas.fillRect(
-        zbx - 1,
-        zby - 1,
-        ZOOM_BOX_SIZE + 2,
-        ZOOM_BOX_SIZE + 2,
-        WHITE
-      );
       const zoomSprite = sprites.get("chrome/zoom");
+      // White border clears the stripes behind the box; the sprite fills on top
+      fillR(zbx - 1, zby - 1, ZOOM_BOX_SIZE + 2, ZOOM_BOX_SIZE + 2, WHITE);
       if (zoomSprite) {
-        canvas.blit(zoomSprite, zbx, zby);
+        blitS(zoomSprite, zbx, zby);
       } else {
-        canvas.drawRect(zbx, zby, ZOOM_BOX_SIZE, ZOOM_BOX_SIZE, BLACK);
+        drawR(zbx, zby, ZOOM_BOX_SIZE, ZOOM_BOX_SIZE, BLACK);
       }
 
       if (isZoomPressed) {
-        canvas.invertRect(
-          zbx + 1,
-          zby + 1,
-          ZOOM_BOX_SIZE - 2,
-          ZOOM_BOX_SIZE - 2
-        );
+        invertR(zbx + 1, zby + 1, ZOOM_BOX_SIZE - 2, ZOOM_BOX_SIZE - 2);
       }
 
       if (!interactionBlocked) {
@@ -1097,34 +1124,28 @@ export class WindowManager {
         });
       }
 
-      canvas.fillRect(
-        titleX - 4,
-        y + 1,
-        titleW + 8,
-        TITLE_BAR_HEIGHT - 2,
-        WHITE
-      );
+      fillR(titleX - 4, y + 1, titleW + 8, TITLE_BAR_HEIGHT - 2, WHITE);
     }
 
-    drawBitmapText(canvas, title, titleX, titleY, {
+    drawTxt(title, titleX, titleY, {
       font: "ChiKareGo",
       color: BLACK,
     });
 
     // Info bar
     if (win.infoBar) {
-      this._drawInfoBar(canvas, win);
+      this._drawInfoBar(port, win);
     }
 
     // Vertical scrollbar
     if (win.scrollable) {
-      this._drawScrollbar(canvas, win, sprites, hitRegions, callbacks);
+      this._drawScrollbar(port, win, sprites, hitRegions, callbacks);
     }
 
     // Horizontal scrollbar + grow box
     if (win.resizable) {
-      this._drawHScrollbar(canvas, win, sprites, hitRegions, callbacks);
-      this._drawGrowBox(canvas, win, sprites, hitRegions, callbacks);
+      this._drawHScrollbar(port, win, sprites, hitRegions, callbacks);
+      this._drawGrowBox(port, win, sprites, hitRegions, callbacks);
     }
   }
 
@@ -1135,11 +1156,11 @@ export class WindowManager {
    * outline is always visible regardless of what is underneath (checkerboard,
    * white, black) — any pixel touched is guaranteed to change, and drawing
    * twice restores the original pixels exactly. */
-  drawDragOutline(canvas: BitCanvas) {
+  drawDragOutline(port: GrafPort) {
     const outline = this.getDragOutline();
     if (!outline) return;
-
-    canvas.xorPatternRect(
+    qdXorPatternRect(
+      port,
       outline.x,
       outline.y,
       outline.width,
@@ -1148,24 +1169,25 @@ export class WindowManager {
     );
   }
 
-  private _drawInfoBar(canvas: BitCanvas, win: WindowState) {
+  private _drawInfoBar(port: GrafPort, win: WindowState) {
     const { x, y, width } = win;
     const infoY = y + TITLE_BAR_HEIGHT;
     const items = win.infoBar!;
 
-    canvas.drawHLine(x, infoY + INFO_BAR_HEIGHT - 1, width, BLACK);
+    qdDrawHLine(port, x, infoY + INFO_BAR_HEIGHT - 1, width, BLACK);
 
     if (items.length > 0) {
       const colW = Math.floor((width - 2) / items.length);
       for (let i = 0; i < items.length; i++) {
         const tw = measureText(items[i], "Geneva9");
         const tx = x + 1 + i * colW + Math.floor((colW - tw) / 2);
-        drawBitmapText(canvas, items[i], tx, infoY + 4, {
+        drawBitmapText(_portToBitCanvas(port), items[i], tx, infoY + 4, {
           font: "Geneva9",
           color: BLACK,
         });
         if (i < items.length - 1) {
-          canvas.drawVLine(
+          qdDrawVLine(
+            port,
             x + 1 + (i + 1) * colW,
             infoY,
             INFO_BAR_HEIGHT - 1,
@@ -1177,36 +1199,30 @@ export class WindowManager {
   }
 
   private _drawScrollbar(
-    canvas: BitCanvas,
+    port: GrafPort,
     win: WindowState,
-    sprites: SpriteRegistry,
+    sprites: ResourceManager,
     hitRegions: HitRegionMap,
     callbacks: { scheduleRender: () => void }
   ) {
     const headerH = this._headerHeight(win);
-    const bodyH = this._bodyHeight(win);
-    const inset = win.contentTopInset ?? 0;
     const scrollableBodyH = this._scrollableBodyHeight(win);
+    const inset = win.contentTopInset ?? 0;
 
-    // Right edge of scrollbar sits on the window's right border (1px overlap).
-    // Top starts below the content top inset (Mac convention: -1 overlap).
     const sbx = win.x + win.width - SCROLLBAR_WIDTH;
     const sby = win.y + headerH + inset - 1;
     const needsScroll = win.contentHeight > scrollableBodyH;
 
-    // When there's a content top inset, fill the scrollbar column in the fixed strip so the fixed area is full width (no gap).
     if (inset > 0) {
-      canvas.fillRect(sbx, win.y + headerH, SCROLLBAR_WIDTH, inset, WHITE);
+      qdFillRect(port, sbx, win.y + headerH, SCROLLBAR_WIDTH, inset, WHITE);
     }
 
-    // Arrow sprites are 16×16; their outer border overlaps the window border
     const upSprite = sprites.get("chrome/up");
-    if (upSprite) canvas.blit(upSprite, sbx, sby);
+    if (upSprite) blitSprite(port, upSprite, sbx, sby);
 
-    // Down arrow: at bottom of scrollable region
     const downTop = sby + scrollableBodyH - SCROLLBAR_WIDTH + 1;
     const downSprite = sprites.get("chrome/down");
-    if (downSprite) canvas.blit(downSprite, sbx, downTop);
+    if (downSprite) blitSprite(port, downSprite, sbx, downTop);
 
     const trackTop = sby + SCROLLBAR_WIDTH;
     const trackHeight = downTop - trackTop;
@@ -1236,19 +1252,20 @@ export class WindowManager {
       },
     });
 
-    // Track (starts at sbx so it meets the dividing line with no gap; line is drawn last on top of column sbx)
     if (needsScroll) {
       const trackSprite = sprites.get("scrollbar-bg");
       if (trackSprite) {
-        canvas.fillSpriteTile(
+        fillSpriteTile(
+          port,
+          trackSprite,
           sbx,
           trackTop,
           SCROLLBAR_WIDTH,
-          trackHeight,
-          trackSprite
+          trackHeight
         );
       } else {
-        canvas.fillPattern(
+        qdFillPattern(
+          port,
           sbx,
           trackTop,
           SCROLLBAR_WIDTH,
@@ -1256,8 +1273,13 @@ export class WindowManager {
           "gray50"
         );
       }
-      // Right border line (the scrollbar overlaps the window border, so we redraw it)
-      canvas.drawVLine(sbx + SCROLLBAR_WIDTH - 1, trackTop, trackHeight, BLACK);
+      qdDrawVLine(
+        port,
+        sbx + SCROLLBAR_WIDTH - 1,
+        trackTop,
+        trackHeight,
+        BLACK
+      );
 
       const maxScroll = win.contentHeight - scrollableBodyH;
       const thumbH = Math.max(
@@ -1267,8 +1289,8 @@ export class WindowManager {
       const thumbY =
         trackTop +
         Math.floor((win.scrollY / maxScroll) * (trackHeight - thumbH));
-      canvas.fillRect(sbx + 1, thumbY, SCROLLBAR_WIDTH - 2, thumbH, WHITE);
-      canvas.drawRect(sbx + 1, thumbY, SCROLLBAR_WIDTH - 2, thumbH, BLACK);
+      qdFillRect(port, sbx + 1, thumbY, SCROLLBAR_WIDTH - 2, thumbH, WHITE);
+      qdDrawRect(port, sbx + 1, thumbY, SCROLLBAR_WIDTH - 2, thumbH, BLACK);
 
       hitRegions.add({
         id: `win-scroll-track-${win.id}`,
@@ -1285,26 +1307,29 @@ export class WindowManager {
         },
       });
     } else {
-      canvas.fillRect(sbx, trackTop, SCROLLBAR_WIDTH, trackHeight, WHITE);
-      canvas.drawVLine(sbx + SCROLLBAR_WIDTH - 1, trackTop, trackHeight, BLACK);
+      qdFillRect(port, sbx, trackTop, SCROLLBAR_WIDTH, trackHeight, WHITE);
+      qdDrawVLine(
+        port,
+        sbx + SCROLLBAR_WIDTH - 1,
+        trackTop,
+        trackHeight,
+        BLACK
+      );
     }
 
-    // Dividing line drawn last so it sits on top of scrollbar (arrows/track can have a white left column that would otherwise leave a 1px gap).
-    canvas.drawVLine(sbx, win.y + headerH + inset, scrollableBodyH, BLACK);
+    qdDrawVLine(port, sbx, win.y + headerH + inset, scrollableBodyH, BLACK);
   }
 
   private _drawHScrollbar(
-    canvas: BitCanvas,
+    port: GrafPort,
     win: WindowState,
-    sprites: SpriteRegistry,
+    sprites: ResourceManager,
     hitRegions: HitRegionMap,
     callbacks: { scheduleRender: () => void }
   ) {
     const headerH = this._headerHeight(win);
     const bodyH = this._bodyHeight(win);
 
-    // H-scrollbar top edge sits at the first row below the content area.
-    // Its bottom edge overlaps the window's bottom border (1px overlap).
     const hsby = win.y + headerH + bodyH;
     const hsbx = win.x;
     const hsbw = win.width - GROW_BOX_SIZE;
@@ -1312,16 +1337,14 @@ export class WindowManager {
     const contentW = win.width - 1 - sbW;
     const needsScroll = win.contentWidth > contentW;
 
-    // Horizontal dividing line between content and h-scrollbar (the top edge of the bar)
-    canvas.drawHLine(win.x, hsby, win.width - GROW_BOX_SIZE, BLACK);
+    qdDrawHLine(port, win.x, hsby, win.width - GROW_BOX_SIZE, BLACK);
 
-    // Arrow sprites are 16×16
     const leftSprite = sprites.get("chrome/left");
-    if (leftSprite) canvas.blit(leftSprite, hsbx, hsby);
+    if (leftSprite) blitSprite(port, leftSprite, hsbx, hsby);
 
     const rightLeft = hsbx + hsbw - SCROLLBAR_WIDTH + 1;
     const rightSprite = sprites.get("chrome/right");
-    if (rightSprite) canvas.blit(rightSprite, rightLeft, hsby);
+    if (rightSprite) blitSprite(port, rightSprite, rightLeft, hsby);
 
     const trackLeft = hsbx + SCROLLBAR_WIDTH;
     const trackWidth = rightLeft - trackLeft;
@@ -1354,15 +1377,17 @@ export class WindowManager {
     if (needsScroll) {
       const trackSprite = sprites.get("scrollbar-bg");
       if (trackSprite) {
-        canvas.fillSpriteTile(
+        fillSpriteTile(
+          port,
+          trackSprite,
           trackLeft,
           hsby + 1,
           trackWidth,
-          SCROLLBAR_WIDTH - 2,
-          trackSprite
+          SCROLLBAR_WIDTH - 2
         );
       } else {
-        canvas.fillPattern(
+        qdFillPattern(
+          port,
           trackLeft,
           hsby + 1,
           trackWidth,
@@ -1379,8 +1404,8 @@ export class WindowManager {
       const thumbX =
         trackLeft +
         Math.floor((win.scrollX / maxScrollX) * (trackWidth - thumbW));
-      canvas.fillRect(thumbX, hsby + 1, thumbW, SCROLLBAR_WIDTH - 2, WHITE);
-      canvas.drawRect(thumbX, hsby + 1, thumbW, SCROLLBAR_WIDTH - 2, BLACK);
+      qdFillRect(port, thumbX, hsby + 1, thumbW, SCROLLBAR_WIDTH - 2, WHITE);
+      qdDrawRect(port, thumbX, hsby + 1, thumbW, SCROLLBAR_WIDTH - 2, BLACK);
 
       hitRegions.add({
         id: `win-hscroll-track-${win.id}`,
@@ -1397,7 +1422,8 @@ export class WindowManager {
         },
       });
     } else {
-      canvas.fillRect(
+      qdFillRect(
+        port,
         trackLeft,
         hsby + 1,
         trackWidth,
@@ -1408,24 +1434,23 @@ export class WindowManager {
   }
 
   private _drawGrowBox(
-    canvas: BitCanvas,
+    port: GrafPort,
     win: WindowState,
-    sprites: SpriteRegistry,
+    sprites: ResourceManager,
     hitRegions: HitRegionMap,
     _callbacks: { scheduleRender: () => void }
   ) {
     const headerH = this._headerHeight(win);
-    // Grow box is 16×16, bottom-right corner; outer edge overlaps window borders
     const gbx = win.x + win.width - GROW_BOX_SIZE;
     const gby = win.y + headerH + win.height - GROW_BOX_SIZE;
 
     const resizeSprite = sprites.get("chrome/resize");
     if (resizeSprite) {
-      canvas.blit(resizeSprite, gbx, gby);
+      blitSprite(port, resizeSprite, gbx, gby);
     } else {
-      canvas.fillRect(gbx, gby, GROW_BOX_SIZE, GROW_BOX_SIZE, WHITE);
-      canvas.drawHLine(gbx, gby, GROW_BOX_SIZE, BLACK);
-      canvas.drawVLine(gbx, gby, GROW_BOX_SIZE, BLACK);
+      qdFillRect(port, gbx, gby, GROW_BOX_SIZE, GROW_BOX_SIZE, WHITE);
+      qdDrawHLine(port, gbx, gby, GROW_BOX_SIZE, BLACK);
+      qdDrawVLine(port, gbx, gby, GROW_BOX_SIZE, BLACK);
     }
 
     hitRegions.add({

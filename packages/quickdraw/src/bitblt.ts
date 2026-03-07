@@ -1,17 +1,27 @@
-// BitBlt — the core raster engine.
-// Implements all 16 QuickDraw transfer modes operating on 1-bpp pixel buffers.
-// Matches the behaviour described in reference/QuickDraw/BitBlt.a.
-//
-// All pixel buffers use 1 byte per pixel (0 = white, 1 = black).
+/**
+ * BitBlt — the core 1-bpp raster engine.
+ *
+ * Implements all 16 QuickDraw transfer modes operating on flat pixel buffers
+ * (1 byte per pixel, `0`=white, `1`=black).  Matches the behaviour described
+ * in `reference/QuickDraw/BitBlt.a`.
+ *
+ * Internal helper functions (`drawRectToPort`, `drawHSpan`, `drawPixelToPort`)
+ * are used by all shape-drawing modules.  `BitBlt` itself is the low-level
+ * block transfer used by {@link CopyBits}.
+ */
 
 import { BitMap, Pattern, Rect, GrafPort, RgnHandle } from "./types";
 import { globals } from "./globals";
 
-// -------------------------------------------------------------------------
-// Pattern sampling (8-byte packed pattern → 1-bit pixel)
-// The original Pattern is a PACKED ARRAY[0..7] OF 0..255.
-// Bit 7 of each byte is the leftmost pixel.
-// -------------------------------------------------------------------------
+/**
+ * Sample a single pixel from an 8-byte packed pattern at screen position
+ * `(x, y)`.  The pattern tiles with period 8 in both axes.
+ *
+ * The original Pattern is `PACKED ARRAY[0..7] OF 0..255`: bit 7 of each byte
+ * is the leftmost pixel.
+ *
+ * @returns `1` (black) or `0` (white).
+ */
 
 export function samplePattern(pat: Pattern, x: number, y: number): number {
   const row = pat[y & 7];
@@ -107,7 +117,13 @@ function intersectClip(
   return { left, top, right, bottom };
 }
 
-// Test whether a point is inside a region (handles complex scanline regions)
+/**
+ * Test whether pixel `(h, v)` lies inside region `rgn`.
+ *
+ * For rectangular regions (no scanlines) a simple bounding-box test is used.
+ * For complex regions the scanline inversion-point list is consulted: a pixel
+ * is inside if the count of `xs[i] <= h` on that row is **odd**.
+ */
 export function pointInRegion(rgn: RgnHandle, h: number, v: number): boolean {
   const r = rgn.rgn;
   if (
@@ -136,11 +152,22 @@ export function pointInRegion(rgn: RgnHandle, h: number, v: number): boolean {
   return false;
 }
 
-// -------------------------------------------------------------------------
-// Core BitBlt
-// Transfers from srcBits[srcRect] → dstBits[dstRect] using mode + pattern.
-// No clipping — callers are responsible for clipping before calling.
-// -------------------------------------------------------------------------
+/**
+ * Low-level block transfer: copy/combine pixels from `srcBits[srcRect]`
+ * to `dstBits[dstRect]` using the given transfer `mode` and `pat`.
+ *
+ * When `mode >= 8` the source pixels are ignored and `pat` is sampled at
+ * each destination coordinate instead (pattern modes).
+ *
+ * **No clipping is performed** — callers must clip rectangles before calling.
+ *
+ * @param srcBits  Source bitmap.
+ * @param dstBits  Destination bitmap (may be the same as srcBits for self-copy).
+ * @param srcRect  Source rectangle in `srcBits` coordinate space.
+ * @param dstRect  Destination rectangle in `dstBits` coordinate space.
+ * @param mode     QuickDraw transfer mode (0–15).
+ * @param pat      Pattern used for modes 8–15; ignored for modes 0–7.
+ */
 
 export function BitBlt(
   srcBits: BitMap,
@@ -182,9 +209,10 @@ export function BitBlt(
   }
 }
 
-// -------------------------------------------------------------------------
-// DrawPixel — write a single pixel to thePort with clipping + mode
-// -------------------------------------------------------------------------
+/**
+ * Write a single pixel to the current port at `(x, y)` using the port's pen
+ * pattern and mode, respecting visRgn / clipRgn / portRect clipping.
+ */
 
 export function drawPixelToPort(x: number, y: number, port: GrafPort): void {
   // Check clip
@@ -213,10 +241,19 @@ export function drawPixelToPort(x: number, y: number, port: GrafPort): void {
   port.portBits.baseAddr[idx] = applyMode(mode, patPx, dst) & 1;
 }
 
-// -------------------------------------------------------------------------
-// DrawRect — fill/frame a rectangle into the port's pixel buffer
-// Used by StdRect and all rect drawing routines.
-// -------------------------------------------------------------------------
+/**
+ * Fill or frame a rectangle into the current port's pixel buffer, applying
+ * clipping (visRgn, clipRgn, portRect) and the given transfer mode.
+ *
+ * Used internally by `StdRect` and all other rectangle-drawing code.  If
+ * the port has a complex clip region the per-pixel `pointInRegion` check is
+ * applied; for rectangular clips a fast bounding-box path is used.
+ *
+ * @param left, top, right, bottom  Rectangle to fill (local port coordinates).
+ * @param pat   Pattern to tile across the rectangle.
+ * @param mode  QuickDraw transfer mode.
+ * @param port  The port to draw into.
+ */
 
 export function drawRectToPort(
   left: number,
@@ -250,9 +287,11 @@ export function drawRectToPort(
   }
 }
 
-// -------------------------------------------------------------------------
-// DrawHSpan — draw a single horizontal span (used by shape scanline fillers)
-// -------------------------------------------------------------------------
+/**
+ * Draw a single horizontal span from `x0` (inclusive) to `x1` (exclusive)
+ * at row `y` into the current port.  Used by scanline-fill rasterizers
+ * (ovals, arcs, regions, polygons).
+ */
 
 export function drawHSpan(
   x0: number,
@@ -265,9 +304,10 @@ export function drawHSpan(
   drawRectToPort(x0, y, x1, y + 1, pat, mode, port);
 }
 
-// -------------------------------------------------------------------------
-// SetPixel in a BitMap at (h, v) with per-pixel colour
-// -------------------------------------------------------------------------
+/**
+ * Set pixel `(h, v)` in bitmap `bm` to `color` (0 or 1).
+ * Performs bounds checking; out-of-bounds writes are silently ignored.
+ */
 
 export function bmSetPixel(
   bm: BitMap,
@@ -286,6 +326,10 @@ export function bmSetPixel(
   if (idx >= 0 && idx < bm.baseAddr.length) bm.baseAddr[idx] = color & 1;
 }
 
+/**
+ * Read the pixel value at `(h, v)` from bitmap `bm`.
+ * Returns `0` for out-of-bounds reads.
+ */
 export function bmGetPixel(bm: BitMap, h: number, v: number): number {
   if (
     v < bm.bounds.top ||

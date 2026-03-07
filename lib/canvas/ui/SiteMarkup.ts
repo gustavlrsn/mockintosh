@@ -1,7 +1,7 @@
-import { AppContext } from "../AppContext";
+import { WindowContext } from "../../toolbox/WindowContext";
 import { Sprite, BLACK, WHITE } from "../BitCanvas";
 import { FontName, measureText, getLineHeight } from "../fontAdapter";
-import { SpriteRegistry } from "../SpriteRegistry";
+import { ResourceManager } from "../../toolbox/ResourceManager";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,7 +47,7 @@ interface RenderOptions {
   startY: number;
   width: number;
   margin?: number;
-  sprites?: SpriteRegistry;
+  sprites?: ResourceManager;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +296,7 @@ function alignedX(
 // ---------------------------------------------------------------------------
 
 export function renderSiteNodes(
-  ctx: AppContext,
+  ctx: WindowContext,
   nodes: LayoutNode[],
   opts: RenderOptions
 ): RenderResult {
@@ -420,7 +420,7 @@ export function measureSiteNodes(
   nodes: LayoutNode[],
   width: number,
   margin: number = 8,
-  sprites?: SpriteRegistry
+  sprites?: ResourceManager
 ): number {
   const contentWidth = width - margin * 2;
   let y = 0;

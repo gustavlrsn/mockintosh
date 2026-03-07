@@ -6,7 +6,7 @@
 import {
   App,
   AppBuilder,
-  AppContext,
+  WindowContext,
   AppProps,
   Sprite,
   fromGrid,
@@ -75,7 +75,7 @@ const TodoApp: App = {
   resizable: true,
   minSize: { width: 160, height: 120 },
 
-  render(app: AppBuilder, ctx: AppContext, props: AppProps) {
+  render(app: AppBuilder, ctx: WindowContext, props: AppProps) {
     const [todos, setTodos] = app.useState<TodoItem[]>([]);
     const [input] = app.useState<TextInputState>({
       value: "",

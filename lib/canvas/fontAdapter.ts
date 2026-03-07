@@ -218,6 +218,72 @@ export function drawBitmapText(
   }
 }
 
+// --- Font Drawing into a raw pixel buffer ---
+
+/**
+ * Draw bitmap text directly into a 1-bit pixel buffer (1 byte per pixel).
+ * Used by the QuickDraw font injection bridge.
+ */
+export function drawBitmapTextToPixels(
+  pixels: Uint8Array,
+  rowBytes: number,
+  clipLeft: number,
+  clipTop: number,
+  clipRight: number,
+  clipBottom: number,
+  text: string,
+  x: number,
+  y: number,
+  font: FontName,
+  color: number
+): void {
+  if (!text) return;
+  const fontData = PixelFontCanvas.fonts[font];
+  const cache = glyphCache.get(font);
+  if (!fontData || !cache) return;
+
+  let cx = x;
+  let prevCharCode: number | null = null;
+
+  for (let i = 0; i < text.length; i++) {
+    const charCode = text.charCodeAt(i);
+    const charData = fontData.chars[charCode];
+    if (!charData) continue;
+
+    if (prevCharCode && charData.kerning[prevCharCode]) {
+      cx += charData.kerning[prevCharCode];
+    }
+
+    const glyph = cache.get(charCode);
+    if (glyph) {
+      const gx = (cx + charData.xOffset) | 0;
+      const gy = (y + charData.yOffset) | 0;
+      const { width: gw, height: gh, data } = glyph;
+
+      const x0 = Math.max(0, clipLeft - gx);
+      const y0 = Math.max(0, clipTop - gy);
+      const x1 = Math.min(gw, clipRight - gx);
+      const y1 = Math.min(gh, clipBottom - gy);
+
+      for (let gy2 = y0; gy2 < y1; gy2++) {
+        const ty = gy + gy2;
+        if (ty < 0) continue;
+        const srcRow = gy2 * gw;
+        const dstRow = ty * rowBytes;
+        for (let gx2 = x0; gx2 < x1; gx2++) {
+          if (data[srcRow + gx2]) {
+            const tx = gx + gx2;
+            if (tx >= 0) pixels[dstRow + tx] = color;
+          }
+        }
+      }
+    }
+
+    cx += charData.xAdvance;
+    prevCharCode = charCode;
+  }
+}
+
 // --- Font Loading ---
 
 export function loadFonts(): Promise<void> {

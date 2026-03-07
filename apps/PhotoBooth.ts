@@ -1,10 +1,10 @@
 import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { OSEvent } from "../lib/canvas/EventManager";
+import { OSEvent } from "../lib/toolbox/EventManager";
 import { OSServices } from "../lib/canvas/OSServices";
-import { MenubarDefinition } from "../lib/canvas/ui/drawMenubar";
+import { MenubarDefinition } from "../lib/toolbox/MenuManager";
 
 const WIDTH = 288;
 const HEIGHT = 288;
@@ -157,7 +157,7 @@ export const PhotoBoothApp: SystemApp = {
   defaultSize: { width: WIDTH, height: HEIGHT + 40 },
   scrollable: false,
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
     const os: OSServices = props._os;
     const [loading, setLoading] = app.useState(true);
     const [errorText, setErrorText] = app.useState("");

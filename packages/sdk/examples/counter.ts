@@ -5,7 +5,7 @@
 import {
   App,
   AppBuilder,
-  AppContext,
+  WindowContext,
   AppProps,
   Sprite,
   fromGrid,
@@ -58,7 +58,7 @@ const CounterApp: App = {
   icon: "counter/icon",
   defaultSize: { width: 140, height: 100 },
 
-  render(app: AppBuilder, ctx: AppContext, props: AppProps) {
+  render(app: AppBuilder, ctx: WindowContext, props: AppProps) {
     const [count, setCount] = app.useState(0);
 
     ctx.clear(WHITE);

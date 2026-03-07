@@ -1,9 +1,9 @@
 import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
-import { OSEvent } from "../lib/canvas/EventManager";
+import { ResourceManager } from "../lib/toolbox/ResourceManager";
+import { OSEvent } from "../lib/toolbox/EventManager";
 
 export const PictureApp: SystemApp = {
   id: "picture",
@@ -12,8 +12,8 @@ export const PictureApp: SystemApp = {
   defaultSize: { width: 256, height: 256 },
   scrollable: true,
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
-    const sprites: SpriteRegistry = props._sprites;
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
+    const sprites: ResourceManager = props._sprites;
     const src: string = props.src ?? "";
 
     ctx.clear(WHITE);

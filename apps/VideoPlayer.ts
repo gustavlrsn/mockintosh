@@ -1,8 +1,8 @@
 import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { OSEvent } from "../lib/canvas/EventManager";
+import { OSEvent } from "../lib/toolbox/EventManager";
 import Dither from "canvas-dither";
 
 const VIDEO_WIDTH = 340;
@@ -14,7 +14,7 @@ export const VideoPlayerApp: SystemApp = {
   defaultSize: { width: VIDEO_WIDTH, height: 260 },
   scrollable: false,
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
     const [isPlaying, setIsPlaying] = app.useState(false);
     const frameRef = app.useRef<ImageData | null>(null);
     const videoRef = app.useRef<HTMLVideoElement | null>(null);

@@ -1,12 +1,19 @@
-// Region routines — from QuickDraw.p Region Calculations +
-// Graphical Operations on Regions sections.
-// Implements the QuickDraw scanline-compressed region format.
-//
-// Region encoding:
-//   Rectangular region: rgnSize=10, rgnBBox set, scanlines=undefined/empty
-//   Complex region: scanlines = array of { y, xs }
-//     Each scanline holds sorted x-inversion points for that row.
-//     A pixel (h, v) is inside if the count of xs[i] <= h is odd.
+/**
+ * Region routines — from `QuickDraw.p` Region Calculations and Graphical
+ * Operations on Regions sections, implementing the QuickDraw scanline-
+ * compressed region format.
+ *
+ * ## Region encoding
+ * - **Rectangular region**: `rgnSize=10`, `rgnBBox` set, `scanlines` absent.
+ *   The region exactly equals its bounding box.
+ * - **Complex region**: `scanlines = [{y, xs}, …]`.  Each entry covers one
+ *   horizontal row.  A pixel `(h, v)` is inside the region if the count of
+ *   `xs[i] <= h` on that row is **odd** (even-odd / XOR rule).
+ *
+ * ## Boolean operations
+ * `SectRgn`, `UnionRgn`, `DiffRgn`, and `XorRgn` are implemented via
+ * scanline merging using the inversion-point model.
+ */
 
 import {
   Region,
@@ -72,19 +79,28 @@ function recomputeBBox(rgn: Region): void {
 // NewRgn / DisposeRgn / CopyRgn
 // -------------------------------------------------------------------------
 
-// FUNCTION NewRgn: RgnHandle;
+/**
+ * Allocate an empty region (bounding box = `{0,0,0,0}`, rectangular).
+ * `FUNCTION NewRgn: RgnHandle`.
+ */
 export function NewRgn(): RgnHandle {
   return {
     rgn: { rgnSize: 10, rgnBBox: { top: 0, left: 0, bottom: 0, right: 0 } },
   };
 }
 
-// PROCEDURE DisposeRgn(rgn: RgnHandle);
+/**
+ * Release a region handle.  In JS this is a no-op — the GC reclaims memory.
+ * `PROCEDURE DisposeRgn(rgn: RgnHandle)`.
+ */
 export function DisposeRgn(_rgn: RgnHandle): void {
   // GC handles memory in JS
 }
 
-// PROCEDURE CopyRgn(srcRgn, dstRgn: RgnHandle);
+/**
+ * Deep-copy `srcRgn` into `dstRgn`.
+ * `PROCEDURE CopyRgn(srcRgn, dstRgn: RgnHandle)`.
+ */
 export function CopyRgn(srcRgn: RgnHandle, dstRgn: RgnHandle): void {
   dstRgn.rgn = {
     rgnSize: srcRgn.rgn.rgnSize,
@@ -99,14 +115,20 @@ export function CopyRgn(srcRgn: RgnHandle, dstRgn: RgnHandle): void {
 // SetEmptyRgn / SetRectRgn / RectRgn
 // -------------------------------------------------------------------------
 
-// PROCEDURE SetEmptyRgn(rgn: RgnHandle);
+/**
+ * Set `rgn` to the empty region.
+ * `PROCEDURE SetEmptyRgn(rgn: RgnHandle)`.
+ */
 export function SetEmptyRgn(rgn: RgnHandle): void {
   rgn.rgn.rgnSize = 10;
   rgn.rgn.rgnBBox = { top: 0, left: 0, bottom: 0, right: 0 };
   rgn.rgn.scanlines = undefined;
 }
 
-// PROCEDURE SetRectRgn(rgn: RgnHandle; left, top, right, bottom: INTEGER);
+/**
+ * Set `rgn` to the rectangle described by `(left, top, right, bottom)`.
+ * `PROCEDURE SetRectRgn(rgn: RgnHandle; left, top, right, bottom: INTEGER)`.
+ */
 export function SetRectRgn(
   rgn: RgnHandle,
   left: number,
@@ -119,7 +141,10 @@ export function SetRectRgn(
   rgn.rgn.scanlines = undefined;
 }
 
-// PROCEDURE RectRgn(rgn: RgnHandle; r: Rect);
+/**
+ * Set `rgn` to the rectangle `r`.
+ * `PROCEDURE RectRgn(rgn: RgnHandle; r: Rect)`.
+ */
 export function RectRgn(rgn: RgnHandle, r: Rect): void {
   SetRectRgn(rgn, r.left, r.top, r.right, r.bottom);
 }
@@ -130,7 +155,15 @@ export function RectRgn(rgn: RgnHandle, r: Rect): void {
 // During OpenRgn, line draws record inversion points.
 // -------------------------------------------------------------------------
 
-// PROCEDURE OpenRgn;
+/**
+ * Begin recording line drawing calls into a region.
+ *
+ * While a region is open, every call to `LineTo` / `StdLine` records
+ * x-inversion points instead of (or in addition to) drawing pixels.
+ * Call {@link CloseRgn} to finalise the region.
+ *
+ * `PROCEDURE OpenRgn`.
+ */
 export function OpenRgn(): void {
   const port = globals.thePort;
   if (!port) return;
@@ -142,7 +175,16 @@ export function OpenRgn(): void {
   globals.rgnMax = 0;
 }
 
-// PROCEDURE CloseRgn(dstRgn: RgnHandle);
+/**
+ * Finish recording and store the accumulated shape into `dstRgn`.
+ *
+ * The accumulated x-inversion points (recorded since {@link OpenRgn}) are
+ * collapsed using the XOR rule: each edge crossing toggles inside/outside.
+ * The resulting scanline list is stored in `dstRgn` and the bounding box
+ * is recomputed.
+ *
+ * `PROCEDURE CloseRgn(dstRgn: RgnHandle)`.
+ */
 export function CloseRgn(dstRgn: RgnHandle): void {
   const port = globals.thePort;
   if (!port) return;
@@ -185,7 +227,10 @@ export function CloseRgn(dstRgn: RgnHandle): void {
 // Geometric transformations
 // -------------------------------------------------------------------------
 
-// PROCEDURE OffsetRgn(rgn: RgnHandle; dh, dv: INTEGER);
+/**
+ * Translate all points in `rgn` by `(dh, dv)` pixels.
+ * `PROCEDURE OffsetRgn(rgn: RgnHandle; dh, dv: INTEGER)`.
+ */
 export function OffsetRgn(rgn: RgnHandle, dh: number, dv: number): void {
   rgn.rgn.rgnBBox.top += dv;
   rgn.rgn.rgnBBox.left += dh;
@@ -199,7 +244,12 @@ export function OffsetRgn(rgn: RgnHandle, dh: number, dv: number): void {
   }
 }
 
-// PROCEDURE InsetRgn(rgn: RgnHandle; dh, dv: INTEGER);
+/**
+ * Inset (shrink) `rgn` by `dh` pixels on each horizontal side and `dv`
+ * pixels on each vertical side.  Scanlines outside the new bounding box are
+ * removed.
+ * `PROCEDURE InsetRgn(rgn: RgnHandle; dh, dv: INTEGER)`.
+ */
 export function InsetRgn(rgn: RgnHandle, dh: number, dv: number): void {
   rgn.rgn.rgnBBox.top += dv;
   rgn.rgn.rgnBBox.left += dh;
@@ -221,7 +271,10 @@ export function InsetRgn(rgn: RgnHandle, dh: number, dv: number): void {
   }
 }
 
-// PROCEDURE MapRgn(rgn: RgnHandle; fromRect, toRect: Rect);
+/**
+ * Map `rgn` from the coordinate space of `fromRect` to `toRect`.
+ * `PROCEDURE MapRgn(rgn: RgnHandle; fromRect, toRect: Rect)`.
+ */
 export function MapRgn(rgn: RgnHandle, fromRect: Rect, toRect: Rect): void {
   const fW = fromRect.right - fromRect.left;
   const fH = fromRect.bottom - fromRect.top;
@@ -250,7 +303,10 @@ export function MapRgn(rgn: RgnHandle, fromRect: Rect, toRect: Rect): void {
 // Region predicates
 // -------------------------------------------------------------------------
 
-// FUNCTION EqualRgn(rgnA, rgnB: RgnHandle): BOOLEAN;
+/**
+ * Return `true` if `rgnA` and `rgnB` describe the same pixel set.
+ * `FUNCTION EqualRgn(rgnA, rgnB: RgnHandle): BOOLEAN`.
+ */
 export function EqualRgn(rgnA: RgnHandle, rgnB: RgnHandle): boolean {
   const a = rgnA.rgn;
   const b = rgnB.rgn;
@@ -274,18 +330,29 @@ export function EqualRgn(rgnA: RgnHandle, rgnB: RgnHandle): boolean {
   return true;
 }
 
-// FUNCTION EmptyRgn(rgn: RgnHandle): BOOLEAN;
+/**
+ * Return `true` if `rgn` contains no pixels.
+ * `FUNCTION EmptyRgn(rgn: RgnHandle): BOOLEAN`.
+ */
 export function EmptyRgn(rgn: RgnHandle): boolean {
   const r = rgn.rgn.rgnBBox;
   return r.top >= r.bottom || r.left >= r.right;
 }
 
-// FUNCTION PtInRgn(pt: Point; rgn: RgnHandle): BOOLEAN;
+/**
+ * Return `true` if point `pt` lies inside `rgn`.
+ * `FUNCTION PtInRgn(pt: Point; rgn: RgnHandle): BOOLEAN`.
+ */
 export function PtInRgn(pt: Point, rgn: RgnHandle): boolean {
   return pointInRegion(rgn, pt.h, pt.v);
 }
 
-// FUNCTION RectInRgn(r: Rect; rgn: RgnHandle): BOOLEAN;
+/**
+ * Return `true` if any pixel in rect `r` is also inside `rgn`.
+ * Uses a fast bounding-box pre-check; for complex regions falls back to a
+ * per-pixel scan.
+ * `FUNCTION RectInRgn(r: Rect; rgn: RgnHandle): BOOLEAN`.
+ */
 export function RectInRgn(r: Rect, rgn: RgnHandle): boolean {
   // Quick bounding-box check
   const b = rgn.rgn.rgnBBox;
@@ -422,7 +489,10 @@ function diffInvPoints(aXs: number[], bXs: number[]): number[] {
   return result;
 }
 
-// PROCEDURE SectRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle);
+/**
+ * Store the intersection of `srcRgnA` and `srcRgnB` in `dstRgn`.
+ * `PROCEDURE SectRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle)`.
+ */
 export function SectRgn(
   srcRgnA: RgnHandle,
   srcRgnB: RgnHandle,
@@ -441,7 +511,10 @@ export function SectRgn(
   CopyRgn(h, dstRgn);
 }
 
-// PROCEDURE UnionRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle);
+/**
+ * Store the union of `srcRgnA` and `srcRgnB` in `dstRgn`.
+ * `PROCEDURE UnionRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle)`.
+ */
 export function UnionRgn(
   srcRgnA: RgnHandle,
   srcRgnB: RgnHandle,
@@ -488,7 +561,10 @@ function unionInvPoints(aXs: number[], bXs: number[]): number[] {
   return result;
 }
 
-// PROCEDURE DiffRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle);
+/**
+ * Store `srcRgnA` minus `srcRgnB` in `dstRgn` (pixels in A but not in B).
+ * `PROCEDURE DiffRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle)`.
+ */
 export function DiffRgn(
   srcRgnA: RgnHandle,
   srcRgnB: RgnHandle,
@@ -506,7 +582,11 @@ export function DiffRgn(
   CopyRgn(h, dstRgn);
 }
 
-// PROCEDURE XorRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle);
+/**
+ * Store the symmetric difference (XOR) of `srcRgnA` and `srcRgnB` in
+ * `dstRgn` (pixels in A or B but not both).
+ * `PROCEDURE XorRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle)`.
+ */
 export function XorRgn(
   srcRgnA: RgnHandle,
   srcRgnB: RgnHandle,
@@ -652,23 +732,23 @@ export function StdRgn(verb: number, rgn: RgnHandle, fillPat?: Pattern): void {
   }
 }
 
-// PROCEDURE FrameRgn(rgn: RgnHandle);
+/** Draw the outline of `rgn` using the current pen. `PROCEDURE FrameRgn`. */
 export function FrameRgn(rgn: RgnHandle): void {
   drawRegion(FRAME, rgn);
 }
-// PROCEDURE PaintRgn(rgn: RgnHandle);
+/** Fill `rgn` with the current pen pattern. `PROCEDURE PaintRgn`. */
 export function PaintRgn(rgn: RgnHandle): void {
   drawRegion(PAINT, rgn);
 }
-// PROCEDURE EraseRgn(rgn: RgnHandle);
+/** Fill `rgn` with the background pattern. `PROCEDURE EraseRgn`. */
 export function EraseRgn(rgn: RgnHandle): void {
   drawRegion(ERASE, rgn);
 }
-// PROCEDURE InvertRgn(rgn: RgnHandle);
+/** Invert every pixel inside `rgn`. `PROCEDURE InvertRgn`. */
 export function InvertRgn(rgn: RgnHandle): void {
   drawRegion(INVERT, rgn);
 }
-// PROCEDURE FillRgn(rgn: RgnHandle; pat: Pattern);
+/** Fill `rgn` with the explicit pattern `pat`. `PROCEDURE FillRgn`. */
 export function FillRgn(rgn: RgnHandle, pat: Pattern): void {
   drawRegion(FILL, rgn, pat);
 }

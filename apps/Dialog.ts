@@ -1,17 +1,17 @@
 import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { measureText } from "../lib/canvas/fontAdapter";
-import { OSEvent } from "../lib/canvas/EventManager";
-import { getWrappedLines } from "../lib/canvas/ui/TextBlock";
+import { OSEvent } from "../lib/toolbox/EventManager";
 import {
+  getWrappedLines,
   TextInputState,
   createTextInputState,
   handleTextInputKey,
   handleTextInputClick,
   handleTextInputDoubleClick,
-} from "../lib/canvas/ui/TextInput";
+} from "../lib/toolbox/TextEdit";
 
 const DIALOG_PADDING = 16;
 const LINE_HEIGHT = 16;
@@ -52,7 +52,7 @@ export const DialogApp: SystemApp = {
   scrollable: false,
   resizable: false,
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
     const { message, buttons, showInput } = props as DialogAppProps;
     const [inputState] = app.useState<TextInputState>(
       createTextInputState(props.inputDefault ?? "")

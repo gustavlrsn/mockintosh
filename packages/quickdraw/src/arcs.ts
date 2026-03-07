@@ -1,6 +1,15 @@
-// Arc, Oval, and RoundRect drawing — from QuickDraw.p
-// Implements DrawArc in TypeScript using midpoint ellipse algorithm,
-// faithfully matching the scanline approach of DrawArc.a.
+/**
+ * Arc, Oval, and RoundRect drawing — from `QuickDraw.p` and
+ * `reference/QuickDraw/DrawArc.a`.
+ *
+ * All shapes are rasterized using a midpoint ellipse algorithm that closely
+ * matches the original `DrawArc.a` "oval state record" approach.  Shapes
+ * can be drawn as outlines (FRAME) or solid fills (PAINT/ERASE/INVERT/FILL).
+ *
+ * ## Angle convention
+ * QuickDraw measures angles in degrees with **0° at 12 o'clock, increasing
+ * clockwise**.  A negative `arcAngle` sweeps counter-clockwise.
+ */
 
 import { Rect, Pattern, GrafPort, cloneRect } from "./types";
 import { globals } from "./globals";
@@ -286,10 +295,13 @@ function verbPat(
   }
 }
 
-// -------------------------------------------------------------------------
-// PtToAngle — compute angle from centre of r to pt
-// Result in degrees, QuickDraw convention (0=up, clockwise)
-// -------------------------------------------------------------------------
+/**
+ * Compute the angle in QuickDraw convention (0° = up, clockwise) from the
+ * centre of `r` to point `pt`, and store the result (rounded to the nearest
+ * degree) in `angle.value`.
+ *
+ * `PROCEDURE PtToAngle(r: Rect; pt: Point; VAR angle: INTEGER)`.
+ */
 
 export function PtToAngle(
   r: Rect,
@@ -333,15 +345,22 @@ export function StdOval(verb: number, r: Rect, fillPat?: Pattern): void {
 export function FrameOval(r: Rect): void {
   callOval(FRAME, r);
 }
+/** Fill the oval bounded by `r` with the current pen pattern. `PROCEDURE PaintOval`. */
 export function PaintOval(r: Rect): void {
   callOval(PAINT, r);
 }
+/** Fill the oval bounded by `r` with the background pattern. `PROCEDURE EraseOval`. */
 export function EraseOval(r: Rect): void {
   callOval(ERASE, r);
 }
+/** Invert every pixel inside the oval bounded by `r`. `PROCEDURE InvertOval`. */
 export function InvertOval(r: Rect): void {
   callOval(INVERT, r);
 }
+/**
+ * Fill the oval bounded by `r` with the explicit pattern `pat`.
+ * `PROCEDURE FillOval(r: Rect; pat: Pattern)`.
+ */
 export function FillOval(r: Rect, pat: Pattern): void {
   callOval(FILL, r, pat);
 }
@@ -350,6 +369,15 @@ export function FillOval(r: Rect, pat: Pattern): void {
 // ARC routines
 // -------------------------------------------------------------------------
 
+/**
+ * Draw the outline of an arc of the oval bounded by `r`.
+ *
+ * `startAngle` is the starting angle in degrees (0° = 12 o'clock,
+ * clockwise).  `arcAngle` is the sweep in degrees; negative values sweep
+ * counter-clockwise.
+ *
+ * `PROCEDURE FrameArc(r: Rect; startAngle, arcAngle: INTEGER)`.
+ */
 function callArc(
   verb: number,
   r: Rect,
@@ -392,15 +420,19 @@ export function StdArc(
 export function FrameArc(r: Rect, startAngle: number, arcAngle: number): void {
   callArc(FRAME, r, startAngle, arcAngle);
 }
+/** Fill an arc sector with the current pen pattern. `PROCEDURE PaintArc`. */
 export function PaintArc(r: Rect, startAngle: number, arcAngle: number): void {
   callArc(PAINT, r, startAngle, arcAngle);
 }
+/** Fill an arc sector with the background pattern. `PROCEDURE EraseArc`. */
 export function EraseArc(r: Rect, startAngle: number, arcAngle: number): void {
   callArc(ERASE, r, startAngle, arcAngle);
 }
+/** Invert every pixel inside an arc sector. `PROCEDURE InvertArc`. */
 export function InvertArc(r: Rect, startAngle: number, arcAngle: number): void {
   callArc(INVERT, r, startAngle, arcAngle);
 }
+/** Fill an arc sector with an explicit pattern. `PROCEDURE FillArc`. */
 export function FillArc(
   r: Rect,
   startAngle: number,
@@ -631,6 +663,13 @@ function callRRect(
   StdRRect(verb, r, ovWd, ovHt, fillPat);
 }
 
+/**
+ * Default RoundRect rasterizer.  Called by the `Frame/Paint/…RoundRect`
+ * family (or directly when bypassing the bottleneck).
+ *
+ * @param ovWd  Corner oval width (total diameter, not radius).
+ * @param ovHt  Corner oval height.
+ */
 export function StdRRect(
   verb: number,
   r: Rect,
@@ -648,18 +687,23 @@ export function StdRRect(
   fillRoundRectImpl(r, ovWd, ovHt, pat, mode, port);
 }
 
+/** Draw the outline of a round-cornered rectangle. `PROCEDURE FrameRoundRect`. */
 export function FrameRoundRect(r: Rect, ovWd: number, ovHt: number): void {
   callRRect(FRAME, r, ovWd, ovHt);
 }
+/** Fill a round-cornered rectangle with the current pen pattern. `PROCEDURE PaintRoundRect`. */
 export function PaintRoundRect(r: Rect, ovWd: number, ovHt: number): void {
   callRRect(PAINT, r, ovWd, ovHt);
 }
+/** Fill a round-cornered rectangle with the background pattern. `PROCEDURE EraseRoundRect`. */
 export function EraseRoundRect(r: Rect, ovWd: number, ovHt: number): void {
   callRRect(ERASE, r, ovWd, ovHt);
 }
+/** Invert every pixel inside a round-cornered rectangle. `PROCEDURE InvertRoundRect`. */
 export function InvertRoundRect(r: Rect, ovWd: number, ovHt: number): void {
   callRRect(INVERT, r, ovWd, ovHt);
 }
+/** Fill a round-cornered rectangle with an explicit pattern. `PROCEDURE FillRoundRect`. */
 export function FillRoundRect(
   r: Rect,
   ovWd: number,

@@ -1,9 +1,9 @@
 import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { WHITE } from "../lib/canvas/BitCanvas";
 import { measureTextBlock } from "../lib/canvas/ui/TextBlock";
-import { MockFS } from "../lib/canvas/fs/MockFS";
+import { FileManager } from "../lib/toolbox/FileManager";
 
 export const FileViewerApp: SystemApp = {
   id: "file",
@@ -12,8 +12,8 @@ export const FileViewerApp: SystemApp = {
   defaultSize: { width: 350, height: 200 },
   scrollable: true,
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
-    const fs: MockFS | undefined = props._fs;
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
+    const fs: FileManager | undefined = props._fs;
     const fileId: string | undefined = props.fileId;
     const [content, setContent] = app.useState<string>(props.content ?? "");
 

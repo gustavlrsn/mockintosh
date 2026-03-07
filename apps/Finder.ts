@@ -1,15 +1,22 @@
 import { MultiWindowSystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
-import { BitCanvas, BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
+import { WindowContext } from "../lib/toolbox/WindowContext";
+import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
+import type { GrafPort } from "@mockintosh/quickdraw";
+import { blitSpriteOutline } from "../lib/canvas/SpriteManager";
+import { qdDrawRect } from "../lib/canvas/qdDraw";
+import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { drawBitmapText, measureText } from "../lib/canvas/fontAdapter";
-import { OSEvent } from "../lib/canvas/EventManager";
-import { MockFS, getIconForNode, ROOT_ID } from "../lib/canvas/fs/MockFS";
-import { MenubarDefinition } from "../lib/canvas/ui/drawMenubar";
+import { OSEvent } from "../lib/toolbox/EventManager";
+import {
+  FileManager,
+  getIconForNode,
+  ROOT_ID,
+} from "../lib/toolbox/FileManager";
+import { MenubarDefinition } from "../lib/toolbox/MenuManager";
 import { OSServices } from "../lib/canvas/OSServices";
 import { HitRegionMap } from "../lib/canvas/HitRegion";
-import { SCROLLBAR_WIDTH, INFO_BAR_HEIGHT } from "../lib/canvas/WindowManager";
+import { SCROLLBAR_WIDTH, INFO_BAR_HEIGHT } from "../lib/toolbox/WindowManager";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,8 +63,8 @@ export interface IconScreenRect {
 }
 
 export interface FinderServices {
-  sprites: SpriteRegistry;
-  fs: MockFS;
+  sprites: ResourceManager;
+  fs: FileManager;
   os: OSServices;
   /** Open a filesystem node. Pass iconRect (screen coords) to trigger the
    *  zoom-open animation from the icon to the new window. */
@@ -96,7 +103,7 @@ export const DESKTOP_WINDOW_ID = "__desktop__";
 // FS → Icon helpers
 // ---------------------------------------------------------------------------
 
-function buildFolderIcons(fs: MockFS, directoryId: string): FinderIcon[] {
+function buildFolderIcons(fs: FileManager, directoryId: string): FinderIcon[] {
   const children = fs.readDir(directoryId);
   return children.map((node) => ({
     title: node.name,
@@ -107,7 +114,7 @@ function buildFolderIcons(fs: MockFS, directoryId: string): FinderIcon[] {
   }));
 }
 
-function buildDesktopIcons(fs: MockFS): FinderIcon[] {
+function buildDesktopIcons(fs: FileManager): FinderIcon[] {
   const icons: FinderIcon[] = [];
 
   const volumes = fs.readDir(ROOT_ID);
@@ -153,7 +160,7 @@ function buildDesktopIcons(fs: MockFS): FinderIcon[] {
   return icons;
 }
 
-function getDesktopFolderId(fs: MockFS): string | undefined {
+function getDesktopFolderId(fs: FileManager): string | undefined {
   const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
   if (!hd) return undefined;
   const df = fs.findByName(hd.id, "Desktop Folder");
@@ -161,7 +168,7 @@ function getDesktopFolderId(fs: MockFS): string | undefined {
 }
 
 /** Trash directory on the main volume (original Mac: root-level special folder). */
-function getTrashId(fs: MockFS): string | undefined {
+function getTrashId(fs: FileManager): string | undefined {
   const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
   if (!hd) return undefined;
   const trash = fs.findByName(hd.id, "Trash");
@@ -456,7 +463,7 @@ export const FinderApp: MultiWindowSystemApp = {
   renderWindow(
     app: AppBuilder,
     win: AppBuilder,
-    ctx: AppContext,
+    ctx: WindowContext,
     windowId: string,
     props: any
   ) {
@@ -820,14 +827,14 @@ export function finderHandleMouseUp(
 }
 
 /**
- * Render the drag ghost on the BitCanvas in screen coordinates.
+ * Render the drag ghost on the GrafPort in screen coordinates.
  * Called from main.tsx after all windows are drawn, so the ghost appears on top.
  * Draws a solid outline of the icon silhouette and a rectangle outline around
  * the label, matching the classic Mac Finder drag appearance.
  */
 export function finderRenderDragGhost(
   app: AppBuilder,
-  canvas: BitCanvas,
+  port: GrafPort,
   svc: FinderServices
 ) {
   const st = getAppState();
@@ -844,14 +851,17 @@ export function finderRenderDragGhost(
       ? DESKTOP_ICON_CELL_W
       : FOLDER_ICON_CELL_W;
   const ix = ghostX + Math.floor((cellW - ICON_SIZE) / 2);
-  canvas.blitOutline(sprite, ix, ghostY);
+
+  blitSpriteOutline(port, sprite, ix, ghostY, BLACK);
 
   const textW = measureText(drag.title, "Geneva9");
   const labelW = textW + 4;
   const labelH = 12;
   const labelX = ghostX + Math.floor((cellW - labelW) / 2);
   const labelY = ghostY + ICON_SIZE + 2;
-  canvas.drawRect(labelX, labelY, labelW, labelH, BLACK);
+  if (labelW > 0 && labelH > 0) {
+    qdDrawRect(port, labelX, labelY, labelW, labelH, BLACK);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -933,7 +943,7 @@ function findDropTargetAtScreen(
 function renderDesktopWindow(
   app: AppBuilder,
   win: AppBuilder,
-  ctx: AppContext,
+  ctx: WindowContext,
   svc: FinderServices
 ) {
   ctx.fillPattern(0, 0, ctx.width, ctx.height, "checkers");
@@ -1072,7 +1082,7 @@ function handleDesktopEvent(
 function renderFolderWindow(
   app: AppBuilder,
   win: AppBuilder,
-  ctx: AppContext,
+  ctx: WindowContext,
   _windowId: string,
   props: any,
   svc: FinderServices
@@ -1266,8 +1276,8 @@ function handleFolderEvent(
 // ---------------------------------------------------------------------------
 
 function drawIcon(
-  ctx: AppContext,
-  sprites: SpriteRegistry,
+  ctx: WindowContext,
+  sprites: ResourceManager,
   icon: FinderIcon,
   cellX: number,
   cellY: number,

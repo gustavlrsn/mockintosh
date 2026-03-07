@@ -1,4 +1,4 @@
-import { SpriteRegistry } from "./SpriteRegistry";
+import { ResourceManager } from "../toolbox/ResourceManager";
 import { AppRegistry, SystemApp } from "./AppRegistry";
 import { Sprite } from "./BitCanvas";
 
@@ -31,11 +31,11 @@ interface AppModule {
  * validates the app export, and registers the app with the AppRegistry.
  */
 export class AppLoader {
-  private spriteRegistry: SpriteRegistry;
+  private spriteRegistry: ResourceManager;
   private appRegistry: AppRegistry;
   private loaded: Set<string> = new Set();
 
-  constructor(spriteRegistry: SpriteRegistry, appRegistry: AppRegistry) {
+  constructor(spriteRegistry: ResourceManager, appRegistry: AppRegistry) {
     this.spriteRegistry = spriteRegistry;
     this.appRegistry = appRegistry;
   }
@@ -44,7 +44,7 @@ export class AppLoader {
    * Load a third-party app from a remote ESM bundle URL.
    *
    * 1. Dynamically imports the module
-   * 2. Registers any app-owned sprites into the global SpriteRegistry
+   * 2. Registers any app-owned sprites into the global ResourceManager
    * 3. Validates the default export has the required App shape
    * 4. Registers the app with AppRegistry
    *

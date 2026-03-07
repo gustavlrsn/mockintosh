@@ -1,6 +1,6 @@
 import { SystemApp, WindowSize } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { measureText, getLineHeight } from "../lib/canvas/fontAdapter";
 import {
@@ -10,9 +10,9 @@ import {
   handleTextInputDoubleClick,
   handleTextInputDrag,
   TextInputState,
-} from "../lib/canvas/ui/TextInput";
-import { OSEvent } from "../lib/canvas/EventManager";
-import { SpriteRegistry } from "../lib/canvas/SpriteRegistry";
+} from "../lib/toolbox/TextEdit";
+import { OSEvent } from "../lib/toolbox/EventManager";
+import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import {
   parseSiteMarkup,
   renderSiteNodes,
@@ -192,7 +192,7 @@ function googleSearchBarLayout(
 }
 
 function renderGooglePage(
-  ctx: AppContext,
+  ctx: WindowContext,
   contentY: number,
   w: number,
   contentH: number,
@@ -306,8 +306,8 @@ export const SafariApp: SystemApp = {
   defaultSize: { width: 384, height: 220 },
   scrollable: true,
 
-  render(app: AppBuilder, ctx: AppContext, props: any) {
-    const sprites: SpriteRegistry = props._sprites;
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
+    const sprites: ResourceManager = props._sprites;
 
     // --- Hooks (must match order in onEvent and getContentHeight) ---
     const [urlInput, setUrlInput] = app.useState<TextInputState>(
@@ -611,7 +611,7 @@ export const SafariApp: SystemApp = {
   },
 
   getContentHeight(app: AppBuilder, props: any, size: WindowSize): number {
-    const sprites: SpriteRegistry = props._sprites;
+    const sprites: ResourceManager = props._sprites;
 
     // --- Hooks (same order as render) ---
     app.useState<TextInputState>(createTextInputState("google.com"));

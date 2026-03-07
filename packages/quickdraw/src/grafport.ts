@@ -1,5 +1,12 @@
-// GrafPort routines — from QuickDraw.p GrafPort Routines section
-// and GrafAsm.a implementation.
+/**
+ * GrafPort management routines — from `QuickDraw.p` GrafPort Routines section
+ * and `GrafAsm.a` implementation.
+ *
+ * A **GrafPort** is the drawing context for all QuickDraw operations.  You
+ * must call {@link InitGraf} once at start-up (providing the screen bitmap),
+ * then {@link OpenPort} or {@link newGrafPort} to create a port and
+ * {@link SetPort} to make it current before drawing anything.
+ */
 
 import {
   GrafPort,
@@ -32,10 +39,15 @@ function copyPattern(src: Pattern): Pattern {
 // InitGraf
 // -------------------------------------------------------------------------
 
-// PROCEDURE InitGraf(globalPtr: QDPtr);
-// In our implementation, globalPtr is a QDScreen — the pixel buffer the OS
-// provides.  Everything else is initialized to the standard defaults from
-// GrafAsm.a.
+/**
+ * Initialise the QuickDraw global state.
+ *
+ * Must be called **once** at system start-up before any other QuickDraw
+ * routine.  Provides the pixel buffer the OS will use as the screen.
+ * Matches `PROCEDURE InitGraf(globalPtr: QDPtr)` from `QuickDraw.p`.
+ *
+ * @param screen  The OS-allocated framebuffer (width × height, 1 byte/pixel).
+ */
 export function InitGraf(screen: QDScreen): void {
   globals._screen = screen;
   globals.screenBits = {
@@ -51,8 +63,14 @@ export function InitGraf(screen: QDScreen): void {
 // OpenPort / InitPort / ClosePort
 // -------------------------------------------------------------------------
 
-// PROCEDURE OpenPort(port: GrafPtr);
-// Allocates fresh clip+vis regions then calls InitPort.
+/**
+ * Allocate fresh clip and vis regions for `port`, then call {@link InitPort}.
+ *
+ * `PROCEDURE OpenPort(port: GrafPtr)` from `QuickDraw.p`.
+ * The visRgn is set to the current screen bounds; clipRgn is set wide-open.
+ *
+ * @param port  An uninitialised {@link GrafPort} object to set up in place.
+ */
 export function OpenPort(port: GrafPort): void {
   const bounds = cloneRect(globals.screenBits.bounds);
   port.visRgn = makeRegion(bounds);
@@ -60,8 +78,16 @@ export function OpenPort(port: GrafPort): void {
   InitPort(port);
 }
 
-// PROCEDURE InitPort(port: GrafPtr);
-// Sets all fields to defaults matching GrafAsm.a InitPort.
+/**
+ * Reset all fields of `port` to their standard defaults and make it the
+ * current port (`globals.thePort`).
+ *
+ * `PROCEDURE InitPort(port: GrafPtr)` from `QuickDraw.p` / `GrafAsm.a`.
+ * Pen is set to 1×1 black, mode `patCopy`; text is system font, size 0;
+ * background is white; foreground is black.
+ *
+ * @param port  The port to initialise.  Existing clip/vis regions are reused.
+ */
 export function InitPort(port: GrafPort): void {
   globals.thePort = port;
 
@@ -115,8 +141,15 @@ export function InitPort(port: GrafPort): void {
   port.grafProcs = null;
 }
 
-// PROCEDURE ClosePort(port: GrafPtr);
-// Discards clipRgn and visRgn (in JS we just null them — GC handles the rest).
+/**
+ * Close a port, releasing its association with `globals.thePort`.
+ *
+ * `PROCEDURE ClosePort(port: GrafPtr)` from `QuickDraw.p`.
+ * In JS the region memory is garbage-collected; this call is mainly needed
+ * to clear `globals.thePort` when the current port is being destroyed.
+ *
+ * @param port  The port to close.
+ */
 export function ClosePort(port: GrafPort): void {
   // No-op in JS; references will be GC'd
   if (globals.thePort === port) {
@@ -128,22 +161,29 @@ export function ClosePort(port: GrafPort): void {
 // Port management
 // -------------------------------------------------------------------------
 
-// PROCEDURE SetPort(port: GrafPtr);
+/**
+ * Make `port` the current drawing port.
+ * `PROCEDURE SetPort(port: GrafPtr)`.
+ */
 export function SetPort(port: GrafPort): void {
   globals.thePort = port;
 }
 
-// PROCEDURE GetPort(VAR port: GrafPtr);
+/**
+ * Return the current drawing port.
+ * `PROCEDURE GetPort(VAR port: GrafPtr)` — returns the value rather than
+ * writing to a VAR parameter.
+ */
 export function GetPort(): GrafPort | null {
   return globals.thePort;
 }
 
-// PROCEDURE GrafDevice(device: INTEGER);
+/** Set the device number of the current port (`PROCEDURE GrafDevice`). */
 export function GrafDevice(device: number): void {
   if (globals.thePort) globals.thePort.device = device;
 }
 
-// PROCEDURE SetPortBits(bm: BitMap);
+/** Replace the current port's backing bitmap (`PROCEDURE SetPortBits`). */
 export function SetPortBits(bm: BitMap): void {
   const port = globals.thePort;
   if (!port) return;
@@ -154,7 +194,10 @@ export function SetPortBits(bm: BitMap): void {
   };
 }
 
-// PROCEDURE PortSize(width, height: INTEGER);
+/**
+ * Resize the current port's portRect to `width × height`.
+ * `PROCEDURE PortSize(width, height: INTEGER)`.
+ */
 export function PortSize(width: number, height: number): void {
   const port = globals.thePort;
   if (!port) return;
@@ -162,7 +205,11 @@ export function PortSize(width: number, height: number): void {
   port.portRect.bottom = port.portRect.top + height;
 }
 
-// PROCEDURE MovePortTo(leftGlobal, topGlobal: INTEGER);
+/**
+ * Move the current port so that its portRect's top-left maps to the
+ * global screen coordinates `(leftGlobal, topGlobal)`.
+ * `PROCEDURE MovePortTo(leftGlobal, topGlobal: INTEGER)`.
+ */
 export function MovePortTo(leftGlobal: number, topGlobal: number): void {
   const port = globals.thePort;
   if (!port) return;
@@ -174,7 +221,18 @@ export function MovePortTo(leftGlobal: number, topGlobal: number): void {
   port.portBits.bounds.right += dh;
 }
 
-// PROCEDURE SetOrigin(h, v: INTEGER);
+/**
+ * Shift the coordinate origin of the current port.
+ *
+ * After this call, local coordinate `(h, v)` maps to the pixel that used
+ * to be at `(h − oldLeft + h, v − oldTop + v)`.  The visRgn is adjusted
+ * by the same delta so clipping remains correct.
+ *
+ * `PROCEDURE SetOrigin(h, v: INTEGER)` from `QuickDraw.p`.
+ *
+ * @param h  New left edge of portRect in local coordinates.
+ * @param v  New top edge of portRect in local coordinates.
+ */
 export function SetOrigin(h: number, v: number): void {
   const port = globals.thePort;
   if (!port) return;
@@ -205,7 +263,10 @@ export function SetOrigin(h: number, v: number): void {
 // Clip management
 // -------------------------------------------------------------------------
 
-// PROCEDURE SetClip(rgn: RgnHandle);
+/**
+ * Replace the current port's clip region with a deep copy of `rgn`.
+ * `PROCEDURE SetClip(rgn: RgnHandle)`.
+ */
 export function SetClip(rgn: RgnHandle): void {
   const port = globals.thePort;
   if (!port) return;
@@ -221,7 +282,10 @@ export function SetClip(rgn: RgnHandle): void {
   };
 }
 
-// PROCEDURE GetClip(rgn: RgnHandle);
+/**
+ * Copy the current port's clip region into `rgn`.
+ * `PROCEDURE GetClip(rgn: RgnHandle)`.
+ */
 export function GetClip(rgn: RgnHandle): void {
   const port = globals.thePort;
   if (!port) return;
@@ -233,7 +297,10 @@ export function GetClip(rgn: RgnHandle): void {
     : undefined;
 }
 
-// PROCEDURE ClipRect(r: Rect);
+/**
+ * Set the current port's clip region to the rectangle `r`.
+ * `PROCEDURE ClipRect(r: Rect)`.
+ */
 export function ClipRect(r: Rect): void {
   const port = globals.thePort;
   if (!port) return;
@@ -246,7 +313,10 @@ export function ClipRect(r: Rect): void {
   };
 }
 
-// PROCEDURE BackPat(pat: Pattern);
+/**
+ * Set the current port's background pattern to `pat`.
+ * Used by erase operations.  `PROCEDURE BackPat(pat: Pattern)`.
+ */
 export function BackPat(pat: Pattern): void {
   const port = globals.thePort;
   if (!port) return;
@@ -256,6 +326,15 @@ export function BackPat(pat: Pattern): void {
 // -------------------------------------------------------------------------
 // Create a new GrafPort object (not part of original API, but needed in JS)
 // -------------------------------------------------------------------------
+
+/**
+ * Allocate and return a fully initialised {@link GrafPort} pointing at the
+ * current screen buffer.
+ *
+ * This is a JS-only convenience that replaces the original two-step
+ * `NEW(port); OpenPort(port)` pattern.  The returned port is **not** made
+ * the current port — call {@link SetPort} or {@link OpenPort} to activate it.
+ */
 
 export function newGrafPort(): GrafPort {
   const bounds = globals._screen

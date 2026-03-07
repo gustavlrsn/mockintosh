@@ -1,15 +1,15 @@
 import { SystemApp } from "../lib/canvas/AppRegistry";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
-import { AppContext } from "../lib/canvas/AppContext";
+import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
-import { OSEvent } from "../lib/canvas/EventManager";
+import { OSEvent } from "../lib/toolbox/EventManager";
 import {
   TextInputState,
   createTextInputState,
   handleTextInputKey,
-} from "../lib/canvas/ui/TextInput";
+} from "../lib/toolbox/TextEdit";
 import { measureText, getLineHeight } from "../lib/canvas/fontAdapter";
-import { MenubarDefinition } from "../lib/canvas/ui/drawMenubar";
+import { MenubarDefinition } from "../lib/toolbox/MenuManager";
 import { ditherBlobToPixels } from "../lib/canvas/dither";
 
 // ---------------------------------------------------------------------------
@@ -290,7 +290,7 @@ export const ChatGippityApp: SystemApp = {
   minSize: { width: 200, height: 160 },
 
   // Hook order: messages, inputState, loading, scrollOffset
-  render(app: AppBuilder, ctx: AppContext, props: any) {
+  render(app: AppBuilder, ctx: WindowContext, props: any) {
     const [messages, setMessages] = app.useState<ChatMessage[]>([]);
     const [inputState] = app.useState<TextInputState>(createTextInputState(""));
     // Ensure the input stays focused (it's the only input in this app)

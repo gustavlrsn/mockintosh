@@ -2,7 +2,7 @@
  * @mockintosh/sdk — Public API for third-party Mockintosh apps.
  *
  * Third-party apps import types, interfaces, and sprite utilities from this
- * package. The actual runtime implementations (AppBuilder, AppContext) are
+ * package. The actual runtime implementations (AppBuilder, WindowContext) are
  * provided by the OS when the app is loaded.
  */
 
@@ -209,7 +209,7 @@ export interface ScrollAreaOptions {
 }
 
 // ---------------------------------------------------------------------------
-// AppContext interface (provided at runtime by the OS)
+// WindowContext interface (provided at runtime by the OS)
 // ---------------------------------------------------------------------------
 
 export interface TextOptions {
@@ -244,7 +244,7 @@ export interface TextBlockOptions {
   lineSpacing?: number;
 }
 
-export interface AppContext {
+export interface WindowContext {
   readonly width: number;
   readonly height: number;
   readonly scrollY: number;
@@ -336,10 +336,10 @@ export interface AppContext {
     id: string,
     rect: { x: number; y: number; w: number; h: number },
     opts: ScrollAreaOptions,
-    drawContent: (ctx: AppContext) => void
+    drawContent: (ctx: WindowContext) => void
   ): void;
   /** When the window has a content top inset, draw the scrollable content (below the fixed strip) here. No-op when inset is 0. */
-  drawScrollableContent(drawContent: (scrollCtx: AppContext) => void): void;
+  drawScrollableContent(drawContent: (scrollCtx: WindowContext) => void): void;
   clear(color?: number): void;
   hitRegion(
     id: string,
@@ -353,6 +353,9 @@ export interface AppContext {
     }
   ): void;
 }
+
+/** @deprecated Use WindowContext instead */
+export type AppContext = WindowContext;
 
 // ---------------------------------------------------------------------------
 // Font measurement utilities
@@ -456,7 +459,7 @@ export interface App {
   resizable?: boolean;
   minSize?: { width: number; height: number };
 
-  render(app: AppBuilder, ctx: AppContext, props: AppProps): void;
+  render(app: AppBuilder, ctx: WindowContext, props: AppProps): void;
 
   onEvent?(
     app: AppBuilder,

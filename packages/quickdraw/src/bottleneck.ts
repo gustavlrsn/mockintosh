@@ -1,6 +1,20 @@
-// Bottleneck routines — from QuickDraw.p The Bottleneck Interface section
-// SetStdProcs and the standard bottleneck implementations (mostly re-exports
-// of the core Std* functions from their respective modules).
+/**
+ * Bottleneck routines — from `QuickDraw.p` The Bottleneck Interface section.
+ *
+ * The *bottleneck* is the mechanism by which QuickDraw allows callers to
+ * intercept every drawing primitive (lines, rects, ovals, text, bitmaps,
+ * etc.).  Install a customised {@link QDProcs} record in `port.grafProcs` and
+ * any drawing call will route through your hooks before (or instead of)
+ * the default `Std*` implementations.
+ *
+ * ## Typical use
+ * ```ts
+ * const procs: QDProcs = {};
+ * SetStdProcs(procs);          // fill all slots with defaults
+ * procs.rectProc = myRectHook; // override just one
+ * port.grafProcs = procs;
+ * ```
+ */
 
 import {
   QDProcs,
@@ -26,8 +40,15 @@ import { CopyBits } from "./bitmaps";
 // SetStdProcs
 // -------------------------------------------------------------------------
 
-// PROCEDURE SetStdProcs(VAR procs: QDProcs);
-// Fills in all bottleneck slots with the standard QuickDraw implementations.
+/**
+ * Populate all slots of `procs` with the standard QuickDraw implementations.
+ *
+ * Call this before installing `procs` in `port.grafProcs` so that you only
+ * need to override the specific operations you care about — unpatched slots
+ * will behave identically to the default QuickDraw drawing.
+ *
+ * `PROCEDURE SetStdProcs(VAR procs: QDProcs)`.
+ */
 export function SetStdProcs(procs: QDProcs): void {
   procs.textProc = StdText;
   procs.lineProc = (newPt: Point) => {
@@ -58,8 +79,13 @@ export function SetStdProcs(procs: QDProcs): void {
 // StdBits
 // -------------------------------------------------------------------------
 
-// PROCEDURE StdBits(VAR srcBits: BitMap; VAR srcRect, dstRect: Rect;
-//                  mode: INTEGER; maskRgn: RgnHandle);
+/**
+ * Default bitmap bottleneck.  Copies `srcBits[srcRect]` to
+ * `port.portBits[dstRect]` using the given mode and optional mask region.
+ *
+ * `PROCEDURE StdBits(VAR srcBits: BitMap; VAR srcRect, dstRect: Rect;
+ *                    mode: INTEGER; maskRgn: RgnHandle)`.
+ */
 export function StdBits(
   srcBits: BitMap,
   srcRect: Rect,
@@ -76,7 +102,13 @@ export function StdBits(
 // StdComment
 // -------------------------------------------------------------------------
 
-// PROCEDURE StdComment(kind, dataSize: INTEGER; dataHandle: QDHandle);
+/**
+ * Default picture-comment bottleneck.  The standard implementation is a
+ * no-op; override via `grafProcs.commentProc` to handle application-defined
+ * comments during picture playback.
+ *
+ * `PROCEDURE StdComment(kind, dataSize: INTEGER; dataHandle: QDHandle)`.
+ */
 export function StdComment(
   _kind: number,
   _dataSize: number,
