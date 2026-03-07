@@ -321,6 +321,10 @@ const MyApp: App = {
 };
 ```
 
+### Fixed strip above the scrollbar (content top inset)
+
+For a window with a **fixed toolbar or header** at the top and scrollable content below (e.g. a browser URL bar), use the content top inset pattern so the **window** scrollbar sits alongside only the scrollable region (classic Mac behaviour). Implement optional `getContentTopInset(app, props, size)` returning the height of the fixed strip in pixels. Set `scrollable: true` and implement `getContentHeight` to return only the **scrollable** content height (the part below the strip). In `render`, draw the fixed strip in the main context, then call `ctx.drawScrollableContent((scrollCtx) => { ... })` and draw the scrollable content inside the callback. Mouse events include `contentRegion: "fixed" | "scrollable"` when the window has an inset; use it to tell clicks in the strip from clicks in the scrollable area. In the scrollable region, `event.y` is in scrollable-content space (0 = top of scrollable content). `WindowSize` may include `contentTopInset`, `scrollY`, and `scrollX` for coordinate conversion.
+
 ### Partial scrolling with ScrollArea
 
 Use `ctx.scrollArea()` when only **part** of the window scrolls — for example, a chat message list with a fixed input bar at the bottom, or a panel with a fixed header and scrollable body.

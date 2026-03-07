@@ -374,48 +374,49 @@ export const SafariApp: SystemApp = {
 
     ctx.drawTextInput(urlInput, 50, 6, ctx.width - 58, 16);
 
-    // --- Content area ---
-    const contentY = HEADER_HEIGHT;
-    const contentH = ctx.height - HEADER_HEIGHT;
-    ctx.pushClip(0, contentY, ctx.width, contentH);
-
-    if (currentUrl === "google.com") {
-      renderGooglePage(
-        ctx,
-        contentY,
-        ctx.width,
-        contentH,
-        searchInput,
-        searchResults,
-        linksRef
-      );
-    } else {
-      const site = siteRegistry.find((s) => s.url === currentUrl);
-      if (site) {
-        const cards = parseSiteMarkup(site.body);
-        const cardNodes =
-          cards.get(currentCard) || cards.values().next().value || [];
-        const result = renderSiteNodes(ctx, cardNodes as LayoutNode[], {
-          startY: contentY + CONTENT_MARGIN,
-          width: ctx.width,
-          margin: CONTENT_MARGIN,
-          sprites,
-        });
-        linksRef.current = result.links;
+    // --- Scrollable content (page) below the fixed URL bar ---
+    ctx.drawScrollableContent((scrollCtx) => {
+      const contentH = scrollCtx.height;
+      if (currentUrl === "google.com") {
+        renderGooglePage(
+          scrollCtx,
+          0,
+          scrollCtx.width,
+          contentH,
+          searchInput,
+          searchResults,
+          linksRef
+        );
       } else {
-        ctx.drawText("Page not found", 16, contentY + 16, {
-          font: "ChiKareGo",
-          color: BLACK,
-        });
-        ctx.drawText(currentUrl, 16, contentY + 34, {
-          font: "Geneva9",
-          color: BLACK,
-        });
-        linksRef.current = [];
+        const site = siteRegistry.find((s) => s.url === currentUrl);
+        if (site) {
+          const cards = parseSiteMarkup(site.body);
+          const cardNodes =
+            cards.get(currentCard) || cards.values().next().value || [];
+          const result = renderSiteNodes(scrollCtx, cardNodes as LayoutNode[], {
+            startY: CONTENT_MARGIN,
+            width: scrollCtx.width,
+            margin: CONTENT_MARGIN,
+            sprites,
+          });
+          linksRef.current = result.links;
+        } else {
+          scrollCtx.drawText("Page not found", 16, 16, {
+            font: "ChiKareGo",
+            color: BLACK,
+          });
+          scrollCtx.drawText(currentUrl, 16, 34, {
+            font: "Geneva9",
+            color: BLACK,
+          });
+          linksRef.current = [];
+        }
       }
-    }
+    });
+  },
 
-    ctx.popClip();
+  getContentTopInset(_app: AppBuilder, _props: any, _size: WindowSize): number {
+    return HEADER_HEIGHT;
   },
 
   onEvent(app: AppBuilder, event: OSEvent, props: any, size: WindowSize) {
@@ -491,8 +492,15 @@ export const SafariApp: SystemApp = {
 
       const urlInputX = 50;
       const urlInputW = size.width - 58;
+      const inFixedStrip =
+        event.contentRegion === "fixed" ||
+        (event.contentRegion === undefined && event.y! < HEADER_HEIGHT);
+      const inScrollable =
+        event.contentRegion === "scrollable" ||
+        (event.contentRegion === undefined && event.y! >= HEADER_HEIGHT);
 
       if (
+        inFixedStrip &&
         event.y! >= 6 &&
         event.y! < 22 &&
         event.x! >= urlInputX &&
@@ -508,10 +516,10 @@ export const SafariApp: SystemApp = {
           newDragging = "url";
         }
         setUrlInput({ ...urlInput, focused: true });
-      } else if (event.y! < HEADER_HEIGHT) {
+      } else if (inFixedStrip) {
         // Nav buttons handled by hit regions
-      } else {
-        // Content area click — check links first
+      } else if (inScrollable) {
+        // Content area click — check links first (event.y is in scrollable-content space)
         const links = linksRef.current;
         for (const link of links) {
           if (
@@ -540,7 +548,7 @@ export const SafariApp: SystemApp = {
           }
         }
 
-        // Google search input click
+        // Google search input click (event.y in scrollable-content space)
         if (currentUrl === "google.com") {
           const contentH = size.height - HEADER_HEIGHT;
           const hasResults =
@@ -551,7 +559,7 @@ export const SafariApp: SystemApp = {
             hasResults
           );
           const sx = layout.barX;
-          const sy = HEADER_HEIGHT + layout.barY;
+          const sy = layout.barY;
 
           if (
             event.x! >= sx &&

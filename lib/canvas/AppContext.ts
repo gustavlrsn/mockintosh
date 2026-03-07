@@ -55,6 +55,11 @@ export class AppContext {
   private _minSize: { width: number; height: number } | undefined;
   /** Full window dimensions at context creation time, for grow-box resize baseline. */
   private _windowSize: { width: number; height: number } | undefined;
+  /** Height of the non-scrolling strip at the top; when > 0, drawScrollableContent is used for the part below. */
+  private _contentTopInset: number;
+  /** Window scroll Y/X used for the scrollable sub-context when _contentTopInset > 0. */
+  private _windowScrollY: number;
+  private _windowScrollX: number;
 
   constructor(
     canvas: BitCanvas,
@@ -72,7 +77,10 @@ export class AppContext {
       startHeight: number
     ) => void,
     minSize?: { width: number; height: number },
-    windowSize?: { width: number; height: number }
+    windowSize?: { width: number; height: number },
+    contentTopInset: number = 0,
+    windowScrollY: number = 0,
+    windowScrollX: number = 0
   ) {
     this.canvas = canvas;
     this.ox = x;
@@ -85,6 +93,9 @@ export class AppContext {
     this._onStartResize = onStartResize;
     this._minSize = minSize;
     this._windowSize = windowSize;
+    this._contentTopInset = contentTopInset;
+    this._windowScrollY = windowScrollY;
+    this._windowScrollX = windowScrollX;
     canvas.pushClip(x, y, w, h);
   }
 
@@ -177,7 +188,8 @@ export class AppContext {
   }
 
   /**
-   * Draw a rounded rectangle outline. radius is 1-bit pixel-perfect (clamped to half w/h).
+   * Draw a rounded rectangle outline, 1 pixel wide. Kept for backward compatibility.
+   * Prefer frameRoundRect for new code.
    */
   drawRoundRect(
     x: number,
@@ -198,7 +210,9 @@ export class AppContext {
   }
 
   /**
-   * Fill a rounded rectangle. radius is 1-bit pixel-perfect (clamped to half w/h).
+   * Fill a rounded rectangle using QuickDraw-style inset quarter-ovals.
+   * ovalWidth/ovalHeight are diameters; defaults to a square corner (radius).
+   * Equivalent to QuickDraw PaintRoundRect / FillRoundRect.
    */
   fillRoundRect(
     x: number,
@@ -214,6 +228,34 @@ export class AppContext {
       w,
       h,
       radius,
+      color
+    );
+  }
+
+  /**
+   * Draw a rounded rectangle outline with configurable pen width (thickness).
+   * ovalWidth/ovalHeight are the curvature diameters (e.g. 16 = classic Mac button).
+   * penWidth defaults to 1 (like QuickDraw's 1×1 pen / FrameRoundRect).
+   * Equivalent to QuickDraw's FrameRoundRect with a larger pen size.
+   */
+  frameRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    ovalWidth: number,
+    ovalHeight: number,
+    penWidth: number = 1,
+    color: number = BLACK
+  ) {
+    this.canvas.frameRoundRect(
+      this.ox + x - this.scrollOffsetX,
+      this.oy + y - this.scrollOffsetY,
+      w,
+      h,
+      ovalWidth,
+      ovalHeight,
+      penWidth,
       color
     );
   }
@@ -655,6 +697,33 @@ export class AppContext {
         },
       });
     }
+  }
+
+  /**
+   * When the window has a content top inset, draw the scrollable content (the part below the fixed strip) here.
+   * The callback receives a context with origin at the top of the scrollable region and the window's scroll applied.
+   * No-op when contentTopInset is 0.
+   */
+  drawScrollableContent(drawContent: (scrollCtx: AppContext) => void): void {
+    if (this._contentTopInset <= 0 || !this._hitRegions) return;
+    const inset = this._contentTopInset;
+    const scrollH = this.h - inset;
+    if (scrollH <= 0) return;
+    const scrollCtx = new AppContext(
+      this.canvas,
+      this.ox,
+      this.oy + inset,
+      this.w,
+      scrollH,
+      this._windowScrollY,
+      this._windowScrollX,
+      this._hitRegions,
+      this._onStartResize,
+      this._minSize,
+      this._windowSize
+    );
+    drawContent(scrollCtx);
+    scrollCtx.release();
   }
 
   clear(color: number = WHITE) {

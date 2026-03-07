@@ -96,6 +96,7 @@ async function bootstrapFreshFS(fs: MockFS): Promise<void> {
   await fs.writeFile(dev.id, "CONTRIBUTING.md", contributing, "text");
 
   fs.mkdir(hd.id, "Applications");
+  fs.mkdir(hd.id, "Trash");
 
   const desktop = fs.mkdir(hd.id, "Desktop Folder");
 
@@ -127,6 +128,7 @@ function ensureDesktopFolder(fs: MockFS): void {
   const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
   if (!hd) return;
   fs.mkdir(hd.id, "Desktop Folder");
+  fs.mkdir(hd.id, "Trash");
 }
 
 /**
@@ -737,6 +739,9 @@ async function main() {
           height: win.height,
           contentOriginX: contentRect.x,
           contentOriginY: contentRect.y,
+          contentTopInset: win.contentTopInset,
+          scrollY: win.scrollY,
+          scrollX: win.scrollX,
         };
         mwInst.app.onWindowEvent(
           mwInst.appBuilder,
@@ -889,10 +894,18 @@ async function main() {
           event.y! < contentRect.y + contentRect.h;
 
         if (isInside) {
+          const inset = active.contentTopInset ?? 0;
+          const contentRegion =
+            inset > 0
+              ? event.y! < contentRect.y + inset
+                ? ("fixed" as const)
+                : ("scrollable" as const)
+              : undefined;
           dispatchToApp(active.id, {
             type: "mouseMove",
             x: local.x,
             y: local.y,
+            ...(contentRegion !== undefined && { contentRegion }),
           });
         } else if (active.appId === "finder") {
           dispatchToApp(active.id, {
@@ -1079,6 +1092,17 @@ async function main() {
                 mwInst.props
               ) ?? undefined;
           }
+          if (mwInst.app.getContentTopInset) {
+            mwInst.appBuilder.resetForRender();
+            mwInst.winBuilder.resetForRender();
+            win.contentTopInset = mwInst.app.getContentTopInset(
+              mwInst.appBuilder,
+              mwInst.winBuilder,
+              win.id,
+              mwInst.props,
+              { width: win.width, height: win.height }
+            );
+          }
         }
         continue;
       }
@@ -1105,6 +1129,14 @@ async function main() {
         win.infoBar =
           instance.app.getInfoBar(instance.builder, instance.props) ??
           undefined;
+      }
+      if (instance?.app.getContentTopInset) {
+        instance.builder.resetForRender();
+        win.contentTopInset = instance.app.getContentTopInset(
+          instance.builder,
+          instance.props,
+          { width: win.width, height: win.height }
+        );
       }
     }
 
@@ -1292,6 +1324,7 @@ async function main() {
           contentH: contentRect.h,
           scrollY: win.scrollY,
           scrollX: win.scrollX,
+          contentTopInset: win.contentTopInset,
         });
       }
       return result;

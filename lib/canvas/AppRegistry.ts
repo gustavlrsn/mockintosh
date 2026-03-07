@@ -8,6 +8,11 @@ export interface WindowSize {
   height: number;
   contentOriginX?: number;
   contentOriginY?: number;
+  /** When window has content top inset: height of the fixed strip. */
+  contentTopInset?: number;
+  /** Current scroll offset (for screen coord conversion when contentTopInset is set). */
+  scrollY?: number;
+  scrollX?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -34,6 +39,11 @@ export interface SystemApp {
   getMenubar?: (app: AppBuilder, props: any) => MenubarDefinition[];
   getContentHeight?: (app: AppBuilder, props: any, size: WindowSize) => number;
   getContentWidth?: (app: AppBuilder, props: any, size: WindowSize) => number;
+  getContentTopInset?: (
+    app: AppBuilder,
+    props: any,
+    size: WindowSize
+  ) => number;
   getInfoBar?: (app: AppBuilder, props: any) => string[] | null;
 }
 
@@ -90,6 +100,14 @@ export interface MultiWindowSystemApp {
   ): MenubarDefinition[];
 
   getContentHeight?(
+    app: AppBuilder,
+    win: AppBuilder,
+    windowId: string,
+    props: any,
+    size: WindowSize
+  ): number;
+
+  getContentTopInset?(
     app: AppBuilder,
     win: AppBuilder,
     windowId: string,

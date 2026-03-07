@@ -92,6 +92,8 @@ export interface OSEvent {
     | "keyUp";
   x?: number;
   y?: number;
+  /** When window has content top inset: "fixed" = in non-scrolling strip, "scrollable" = in scrollable region (y in scrollable-content space). */
+  contentRegion?: "fixed" | "scrollable";
   button?: number;
   deltaY?: number;
   key?: string;
@@ -107,6 +109,11 @@ export interface WindowSize {
   height: number;
   contentOriginX?: number;
   contentOriginY?: number;
+  /** When window has content top inset: height of the fixed strip. */
+  contentTopInset?: number;
+  /** Current scroll offset (for screen coord conversion when contentTopInset is set). */
+  scrollY?: number;
+  scrollX?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +274,21 @@ export interface AppContext {
     radius: number,
     color?: number
   ): void;
+  /**
+   * Draw a rounded rectangle outline with configurable pen width.
+   * ovalWidth/ovalHeight are curvature diameters (e.g. 16 = classic Mac button).
+   * penWidth defaults to 1 (QuickDraw FrameRoundRect with 1×1 pen).
+   */
+  frameRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    ovalWidth: number,
+    ovalHeight: number,
+    penWidth?: number,
+    color?: number
+  ): void;
   fillPattern(
     x: number,
     y: number,
@@ -316,6 +338,8 @@ export interface AppContext {
     opts: ScrollAreaOptions,
     drawContent: (ctx: AppContext) => void
   ): void;
+  /** When the window has a content top inset, draw the scrollable content (below the fixed strip) here. No-op when inset is 0. */
+  drawScrollableContent(drawContent: (scrollCtx: AppContext) => void): void;
   clear(color?: number): void;
   hitRegion(
     id: string,
@@ -448,6 +472,12 @@ export interface App {
 
   getContentHeight?(app: AppBuilder, props: AppProps, size: WindowSize): number;
   getContentWidth?(app: AppBuilder, props: AppProps, size: WindowSize): number;
+  /** Height of the non-scrolling strip at the top of the content area. When set, the window scrollbar starts below it and only content below scrolls; use `drawScrollableContent` for the scrollable part. */
+  getContentTopInset?(
+    app: AppBuilder,
+    props: AppProps,
+    size: WindowSize
+  ): number;
   getInfoBar?(app: AppBuilder, props: AppProps): string[] | null;
 }
 

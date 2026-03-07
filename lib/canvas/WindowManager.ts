@@ -76,6 +76,9 @@ export interface WindowState {
   /** Screen rect of the icon this window was opened from (for close zoom
    *  animation). Stored at open time and never changed. */
   openedFromRect?: { x: number; y: number; width: number; height: number };
+  /** Height in pixels of the non-scrolling strip at the top of the content area.
+   *  The window scrollbar starts below this; only content below scrolls. */
+  contentTopInset?: number;
 }
 
 export interface WindowManagerConfig {
@@ -479,16 +482,17 @@ export class WindowManager {
       }
     }
 
-    // Vertical scroll bar
+    // Vertical scroll bar (runs alongside scrollable region only)
     if (win.scrollable) {
       const sbx = x + width - SCROLLBAR_WIDTH - 1;
-      const sby = y + headerH;
-      const bodyH = this._bodyHeight(win);
+      const inset = win.contentTopInset ?? 0;
+      const sby = y + headerH + inset - 1;
+      const scrollableBodyH = this._scrollableBodyHeight(win);
       if (
         gx >= sbx &&
         gx < sbx + SCROLLBAR_WIDTH &&
         gy >= sby &&
-        gy < sby + bodyH
+        gy < sby + scrollableBodyH
       ) {
         return "inVScroll";
       }
@@ -526,6 +530,12 @@ export class WindowManager {
 
   private _bodyHeight(win: WindowState): number {
     return win.height - this._bottomBarHeight(win);
+  }
+
+  /** Height of the content region that scrolls (body minus content top inset). */
+  private _scrollableBodyHeight(win: WindowState): number {
+    const inset = win.contentTopInset ?? 0;
+    return Math.max(0, this._bodyHeight(win) - inset);
   }
 
   getContentRect(win: WindowState): {
@@ -570,18 +580,25 @@ export class WindowManager {
         prospectiveHeight: startHeight,
       };
     };
+    const inset = win.contentTopInset ?? 0;
+    // When there's a content top inset, main context has no scroll so the fixed strip stays put (no vertical or horizontal scroll); real scroll is used in drawScrollableContent.
+    const mainScrollY = inset > 0 ? 0 : win.scrollY;
+    const mainScrollX = inset > 0 ? 0 : win.scrollX;
     return new AppContext(
       canvas,
       r.x,
       r.y,
       r.w,
       r.h,
-      win.scrollY,
-      win.scrollX,
+      mainScrollY,
+      mainScrollX,
       hitRegions,
       onStartResize,
       { width: win.minWidth, height: win.minHeight },
-      { width: win.width, height: win.height }
+      { width: win.width, height: win.height },
+      inset,
+      win.scrollY,
+      win.scrollX
     );
   }
 
@@ -591,6 +608,18 @@ export class WindowManager {
     y: number
   ): { x: number; y: number } {
     const r = this.getContentRect(win);
+    const inset = win.contentTopInset ?? 0;
+    if (inset > 0) {
+      if (y < r.y + inset) {
+        // Fixed strip: content-local coords without scroll (strip does not scroll).
+        return { x: x - r.x, y: y - r.y };
+      }
+      // Scrollable region: coords in scrollable-content space.
+      return {
+        x: x - r.x + win.scrollX,
+        y: y - r.y - inset + win.scrollY,
+      };
+    }
     return { x: x - r.x + win.scrollX, y: y - r.y + win.scrollY };
   }
 
@@ -636,9 +665,9 @@ export class WindowManager {
         (w) => w.id === this.scrollDragging!.windowId
       );
       if (win) {
-        const bodyH = this._bodyHeight(win);
-        const trackH = bodyH - 30;
-        const maxScroll = Math.max(0, win.contentHeight - bodyH);
+        const scrollableBodyH = this._scrollableBodyHeight(win);
+        const trackH = scrollableBodyH - 30;
+        const maxScroll = Math.max(0, win.contentHeight - scrollableBodyH);
         const delta = y - this.scrollDragging.startY;
         const scrollRatio = delta / Math.max(1, trackH);
         win.scrollY = Math.max(
@@ -771,8 +800,8 @@ export class WindowManager {
   }
 
   handleScroll(win: WindowState, deltaY: number) {
-    const bodyH = this._bodyHeight(win);
-    const maxScroll = Math.max(0, win.contentHeight - bodyH);
+    const scrollableBodyH = this._scrollableBodyHeight(win);
+    const maxScroll = Math.max(0, win.contentHeight - scrollableBodyH);
     win.scrollY = Math.max(0, Math.min(maxScroll, win.scrollY + deltaY));
   }
 
@@ -870,6 +899,18 @@ export class WindowManager {
 
       // Content area (dispatches events to apps)
       const contentRect = this.getContentRect(win);
+      const inset = win.contentTopInset ?? 0;
+      const contentEventX = (lx: number, ly: number): number => {
+        if (inset > 0 && ly < inset) return lx; // fixed strip: no horizontal scroll
+        return lx + win.scrollX;
+      };
+      const contentEventY = (ly: number): number => {
+        if (inset > 0 && ly < inset) return ly;
+        if (inset > 0) return ly - inset + win.scrollY;
+        return ly + win.scrollY;
+      };
+      const contentRegion = (ly: number): "fixed" | "scrollable" | undefined =>
+        inset > 0 ? (ly < inset ? "fixed" : "scrollable") : undefined;
       hitRegions.add({
         id: `win-content-${win.id}`,
         x: contentRect.x,
@@ -880,22 +921,25 @@ export class WindowManager {
           callbacks.onBringToFront(win.id);
           callbacks.onContentEvent(win.id, {
             type: "mouseDown",
-            x: lx + win.scrollX,
-            y: ly + win.scrollY,
+            x: contentEventX(lx, ly),
+            y: contentEventY(ly),
+            contentRegion: contentRegion(ly),
           });
         },
         onMouseUp: (lx: number, ly: number) => {
           callbacks.onContentEvent(win.id, {
             type: "mouseUp",
-            x: lx + win.scrollX,
-            y: ly + win.scrollY,
+            x: contentEventX(lx, ly),
+            y: contentEventY(ly),
+            contentRegion: contentRegion(ly),
           });
         },
         onDoubleClick: (lx: number, ly: number) => {
           callbacks.onContentEvent(win.id, {
             type: "doubleClick",
-            x: lx + win.scrollX,
-            y: ly + win.scrollY,
+            x: contentEventX(lx, ly),
+            y: contentEventY(ly),
+            contentRegion: contentRegion(ly),
           });
         },
       });
@@ -1141,22 +1185,26 @@ export class WindowManager {
   ) {
     const headerH = this._headerHeight(win);
     const bodyH = this._bodyHeight(win);
+    const inset = win.contentTopInset ?? 0;
+    const scrollableBodyH = this._scrollableBodyHeight(win);
 
     // Right edge of scrollbar sits on the window's right border (1px overlap).
-    // Top overlaps the title-bar bottom border by 1px (Mac convention).
+    // Top starts below the content top inset (Mac convention: -1 overlap).
     const sbx = win.x + win.width - SCROLLBAR_WIDTH;
-    const sby = win.y + headerH - 1;
-    const needsScroll = win.contentHeight > bodyH;
+    const sby = win.y + headerH + inset - 1;
+    const needsScroll = win.contentHeight > scrollableBodyH;
 
-    // Vertical dividing line between content and scrollbar
-    canvas.drawVLine(sbx, win.y + headerH, bodyH, BLACK);
+    // When there's a content top inset, fill the scrollbar column in the fixed strip so the fixed area is full width (no gap).
+    if (inset > 0) {
+      canvas.fillRect(sbx, win.y + headerH, SCROLLBAR_WIDTH, inset, WHITE);
+    }
 
     // Arrow sprites are 16×16; their outer border overlaps the window border
     const upSprite = sprites.get("chrome/up");
     if (upSprite) canvas.blit(upSprite, sbx, sby);
 
-    // Down arrow: bottom edge shares the grow-box top border line
-    const downTop = win.y + headerH + bodyH - SCROLLBAR_WIDTH + 1;
+    // Down arrow: at bottom of scrollable region
+    const downTop = sby + scrollableBodyH - SCROLLBAR_WIDTH + 1;
     const downSprite = sprites.get("chrome/down");
     if (downSprite) canvas.blit(downSprite, sbx, downTop);
 
@@ -1182,28 +1230,28 @@ export class WindowManager {
       w: SCROLLBAR_WIDTH,
       h: SCROLLBAR_WIDTH,
       onMouseDown: () => {
-        const maxScroll = Math.max(0, win.contentHeight - bodyH);
+        const maxScroll = Math.max(0, win.contentHeight - scrollableBodyH);
         win.scrollY = Math.min(maxScroll, win.scrollY + 12);
         callbacks.scheduleRender();
       },
     });
 
-    // Track
+    // Track (starts at sbx so it meets the dividing line with no gap; line is drawn last on top of column sbx)
     if (needsScroll) {
       const trackSprite = sprites.get("scrollbar-bg");
       if (trackSprite) {
         canvas.fillSpriteTile(
-          sbx + 1,
+          sbx,
           trackTop,
-          SCROLLBAR_WIDTH - 1,
+          SCROLLBAR_WIDTH,
           trackHeight,
           trackSprite
         );
       } else {
         canvas.fillPattern(
-          sbx + 1,
+          sbx,
           trackTop,
-          SCROLLBAR_WIDTH - 1,
+          SCROLLBAR_WIDTH,
           trackHeight,
           "gray50"
         );
@@ -1211,10 +1259,10 @@ export class WindowManager {
       // Right border line (the scrollbar overlaps the window border, so we redraw it)
       canvas.drawVLine(sbx + SCROLLBAR_WIDTH - 1, trackTop, trackHeight, BLACK);
 
-      const maxScroll = win.contentHeight - bodyH;
+      const maxScroll = win.contentHeight - scrollableBodyH;
       const thumbH = Math.max(
         12,
-        Math.floor((bodyH / win.contentHeight) * trackHeight)
+        Math.floor((scrollableBodyH / win.contentHeight) * trackHeight)
       );
       const thumbY =
         trackTop +
@@ -1237,15 +1285,12 @@ export class WindowManager {
         },
       });
     } else {
-      canvas.fillRect(
-        sbx + 1,
-        trackTop,
-        SCROLLBAR_WIDTH - 1,
-        trackHeight,
-        WHITE
-      );
+      canvas.fillRect(sbx, trackTop, SCROLLBAR_WIDTH, trackHeight, WHITE);
       canvas.drawVLine(sbx + SCROLLBAR_WIDTH - 1, trackTop, trackHeight, BLACK);
     }
+
+    // Dividing line drawn last so it sits on top of scrollbar (arrows/track can have a white left column that would otherwise leave a 1px gap).
+    canvas.drawVLine(sbx, win.y + headerH + inset, scrollableBodyH, BLACK);
   }
 
   private _drawHScrollbar(

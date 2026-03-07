@@ -139,8 +139,175 @@ export class BitCanvas {
   }
 
   /**
-   * Draw a rounded rectangle outline (1-bit pixel-perfect corners).
-   * radius is clamped to half width/height; 0 delegates to drawRect.
+   * Returns true if the pixel at local coordinate (lx, ly) is inside the filled area
+   * of a rounded rect with dimensions (w, h) and corner radius (rx, ry).
+   *
+   * Geometry (QuickDraw-style):
+   *  - Corner ovals are inset by (rx, ry) from each corner, tangent to both edges.
+   *  - Centers: TL=(rx,ry), TR=(w-rx,ry), BL=(rx,h-ry), BR=(w-rx,h-ry).
+   *
+   * We use pixel-center inclusion (lx+0.5, ly+0.5) so that top and bottom corners
+   * have the same visual radius: with grid-point rule the top row has one pixel
+   * and the bottom row a chord, which looks asymmetric. Pixel-center gives symmetric
+   * curvature. Integer-only: (2*lx+1-2*cx)²*ry² + (2*ly+1-2*cy)²*rx² <= 4*rx²*ry².
+   */
+  private isInsideRoundRect(
+    lx: number,
+    ly: number,
+    w: number,
+    h: number,
+    rx: number,
+    ry: number
+  ): boolean {
+    // Central bands (not in any corner quadrant): always inside
+    if (lx >= rx && lx < w - rx) return true;
+    if (ly >= ry && ly < h - ry) return true;
+    // Corner quadrant: test pixel center (lx+0.5, ly+0.5) against inset quarter-oval.
+    // Scaled to integers: u = 2*lx+1 - 2*cx, v = 2*ly+1 - 2*cy; u²*ry² + v²*rx² <= 4*rx²*ry²
+    const rx2 = rx * rx;
+    const ry2 = ry * ry;
+    const threshold = 4 * rx2 * ry2;
+    let cx: number, cy: number;
+    if (lx < rx && ly < ry) {
+      cx = rx;
+      cy = ry; // TL
+    } else if (lx >= w - rx && ly < ry) {
+      cx = w - rx;
+      cy = ry; // TR
+    } else if (lx < rx && ly >= h - ry) {
+      cx = rx;
+      cy = h - ry; // BL
+    } else {
+      cx = w - rx;
+      cy = h - ry; // BR
+    }
+    const u = 2 * lx + 1 - 2 * cx;
+    const v = 2 * ly + 1 - 2 * cy;
+    return u * u * ry2 + v * v * rx2 <= threshold;
+  }
+
+  /**
+   * Fill a rounded rectangle using QuickDraw-style inset quarter-ovals.
+   * ovalWidth and ovalHeight are diameters (rx = ovalWidth/2, ry = ovalHeight/2).
+   * With a single radius argument the corners are quarter-circles.
+   * Degrades to fillRect when radius is 0 or omitted.
+   *
+   * Equivalent to QuickDraw's PaintRoundRect / FillRoundRect.
+   */
+  fillRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    color: number = BLACK
+  ): void;
+  fillRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    ovalWidth: number,
+    ovalHeight: number,
+    color: number
+  ): void;
+  fillRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    ovWdOrRadius: number,
+    ovHtOrColor: number = BLACK,
+    colorArg?: number
+  ) {
+    x = x | 0;
+    y = y | 0;
+    w = w | 0;
+    h = h | 0;
+    let rx: number, ry: number, color: number;
+    if (colorArg !== undefined) {
+      // 7-arg overload: ovalWidth, ovalHeight, color
+      rx = Math.floor(ovWdOrRadius / 2);
+      ry = Math.floor(ovHtOrColor / 2);
+      color = colorArg;
+    } else {
+      // 6-arg overload: radius, color
+      rx = ry = ovWdOrRadius | 0;
+      color = ovHtOrColor;
+    }
+    rx = Math.max(0, Math.min(rx, Math.floor(w / 2)));
+    ry = Math.max(0, Math.min(ry, Math.floor(h / 2)));
+    if (rx === 0 || ry === 0) {
+      this.fillRect(x, y, w, h, color);
+      return;
+    }
+    const x0 = Math.max(x, this.clip.x, 0);
+    const y0 = Math.max(y, this.clip.y, 0);
+    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
+    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
+    for (let py = y0; py < y1; py++) {
+      const row = py * this.width;
+      for (let px = x0; px < x1; px++) {
+        if (this.isInsideRoundRect(px - x, py - y, w, h, rx, ry)) {
+          this.pixels[row + px] = color;
+        }
+      }
+    }
+  }
+
+  /**
+   * Draw a rounded rectangle outline with a given pen width (thickness).
+   * Equivalent to QuickDraw's FrameRoundRect (penWidth = 1) with optional thicker pens.
+   *
+   * Implementation: fill the outer rounded rect with color, then erase the interior
+   * by filling the inner rounded rect (inset by penWidth) with the background (WHITE).
+   * This guarantees inner and outer edges are both proper QuickDraw-style round arcs.
+   *
+   * ovalWidth/ovalHeight: diameters of curvature (default 16×16 = classic Mac button).
+   * penWidth: outline thickness in pixels (default 1, same as QuickDraw 1×1 pen).
+   */
+  frameRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    ovalWidth: number,
+    ovalHeight: number,
+    penWidth: number = 1,
+    color: number = BLACK
+  ) {
+    x = x | 0;
+    y = y | 0;
+    w = w | 0;
+    h = h | 0;
+    ovalWidth = ovalWidth | 0;
+    ovalHeight = ovalHeight | 0;
+    penWidth = Math.max(1, penWidth | 0);
+    if (penWidth * 2 >= w || penWidth * 2 >= h) {
+      // Pen is so thick the rect is fully filled
+      this.fillRoundRect(x, y, w, h, ovalWidth, ovalHeight, color);
+      return;
+    }
+    // Fill outer shape
+    this.fillRoundRect(x, y, w, h, ovalWidth, ovalHeight, color);
+    // Erase inner (inset by penWidth); inner oval diameters shrink by penWidth on each side
+    const innerOvWd = Math.max(0, ovalWidth - penWidth * 2);
+    const innerOvHt = Math.max(0, ovalHeight - penWidth * 2);
+    this.fillRoundRect(
+      x + penWidth,
+      y + penWidth,
+      w - penWidth * 2,
+      h - penWidth * 2,
+      innerOvWd,
+      innerOvHt,
+      WHITE
+    );
+  }
+
+  /**
+   * Draw a rounded rectangle outline, 1 pixel wide.
+   * Alias for frameRoundRect(..., ovalSize, ovalSize, 1, color).
+   * Kept for backward compatibility; prefer frameRoundRect for new code.
    */
   drawRoundRect(
     x: number,
@@ -150,94 +317,8 @@ export class BitCanvas {
     radius: number,
     color: number = BLACK
   ) {
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-    let r = radius | 0;
-    r = Math.max(0, Math.min(r, Math.floor(w / 2), Math.floor(h / 2)));
-    if (r === 0) {
-      this.drawRect(x, y, w, h, color);
-      return;
-    }
-    // Straight edges (leave corner quadrants to arcs)
-    this.drawHLine(x + r, y, w - 2 * r, color);
-    this.drawHLine(x + r, y + h - 1, w - 2 * r, color);
-    this.drawVLine(x, y + r, h - 2 * r, color);
-    this.drawVLine(x + w - 1, y + r, h - 2 * r, color);
-    // Corner arcs: pixel (i,j) on arc if at/outside quarter-circle (bias -0.5 for fuller 1-bit curve)
-    const r2 = r * r - 0.5;
-    for (let j = 0; j <= r; j++) {
-      for (let i = 0; i <= r; i++) {
-        if ((i + 0.5) ** 2 + (j + 0.5) ** 2 >= r2) {
-          this.setPixel(x + i, y + j, color);
-          this.setPixel(x + w - 1 - i, y + j, color);
-          this.setPixel(x + i, y + h - 1 - j, color);
-          this.setPixel(x + w - 1 - i, y + h - 1 - j, color);
-        }
-      }
-    }
-  }
-
-  /**
-   * Fill a rounded rectangle (1-bit pixel-perfect: inside = quarter-circles at corners).
-   * radius is clamped; 0 delegates to fillRect.
-   */
-  fillRoundRect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    radius: number,
-    color: number = BLACK
-  ) {
-    x = x | 0;
-    y = y | 0;
-    w = w | 0;
-    h = h | 0;
-    let r = radius | 0;
-    r = Math.max(0, Math.min(r, Math.floor(w / 2), Math.floor(h / 2)));
-    if (r === 0) {
-      this.fillRect(x, y, w, h, color);
-      return;
-    }
-    const r2 = r * r;
-    const x0 = Math.max(x, this.clip.x, 0);
-    const y0 = Math.max(y, this.clip.y, 0);
-    const x1 = Math.min(x + w, this.clip.x + this.clip.w, this.width);
-    const y1 = Math.min(y + h, this.clip.y + this.clip.h, this.height);
-    for (let py = y0; py < y1; py++) {
-      const row = py * this.width;
-      for (let px = x0; px < x1; px++) {
-        const lx = px - x;
-        const ly = py - y;
-        let inside = false;
-        if (lx >= r && lx < w - r) {
-          inside = true;
-        } else if (ly >= r && ly < h - r) {
-          inside = true;
-        } else {
-          const inTL =
-            lx < r && ly < r && (lx + 0.5) ** 2 + (ly + 0.5) ** 2 <= r2;
-          const inTR =
-            lx >= w - r &&
-            ly < r &&
-            (w - 1 - lx + 0.5) ** 2 + (ly + 0.5) ** 2 <= r2;
-          const inBL =
-            lx < r &&
-            ly >= h - r &&
-            (lx + 0.5) ** 2 + (h - 1 - ly + 0.5) ** 2 <= r2;
-          const inBR =
-            lx >= w - r &&
-            ly >= h - r &&
-            (w - 1 - lx + 0.5) ** 2 + (h - 1 - ly + 0.5) ** 2 <= r2;
-          inside = inTL || inTR || inBL || inBR;
-        }
-        if (inside) {
-          this.pixels[row + px] = color;
-        }
-      }
-    }
+    const ovWd = (radius | 0) * 2;
+    this.frameRoundRect(x, y, w, h, ovWd, ovWd, 1, color);
   }
 
   fillRect(x: number, y: number, w: number, h: number, color: number = BLACK) {

@@ -13,6 +13,8 @@ export interface OSEvent {
     | "deactivate";
   x?: number;
   y?: number;
+  /** When window has content top inset: "fixed" = click in non-scrolling strip (y 0..inset), "scrollable" = in scrollable region (y in scrollable-content space). */
+  contentRegion?: "fixed" | "scrollable";
   button?: number;
   deltaY?: number;
   deltaX?: number;

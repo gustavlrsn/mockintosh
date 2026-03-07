@@ -324,7 +324,9 @@ A scoped drawing proxy given to each app. Wraps `BitCanvas` with coordinate offs
 
 `ctx.scrollArea(id, rect, opts, drawContent)` is a composable scrollable region. It handles clipping, scrollbar rendering (classic Mac style), and all scroll interaction (wheel, arrows, thumb drag) — the app only manages the scroll offset via `useState`.
 
-Use `scrollArea` when only **part** of the window content should scroll (e.g., a message list with a fixed input bar). For windows where the entire content scrolls, set `scrollable: true` on the app and implement `getContentHeight` — the OS handles the scrollbar in the window chrome.
+Use `scrollArea` when only **part** of the window content should scroll (e.g., a message list with a fixed input bar at the bottom). For windows where the entire content scrolls, set `scrollable: true` on the app and implement `getContentHeight` — the OS handles the scrollbar in the window chrome.
+
+**Content top inset (fixed strip above the scrollbar):** Per classic Mac guidelines, document windows can reserve a non-scrolling strip at the top of the content area. Implement optional `getContentTopInset(app, props, size)` returning the height in pixels. The window scrollbar then starts below that strip and only the content below scrolls. In `render`, draw the fixed strip (e.g. toolbar, URL bar) in the main context, then call `ctx.drawScrollableContent((scrollCtx) => { ... })` and draw the scrollable content in the callback; `getContentHeight` must return only the **scrollable** content height. Mouse events include `contentRegion: "fixed" | "scrollable"` when the window has an inset so the app can distinguish clicks in the strip vs the scrollable region; in the scrollable region, `event.y` is in scrollable-content space. Safari (URL bar) and Finder folder windows (info strip) use this pattern.
 
 ```typescript
 const [scrollOffset, setScrollOffset] = app.useState(0);
