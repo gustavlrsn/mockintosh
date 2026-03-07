@@ -26,5 +26,5 @@
     "utils/**/*.ts",
     "vite-env.d.ts"
   ],
-  "exclude": ["node_modules", "dist", "api", "scripts"]
+  "exclude": ["node_modules", "dist", "api", "scripts", "packages/quickdraw"]
 }
