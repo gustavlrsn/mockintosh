@@ -4,6 +4,24 @@ Items not fully migrated during the current plan but that could be addressed for
 
 ---
 
+## Deferred: visRgn occlusion (CalcVis)
+
+The original Mac Window Manager maintained **visRgn** per window so that drawing was clipped to the visible content minus windows in front. We currently use the painter's algorithm and repaint every frame, so occlusion is implicit. A more faithful version would compute visRgn (e.g. CalcVis) and set it on each window's port so that QuickDraw only draws into truly visible pixels.
+
+---
+
+## Deferred: SetOrigin for scrolling
+
+The original Mac used **SetOrigin(dh, dv)** to shift the local coordinate plane for scrolling; the app then draws relative to the scrolled document's top-left as (0,0). We currently emulate scrolling via **tx()** / **ty()** offset math in WindowContext. Migrating to SetOrigin would let apps use native QuickDraw coordinates and remove the need for scroll offset in the context transform.
+
+---
+
+## Deferred: Dirty-region / updateRgn rendering
+
+The original Mac only redrew **dirty** areas (updateRgn per window). We currently redraw the full screen each frame. Implementing updateRgn and **BeginUpdate** / **EndUpdate** would allow partial redraws and **putImageData** with a dirty rect for better performance when most of the screen is static.
+
+---
+
 ## Sprite type → QuickDraw BitMap
 
 The `Sprite` interface (`data` + `mask` as 1-byte-per-pixel arrays) is a Mockintosh invention. The Mac equivalent is a `BitMap` (packed 1-bit-per-pixel rows) plus a mask `BitMap`. Converting sprites to native BitMaps would allow `CopyBits` to handle all blitting, eliminating `SpriteManager.ts` entirely.

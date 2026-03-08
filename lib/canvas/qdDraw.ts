@@ -26,8 +26,8 @@ import {
   EraseRect,
   InvertRect,
   FillRect,
-  FrameRoundRect,
-  PaintRoundRect,
+  FrameArc,
+  PaintArc,
   DrawString,
   patXor,
   type GrafPort,
@@ -130,6 +130,15 @@ export function qdFillPattern(
   });
 }
 
+// Round-rect corner arcs: 0°=top, 90°=right, 180°=bottom, 270°=left (QuickDraw clockwise).
+// Each corner draws the convex quarter so the outline/fill matches a proper round rect.
+const ROUND_RECT_CORNERS = [
+  { start: 270, arc: 90 }, // top-left: left to top
+  { start: 0, arc: 90 }, // top-right: top to right
+  { start: 90, arc: 90 }, // bottom-right: right to bottom
+  { start: 180, arc: 90 }, // bottom-left: bottom to left
+];
+
 export function qdFillRoundRect(
   port: GrafPort,
   x: number,
@@ -143,7 +152,24 @@ export function qdFillRoundRect(
   withPort(port, () => {
     PenNormal();
     PenPat(colorToPat(color));
-    PaintRoundRect(makeRect(x, y, x + w, y + h), ovalW, ovalH);
+    const halfOvW = Math.floor(ovalW / 2);
+    const halfOvH = Math.floor(ovalH / 2);
+    const cornerRects = [
+      makeRect(x, y, x + ovalW, y + ovalH),
+      makeRect(x + w - ovalW, y, x + w, y + ovalH),
+      makeRect(x + w - ovalW, y + h - ovalH, x + w, y + h),
+      makeRect(x, y + h - ovalH, x + ovalW, y + h),
+    ];
+    for (let i = 0; i < 4; i++) {
+      PaintArc(
+        cornerRects[i],
+        ROUND_RECT_CORNERS[i].start,
+        ROUND_RECT_CORNERS[i].arc
+      );
+    }
+    PaintRect(makeRect(x, y + halfOvH, x + w, y + h - halfOvH));
+    PaintRect(makeRect(x + halfOvW, y, x + w - halfOvW, y + halfOvH));
+    PaintRect(makeRect(x + halfOvW, y + h - halfOvH, x + w - halfOvW, y + h));
     PenNormal();
   });
 }
@@ -163,7 +189,27 @@ export function qdFrameRoundRect(
     PenNormal();
     PenSize(penWidth, penWidth);
     PenPat(colorToPat(color));
-    FrameRoundRect(makeRect(x, y, x + w, y + h), ovalW, ovalH);
+    const halfOvW = Math.floor(ovalW / 2);
+    const halfOvH = Math.floor(ovalH / 2);
+    const ph = Math.max(1, penWidth);
+    const pw = ph;
+    const cornerRects = [
+      makeRect(x, y, x + ovalW, y + ovalH),
+      makeRect(x + w - ovalW, y, x + w, y + ovalH),
+      makeRect(x + w - ovalW, y + h - ovalH, x + w, y + h),
+      makeRect(x, y + h - ovalH, x + ovalW, y + h),
+    ];
+    for (let i = 0; i < 4; i++) {
+      FrameArc(
+        cornerRects[i],
+        ROUND_RECT_CORNERS[i].start,
+        ROUND_RECT_CORNERS[i].arc
+      );
+    }
+    PaintRect(makeRect(x + halfOvW, y, x + w - halfOvW, y + ph));
+    PaintRect(makeRect(x + halfOvW, y + h - ph, x + w - halfOvW, y + h));
+    PaintRect(makeRect(x, y + halfOvH, x + pw, y + h - halfOvH));
+    PaintRect(makeRect(x + w - pw, y + halfOvH, x + w, y + h - halfOvH));
     PenNormal();
   });
 }
@@ -310,32 +356,39 @@ export function qdMaskPattern(
   h: number,
   pattern: PatternName | Uint8Array
 ): void {
-  // patBic: clears destination bits where pattern is 1 (src & ~dst = keep only 0-bits of pattern)
-  // For gray50 masking (erase every other pixel), we want: dst = dst & ~pat
-  // In QD that's mode srcBic (3) with pattern, but we use direct pixel manipulation here
-  // since QD's patBic mode is "src & ~dst" not "dst & ~src".
-  // We write directly to the pixel buffer for correctness.
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
   const vis = port.visRgn?.rgn.rgnBBox;
   const clip = port.clipRgn?.rgn.rgnBBox;
   const pr = port.portRect;
-  const totalRows = (pixels.length / rowBytes) | 0;
-  const x0 = Math.max(x, vis?.left ?? 0, clip?.left ?? 0, pr.left, 0);
-  const y0 = Math.max(y, vis?.top ?? 0, clip?.top ?? 0, pr.top, 0);
+  const x0 = Math.max(
+    x,
+    vis?.left ?? bnd.left,
+    clip?.left ?? bnd.left,
+    pr.left,
+    bnd.left
+  );
+  const y0 = Math.max(
+    y,
+    vis?.top ?? bnd.top,
+    clip?.top ?? bnd.top,
+    pr.top,
+    bnd.top
+  );
   const x1 = Math.min(
     x + w,
-    vis?.right ?? rowBytes,
-    clip?.right ?? rowBytes,
+    vis?.right ?? bnd.right,
+    clip?.right ?? bnd.right,
     pr.right,
-    rowBytes
+    bnd.right
   );
   const y1 = Math.min(
     y + h,
-    vis?.bottom ?? totalRows,
-    clip?.bottom ?? totalRows,
+    vis?.bottom ?? bnd.bottom,
+    clip?.bottom ?? bnd.bottom,
     pr.bottom,
-    totalRows
+    bnd.bottom
   );
 
   const pat =
@@ -344,11 +397,12 @@ export function qdMaskPattern(
       : (pattern as Pattern);
 
   for (let py = y0; py < y1; py++) {
-    const row = py * rowBytes;
+    const row = (py - bnd.top) * rowBytes;
     const patRow = pat[py & 7];
     for (let px = x0; px < x1; px++) {
       const bit = (patRow >> (7 - (px & 7))) & 1;
-      pixels[row + px] &= bit; // clear pixel where pattern is 0 (keep where 1)
+      const idx = row + (px - bnd.left);
+      pixels[idx] &= bit;
     }
   }
 }

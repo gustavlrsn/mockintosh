@@ -104,14 +104,12 @@ function intersectClip(
   right = Math.min(right, port.portRect.right);
   bottom = Math.min(bottom, port.portRect.bottom);
 
-  // Clamp to pixel buffer bounds
-  left = Math.max(left, 0);
-  top = Math.max(top, 0);
-  right = Math.min(right, port.portBits.rowBytes);
-  bottom = Math.min(
-    bottom,
-    port.portBits.baseAddr.length / port.portBits.rowBytes
-  );
+  // Clamp to portBits.bounds (local coords of the pixel buffer)
+  const bnd = port.portBits.bounds;
+  left = Math.max(left, bnd.left);
+  top = Math.max(top, bnd.top);
+  right = Math.min(right, bnd.right);
+  bottom = Math.min(bottom, bnd.bottom);
 
   if (left >= right || top >= bottom) return null;
   return { left, top, right, bottom };
@@ -194,17 +192,18 @@ export function BitBlt(
   for (let row = 0; row < height; row++) {
     const sy = srcTop + row;
     const dy = dstTop + row;
-    const sRow = sy * srcBits.rowBytes;
-    const dRow = dy * dstBits.rowBytes;
+    const sRow = (sy - srcBits.bounds.top) * srcBits.rowBytes;
+    const dRow = (dy - dstBits.bounds.top) * dstBits.rowBytes;
     for (let col = 0; col < width; col++) {
       const sx = srcLeft + col;
       const dx = dstLeft + col;
 
       const src = usePattern
         ? samplePattern(pat, dx, dy)
-        : srcBits.baseAddr[sRow + sx];
-      const dst = dstBits.baseAddr[dRow + dx];
-      dstBits.baseAddr[dRow + dx] = applyMode(mode, src, dst) & 1;
+        : srcBits.baseAddr[sRow + (sx - srcBits.bounds.left)];
+      const dst = dstBits.baseAddr[dRow + (dx - dstBits.bounds.left)];
+      dstBits.baseAddr[dRow + (dx - dstBits.bounds.left)] =
+        applyMode(mode, src, dst) & 1;
     }
   }
 }
@@ -215,28 +214,18 @@ export function BitBlt(
  */
 
 export function drawPixelToPort(x: number, y: number, port: GrafPort): void {
-  // Check clip
   const vis = port.visRgn.rgn.rgnBBox;
   const clip = port.clipRgn.rgn.rgnBBox;
   const pr = port.portRect;
-  if (x < Math.max(vis.left, clip.left, pr.left, 0)) return;
-  if (y < Math.max(vis.top, clip.top, pr.top, 0)) return;
-  if (x >= Math.min(vis.right, clip.right, pr.right, port.portBits.rowBytes))
-    return;
-  if (
-    y >=
-    Math.min(
-      vis.bottom,
-      clip.bottom,
-      pr.bottom,
-      (port.portBits.baseAddr.length / port.portBits.rowBytes) | 0
-    )
-  )
-    return;
+  const bnd = port.portBits.bounds;
+  if (x < Math.max(vis.left, clip.left, pr.left, bnd.left)) return;
+  if (y < Math.max(vis.top, clip.top, pr.top, bnd.top)) return;
+  if (x >= Math.min(vis.right, clip.right, pr.right, bnd.right)) return;
+  if (y >= Math.min(vis.bottom, clip.bottom, pr.bottom, bnd.bottom)) return;
 
   const patPx = samplePattern(port.pnPat, x, y);
   const mode = port.pnMode;
-  const idx = y * port.portBits.rowBytes + x;
+  const idx = (y - bnd.top) * port.portBits.rowBytes + (x - bnd.left);
   const dst = port.portBits.baseAddr[idx];
   port.portBits.baseAddr[idx] = applyMode(mode, patPx, dst) & 1;
 }
@@ -269,19 +258,20 @@ export function drawRectToPort(
 
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
   const hasComplexClip =
     (port.visRgn.rgn.scanlines && port.visRgn.rgn.scanlines.length > 0) ||
     (port.clipRgn.rgn.scanlines && port.clipRgn.rgn.scanlines.length > 0);
 
   for (let y = cl.top; y < cl.bottom; y++) {
-    const row = y * rowBytes;
+    const row = (y - bnd.top) * rowBytes;
     for (let x = cl.left; x < cl.right; x++) {
       if (hasComplexClip) {
         if (!pointInRegion(port.visRgn, x, y)) continue;
         if (!pointInRegion(port.clipRgn, x, y)) continue;
       }
       const src = samplePattern(pat, x, y);
-      const idx = row + x;
+      const idx = row + (x - bnd.left);
       pixels[idx] = applyMode(mode, src, pixels[idx]) & 1;
     }
   }
@@ -322,7 +312,7 @@ export function bmSetPixel(
     h >= bm.bounds.right
   )
     return;
-  const idx = v * bm.rowBytes + h;
+  const idx = (v - bm.bounds.top) * bm.rowBytes + (h - bm.bounds.left);
   if (idx >= 0 && idx < bm.baseAddr.length) bm.baseAddr[idx] = color & 1;
 }
 
@@ -338,7 +328,7 @@ export function bmGetPixel(bm: BitMap, h: number, v: number): number {
     h >= bm.bounds.right
   )
     return 0;
-  const idx = v * bm.rowBytes + h;
+  const idx = (v - bm.bounds.top) * bm.rowBytes + (h - bm.bounds.left);
   if (idx < 0 || idx >= bm.baseAddr.length) return 0;
   return bm.baseAddr[idx] & 1;
 }

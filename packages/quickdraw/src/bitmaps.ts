@@ -74,14 +74,12 @@ export function CopyBits(
     );
   }
 
-  // Clamp to buffer bounds
-  clipLeft = Math.max(clipLeft, 0);
-  clipTop = Math.max(clipTop, 0);
-  clipRight = Math.min(clipRight, dstBits.rowBytes);
-  clipBottom = Math.min(
-    clipBottom,
-    (dstBits.baseAddr.length / dstBits.rowBytes) | 0
-  );
+  // Clamp to destination bitmap bounds
+  const dstBnd = dstBits.bounds;
+  clipLeft = Math.max(clipLeft, dstBnd.left);
+  clipTop = Math.max(clipTop, dstBnd.top);
+  clipRight = Math.min(clipRight, dstBnd.right);
+  clipBottom = Math.min(clipBottom, dstBnd.bottom);
 
   if (clipLeft >= clipRight || clipTop >= clipBottom) return;
 
@@ -99,8 +97,8 @@ export function CopyBits(
     if (hasMask && maskRgn && !pointInRegion(maskRgn, 0, dy)) continue;
 
     const sy = (srcRect.top + (dy - dstRect.top) * yScale) | 0;
-    const sRow = sy * srcBits.rowBytes;
-    const dRow = dy * dstBits.rowBytes;
+    const sRow = (sy - srcBits.bounds.top) * srcBits.rowBytes;
+    const dRow = (dy - dstBits.bounds.top) * dstBits.rowBytes;
 
     for (let dx = clipLeft; dx < clipRight; dx++) {
       if (hasMask && maskRgn && !pointInRegion(maskRgn, dx, dy)) continue;
@@ -111,10 +109,13 @@ export function CopyBits(
 
       const sx = (srcRect.left + (dx - dstRect.left) * xScale) | 0;
       const srcPx =
-        sx >= 0 && sx < srcBits.rowBytes && sRow + sx < srcBits.baseAddr.length
-          ? srcBits.baseAddr[sRow + sx]
+        sx >= srcBits.bounds.left &&
+        sx < srcBits.bounds.right &&
+        sRow + (sx - srcBits.bounds.left) < srcBits.baseAddr.length
+          ? srcBits.baseAddr[sRow + (sx - srcBits.bounds.left)]
           : 0;
-      const dstPx = dstBits.baseAddr[dRow + dx];
+      const dIdx = dRow + (dx - dstBits.bounds.left);
+      const dstPx = dstBits.baseAddr[dIdx];
 
       let result: number;
       switch (mode & 7) {
@@ -135,7 +136,7 @@ export function CopyBits(
       }
       if (mode >= 4 && mode <= 7) result = 1 - result; // not* variants
 
-      dstBits.baseAddr[dRow + dx] = result & 1;
+      dstBits.baseAddr[dIdx] = result & 1;
     }
   }
 }
@@ -187,23 +188,24 @@ export function ScrollRect(
   const csBottom = cdBottom - dv;
 
   if (cdLeft < cdRight && cdTop < cdBottom) {
-    // Copy pixels (must handle direction to avoid overwrite)
+    const bndTop = bm.bounds.top;
+    const bndLeft = bm.bounds.left;
     if (dv > 0) {
       for (let y = cdBottom - 1; y >= cdTop; y--) {
         const sy = y - dv;
         bm.baseAddr.copyWithin(
-          y * bm.rowBytes + cdLeft,
-          sy * bm.rowBytes + csLeft,
-          sy * bm.rowBytes + csRight
+          (y - bndTop) * bm.rowBytes + (cdLeft - bndLeft),
+          (sy - bndTop) * bm.rowBytes + (csLeft - bndLeft),
+          (sy - bndTop) * bm.rowBytes + (csRight - bndLeft)
         );
       }
     } else {
       for (let y = cdTop; y < cdBottom; y++) {
         const sy = y - dv;
         bm.baseAddr.copyWithin(
-          y * bm.rowBytes + cdLeft,
-          sy * bm.rowBytes + csLeft,
-          sy * bm.rowBytes + csRight
+          (y - bndTop) * bm.rowBytes + (cdLeft - bndLeft),
+          (sy - bndTop) * bm.rowBytes + (csLeft - bndLeft),
+          (sy - bndTop) * bm.rowBytes + (csRight - bndLeft)
         );
       }
     }

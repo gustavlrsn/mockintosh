@@ -56,13 +56,34 @@ function _clip(port: GrafPort): { x: number; y: number; w: number; h: number } {
   const vis = port.visRgn?.rgn.rgnBBox;
   const clip = port.clipRgn?.rgn.rgnBBox;
   const pr = port.portRect;
-  const rw = port.portBits.rowBytes;
-  const rh = (port.portBits.baseAddr.length / rw) | 0;
-  const x = Math.max(vis?.left ?? 0, clip?.left ?? 0, pr.left, 0);
-  const y = Math.max(vis?.top ?? 0, clip?.top ?? 0, pr.top, 0);
-  const x2 = Math.min(vis?.right ?? rw, clip?.right ?? rw, pr.right, rw);
-  const y2 = Math.min(vis?.bottom ?? rh, clip?.bottom ?? rh, pr.bottom, rh);
-  return { x, y, w: x2 - x, h: y2 - y };
+  const bnd = port.portBits.bounds;
+  const x = Math.max(
+    vis?.left ?? bnd.left,
+    clip?.left ?? bnd.left,
+    pr.left,
+    bnd.left
+  );
+  const y = Math.max(
+    vis?.top ?? bnd.top,
+    clip?.top ?? bnd.top,
+    pr.top,
+    bnd.top
+  );
+  const x2 = Math.min(
+    vis?.right ?? bnd.right,
+    clip?.right ?? bnd.right,
+    pr.right,
+    bnd.right
+  );
+  const y2 = Math.min(
+    vis?.bottom ?? bnd.bottom,
+    clip?.bottom ?? bnd.bottom,
+    pr.bottom,
+    bnd.bottom
+  );
+  const w = Math.max(0, x2 - x);
+  const h = Math.max(0, y2 - y);
+  return { x: x - bnd.left, y: y - bnd.top, w, h };
 }
 
 // -------------------------------------------------------------------------

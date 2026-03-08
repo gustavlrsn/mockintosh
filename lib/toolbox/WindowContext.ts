@@ -103,6 +103,9 @@ export class WindowContext {
   private _contentTopInset: number;
   private _windowScrollY: number;
   private _windowScrollX: number;
+  /** Screen position of this context's content area (for hit region registration). */
+  private _contentRectX: number;
+  private _contentRectY: number;
 
   constructor(
     port: GrafPort,
@@ -123,7 +126,9 @@ export class WindowContext {
     windowSize?: { width: number; height: number },
     contentTopInset: number = 0,
     windowScrollY: number = 0,
-    windowScrollX: number = 0
+    windowScrollX: number = 0,
+    contentRectX?: number,
+    contentRectY?: number
   ) {
     this.port = port;
     this.bc = _portToBitCanvas(port);
@@ -140,7 +145,8 @@ export class WindowContext {
     this._contentTopInset = contentTopInset;
     this._windowScrollY = windowScrollY;
     this._windowScrollX = windowScrollX;
-    this.bc.pushClip(x, y, w, h);
+    this._contentRectX = contentRectX ?? x;
+    this._contentRectY = contentRectY ?? y;
   }
 
   // -----------------------------------------------------------------------
@@ -160,9 +166,7 @@ export class WindowContext {
     return this.scrollOffsetX;
   }
 
-  release() {
-    this.bc.popClip();
-  }
+  release() {}
 
   // -----------------------------------------------------------------------
   // Coordinate translation
@@ -173,6 +177,13 @@ export class WindowContext {
   }
   private ty(y: number): number {
     return this.oy + y - this.scrollOffsetY;
+  }
+  /** Screen position for drawing paths that use the BitCanvas shim (full-screen buffer). */
+  private screenX(x: number): number {
+    return this._contentRectX + this.tx(x);
+  }
+  private screenY(y: number): number {
+    return this._contentRectY + this.ty(y);
   }
 
   // -----------------------------------------------------------------------
@@ -186,8 +197,8 @@ export class WindowContext {
   getPixel(x: number, y: number): number {
     const px = this.tx(x);
     const py = this.ty(y);
-    const { baseAddr, rowBytes } = this.port.portBits;
-    const idx = py * rowBytes + px;
+    const { baseAddr, rowBytes, bounds } = this.port.portBits;
+    const idx = (py - bounds.top) * rowBytes + (px - bounds.left);
     if (idx < 0 || idx >= baseAddr.length) return 0;
     return baseAddr[idx];
   }
@@ -340,7 +351,7 @@ export class WindowContext {
   // -----------------------------------------------------------------------
 
   pushClip(x: number, y: number, w: number, h: number) {
-    this.bc.pushClip(this.tx(x), this.ty(y), w, h);
+    this.bc.pushClip(this.screenX(x), this.screenY(y), w, h);
   }
 
   popClip() {
@@ -352,7 +363,7 @@ export class WindowContext {
   // -----------------------------------------------------------------------
 
   drawText(text: string, x: number, y: number, opts: TextOptions = {}) {
-    drawBitmapText(this.bc, text, this.tx(x), this.ty(y), opts);
+    drawBitmapText(this.bc, text, this.screenX(x), this.screenY(y), opts);
   }
 
   // -----------------------------------------------------------------------
@@ -405,7 +416,14 @@ export class WindowContext {
     }
   ) {
     const h = height ?? 16;
-    drawTextEditField(this.port, state, this.tx(x), this.ty(y), width, h);
+    drawTextEditField(
+      this.port,
+      state,
+      this.screenX(x),
+      this.screenY(y),
+      width,
+      h
+    );
 
     if (this._hitRegions && options?.id) {
       const onChange = options.onChange;
@@ -422,7 +440,7 @@ export class WindowContext {
             onChange?.();
           },
           onDrag: (absX: number) => {
-            const localX = absX - this.tx(x);
+            const localX = absX - this.screenX(x);
             if (_handleTextInputDrag(state, localX)) {
               onChange?.();
             }
@@ -451,8 +469,8 @@ export class WindowContext {
       drawBitmapText(
         this.bc,
         lines[i],
-        this.ox + opts.x - this.scrollOffsetX,
-        this.oy + ly - this.scrollOffsetY,
+        this.screenX(opts.x),
+        this.screenY(ly),
         { font, color }
       );
     }
@@ -491,25 +509,30 @@ export class WindowContext {
     const sbW = SCROLL_AREA_BAR_WIDTH;
     const contentW = rect.w - sbW;
 
-    const absX = this.ox + rect.x - this.scrollOffsetX;
-    const absY = this.oy + rect.y - this.scrollOffsetY;
-
     const contentCtx = new WindowContext(
       this.port,
-      absX,
-      absY,
+      rect.x,
+      rect.y,
       contentW,
       rect.h,
       clampedOffset,
       0,
-      this._hitRegions
+      this._hitRegions,
+      undefined,
+      undefined,
+      undefined,
+      0,
+      0,
+      0,
+      this._contentRectX + rect.x,
+      this._contentRectY + rect.y
     );
     drawContent(contentCtx);
     contentCtx.release();
 
-    // Scrollbar chrome
-    const sbx = absX + contentW;
-    const sby = absY;
+    // Scrollbar chrome (port-local coords)
+    const sbx = rect.x + contentW;
+    const sby = rect.y;
     const bodyH = rect.h - growBoxSize;
 
     qdDrawVLine(this.port, sbx, sby, rect.h, BLACK);
@@ -577,11 +600,11 @@ export class WindowContext {
       qdDrawRect(this.port, gbx + 5, gby + 3, 7, 7, BLACK);
     }
 
-    // Hit regions
+    // Hit regions (screen-space)
     this._hitRegions.add({
       id: `${id}-scroll-up`,
-      x: sbx,
-      y: sby,
+      x: this._contentRectX + sbx,
+      y: this._contentRectY + sby,
       w: sbW,
       h: SCROLL_AREA_ARROW_HEIGHT,
       onMouseDown: () => {
@@ -591,8 +614,8 @@ export class WindowContext {
 
     this._hitRegions.add({
       id: `${id}-scroll-down`,
-      x: sbx,
-      y: downTop,
+      x: this._contentRectX + sbx,
+      y: this._contentRectY + downTop,
       w: sbW,
       h: SCROLL_AREA_ARROW_HEIGHT,
       onMouseDown: () => {
@@ -607,8 +630,8 @@ export class WindowContext {
       );
       this._hitRegions.add({
         id: `${id}-scroll-track`,
-        x: sbx,
-        y: trackTop,
+        x: this._contentRectX + sbx,
+        y: this._contentRectY + trackTop,
         w: sbW,
         h: trackH,
         onMouseDown: (_lx: number, ly: number) => {
@@ -620,8 +643,8 @@ export class WindowContext {
 
     this._hitRegions.add({
       id: `${id}-scroll-wheel`,
-      x: absX,
-      y: absY,
+      x: this._contentRectX + rect.x,
+      y: this._contentRectY + rect.y,
       w: rect.w,
       h: rect.h,
       onScroll: (deltaY: number) => {
@@ -637,12 +660,17 @@ export class WindowContext {
       const winH = this._windowSize?.height ?? this.h + 20;
       this._hitRegions.add({
         id: `${id}-grow-box`,
-        x: gbx,
-        y: gby,
+        x: this._contentRectX + gbx,
+        y: this._contentRectY + gby,
         w: GROW_BOX_SIZE,
         h: GROW_BOX_SIZE,
         onMouseDown: (lx: number, ly: number) => {
-          onStartResize(gbx + lx, gby + ly, winW, winH);
+          onStartResize(
+            this._contentRectX + gbx + lx,
+            this._contentRectY + gby + ly,
+            winW,
+            winH
+          );
         },
       });
     }
@@ -664,7 +692,12 @@ export class WindowContext {
       this._hitRegions,
       this._onStartResize,
       this._minSize,
-      this._windowSize
+      this._windowSize,
+      0,
+      this._windowScrollY,
+      this._windowScrollX,
+      this._contentRectX,
+      this._contentRectY + inset
     );
     drawContent(scrollCtx);
     scrollCtx.release();
@@ -682,8 +715,8 @@ export class WindowContext {
     if (!this._hitRegions) return;
     this._hitRegions.add({
       id,
-      x: this.tx(rect.x),
-      y: this.ty(rect.y),
+      x: this._contentRectX + this.tx(rect.x),
+      y: this._contentRectY + this.ty(rect.y),
       w: rect.w,
       h: rect.h,
       ...callbacks,

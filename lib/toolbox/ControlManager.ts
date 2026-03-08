@@ -10,11 +10,7 @@
  */
 
 import type { GrafPort } from "@mockintosh/quickdraw";
-import {
-  drawBitmapText,
-  measureText,
-  getLineHeight,
-} from "../canvas/fontAdapter";
+import { measureText, getLineHeight } from "../canvas/fontAdapter";
 import {
   qdFillRect,
   qdDrawRect,
@@ -24,8 +20,9 @@ import {
   qdDrawHLine,
   qdDrawVLine,
   qdSetPixel,
+  qdDrawText,
 } from "../canvas/qdDraw";
-import { BitCanvas, BLACK, WHITE } from "../canvas/BitCanvas";
+import { BLACK, WHITE } from "../canvas/BitCanvas";
 
 // -------------------------------------------------------------------------
 // Types
@@ -82,20 +79,11 @@ const CHECKBOX_SIZE = 12;
 const RADIO_SIZE = 12;
 const CONTROL_TEXT_GAP = 4;
 
-function _shim(port: GrafPort): BitCanvas {
-  const { baseAddr, rowBytes } = port.portBits;
-  const h = (baseAddr.length / rowBytes) | 0;
-  const bc = new BitCanvas(rowBytes, h);
-  (bc as any).pixels = baseAddr;
-  return bc;
-}
-
 // -------------------------------------------------------------------------
 // DrawControl — Button
 // -------------------------------------------------------------------------
 
 export function drawButton(port: GrafPort, btn: ButtonDef): ControlRect {
-  const bc = _shim(port);
   const h = btn.height ?? 20;
   const textW = measureText(btn.label, "ChiKareGo");
   const w = btn.width ?? textW + 20;
@@ -103,21 +91,26 @@ export function drawButton(port: GrafPort, btn: ButtonDef): ControlRect {
   const isDefault = btn.default === true;
 
   if (isDefault) {
-    const ox = x - DEFAULT_OUTLINE_INSET;
-    const oy = y - DEFAULT_OUTLINE_INSET;
-    const ow = w + DEFAULT_OUTLINE_INSET * 2;
-    const oh = h + DEFAULT_OUTLINE_INSET * 2;
-    qdFrameRoundRect(
-      port,
-      ox,
-      oy,
-      ow,
-      oh,
-      DEFAULT_OUTLINE_OVAL,
-      DEFAULT_OUTLINE_OVAL,
-      DEFAULT_OUTLINE_PEN,
-      BLACK
-    );
+    const pr = port.portRect;
+    const ox = Math.max(pr.left, x - DEFAULT_OUTLINE_INSET);
+    const oy = Math.max(pr.top, y - DEFAULT_OUTLINE_INSET);
+    const ox2 = Math.min(pr.right, x + w + DEFAULT_OUTLINE_INSET);
+    const oy2 = Math.min(pr.bottom, y + h + DEFAULT_OUTLINE_INSET);
+    const ow = ox2 - ox;
+    const oh = oy2 - oy;
+    if (ow > 0 && oh > 0) {
+      qdFrameRoundRect(
+        port,
+        ox,
+        oy,
+        ow,
+        oh,
+        DEFAULT_OUTLINE_OVAL,
+        DEFAULT_OUTLINE_OVAL,
+        DEFAULT_OUTLINE_PEN,
+        BLACK
+      );
+    }
   }
 
   qdFrameRoundRect(
@@ -152,11 +145,7 @@ export function drawButton(port: GrafPort, btn: ButtonDef): ControlRect {
     );
   }
 
-  drawBitmapText(bc, btn.label, tx, ty, {
-    font: "ChiKareGo",
-    color: btn.active ? WHITE : BLACK,
-    height: lineHeight,
-  });
+  qdDrawText(port, btn.label, tx, ty, btn.active ? WHITE : BLACK);
 
   if (btn.disabled) {
     qdFillPattern(port, x + inset, y + inset, innerW, innerH, "gray50");
@@ -178,7 +167,6 @@ export function drawButton(port: GrafPort, btn: ButtonDef): ControlRect {
 // -------------------------------------------------------------------------
 
 export function drawCheckbox(port: GrafPort, def: CheckboxDef): ControlRect {
-  const bc = _shim(port);
   const { x, y, label, checked, disabled } = def;
   const lineH = getLineHeight("ChiKareGo");
   const boxY = y + Math.max(0, Math.floor((lineH - CHECKBOX_SIZE) / 2));
@@ -202,7 +190,7 @@ export function drawCheckbox(port: GrafPort, def: CheckboxDef): ControlRect {
   }
 
   const textX = x + CHECKBOX_SIZE + CONTROL_TEXT_GAP;
-  drawBitmapText(bc, label, textX, y, { font: "ChiKareGo", color: BLACK });
+  qdDrawText(port, label, textX, y, BLACK);
 
   if (disabled) {
     const totalW =
@@ -223,7 +211,6 @@ export function drawRadioButton(
   port: GrafPort,
   def: RadioButtonDef
 ): ControlRect {
-  const bc = _shim(port);
   const { x, y, label, selected, disabled } = def;
   const lineH = getLineHeight("ChiKareGo");
   const circY = y + Math.max(0, Math.floor((lineH - RADIO_SIZE) / 2));
@@ -240,7 +227,7 @@ export function drawRadioButton(
   }
 
   const textX = x + RADIO_SIZE + CONTROL_TEXT_GAP;
-  drawBitmapText(bc, label, textX, y, { font: "ChiKareGo", color: BLACK });
+  qdDrawText(port, label, textX, y, BLACK);
 
   if (disabled) {
     const totalW =

@@ -4,6 +4,7 @@ import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppRegistry } from "../lib/canvas/AppRegistry";
 import { EventManager, OSEvent } from "../lib/toolbox/EventManager";
 import { WindowManager, TITLE_BAR_HEIGHT } from "../lib/toolbox/WindowManager";
+import { getWindowPort } from "../lib/toolbox/WindowPort";
 import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { registerAllSprites } from "../lib/canvas/sprites";
 import { HitRegionMap } from "../lib/canvas/HitRegion";
@@ -1264,8 +1265,10 @@ async function main() {
         windowCallbacks
       );
 
+      const contentRect = windowManager.getContentRect(win);
+      const winPort = getWindowPort(win.id, contentRect, screenPort);
       const contentCtx = windowManager.createWindowContext(
-        screenPort,
+        winPort,
         win,
         hitRegions
       );
@@ -1336,27 +1339,39 @@ async function main() {
   __injectFontFunctions(
     (text) => measureText(text, "ChiKareGo"),
     (text: string, x: number, y: number, port: GrafPort) => {
-      const { baseAddr, rowBytes } = port.portBits;
+      const { baseAddr, rowBytes, bounds } = port.portBits;
       const cl = port.clipRgn?.rgn.rgnBBox;
       const vis = port.visRgn?.rgn.rgnBBox;
       const pr = port.portRect;
-      const clipLeft = Math.max(cl?.left ?? 0, vis?.left ?? 0, pr.left, 0);
-      const clipTop = Math.max(cl?.top ?? 0, vis?.top ?? 0, pr.top, 0);
+      const clipLeft = Math.max(
+        cl?.left ?? bounds.left,
+        vis?.left ?? bounds.left,
+        pr.left,
+        bounds.left
+      );
+      const clipTop = Math.max(
+        cl?.top ?? bounds.top,
+        vis?.top ?? bounds.top,
+        pr.top,
+        bounds.top
+      );
       const clipRight = Math.min(
-        cl?.right ?? rowBytes,
-        vis?.right ?? rowBytes,
+        cl?.right ?? bounds.right,
+        vis?.right ?? bounds.right,
         pr.right,
-        rowBytes
+        bounds.right
       );
       const clipBottom = Math.min(
-        cl?.bottom ?? baseAddr.length / rowBytes,
-        vis?.bottom ?? baseAddr.length / rowBytes,
+        cl?.bottom ?? bounds.bottom,
+        vis?.bottom ?? bounds.bottom,
         pr.bottom,
-        (baseAddr.length / rowBytes) | 0
+        bounds.bottom
       );
       drawBitmapTextToPixels(
         baseAddr,
         rowBytes,
+        bounds.left,
+        bounds.top,
         clipLeft,
         clipTop,
         clipRight,

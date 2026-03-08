@@ -17,6 +17,7 @@ import {
   qdSetPixel,
 } from "../canvas/qdDraw";
 import { blitSprite, fillSpriteTile } from "../canvas/SpriteManager";
+import { closeWindowPort } from "./WindowPort";
 
 // ---------------------------------------------------------------------------
 // Window kind — Mac-aligned classification of every window
@@ -266,6 +267,7 @@ export class WindowManager {
   }
 
   closeWindow(id: string) {
+    closeWindowPort(id);
     this.windows = this.windows.filter((w) => w.id !== id);
     this._notifyActiveChange(() => this._updateActive());
   }
@@ -613,8 +615,8 @@ export class WindowManager {
     const mainScrollX = inset > 0 ? 0 : win.scrollX;
     return new WindowContext(
       port,
-      r.x,
-      r.y,
+      0,
+      0,
       r.w,
       r.h,
       mainScrollY,
@@ -625,7 +627,9 @@ export class WindowManager {
       { width: win.width, height: win.height },
       inset,
       win.scrollY,
-      win.scrollX
+      win.scrollX,
+      r.x,
+      r.y
     );
   }
 

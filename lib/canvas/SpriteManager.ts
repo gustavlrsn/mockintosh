@@ -27,22 +27,31 @@ function getPortClip(port: GrafPort): ClipBounds {
   const vis = port.visRgn?.rgn.rgnBBox;
   const clip = port.clipRgn?.rgn.rgnBBox;
   const pr = port.portRect;
-  const rowBytes = port.portBits.rowBytes;
-  const totalRows = (port.portBits.baseAddr.length / rowBytes) | 0;
+  const bnd = port.portBits.bounds;
 
-  const left = Math.max(vis?.left ?? 0, clip?.left ?? 0, pr.left, 0);
-  const top = Math.max(vis?.top ?? 0, clip?.top ?? 0, pr.top, 0);
+  const left = Math.max(
+    vis?.left ?? bnd.left,
+    clip?.left ?? bnd.left,
+    pr.left,
+    bnd.left
+  );
+  const top = Math.max(
+    vis?.top ?? bnd.top,
+    clip?.top ?? bnd.top,
+    pr.top,
+    bnd.top
+  );
   const right = Math.min(
-    vis?.right ?? rowBytes,
-    clip?.right ?? rowBytes,
+    vis?.right ?? bnd.right,
+    clip?.right ?? bnd.right,
     pr.right,
-    rowBytes
+    bnd.right
   );
   const bottom = Math.min(
-    vis?.bottom ?? totalRows,
-    clip?.bottom ?? totalRows,
+    vis?.bottom ?? bnd.bottom,
+    clip?.bottom ?? bnd.bottom,
     pr.bottom,
-    totalRows
+    bnd.bottom
   );
 
   return { left, top, right, bottom };
@@ -63,19 +72,20 @@ export function blitSprite(
   const { width: sw, height: sh, data, mask } = sprite;
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
   const cl = getPortClip(port);
 
   for (let sy = 0; sy < sh; sy++) {
     const ty = dy + sy;
     if (ty < cl.top || ty >= cl.bottom) continue;
     const srcRow = sy * sw;
-    const dstRow = ty * rowBytes;
+    const dstRow = (ty - bnd.top) * rowBytes;
     for (let sx = 0; sx < sw; sx++) {
       const tx = dx + sx;
       if (tx < cl.left || tx >= cl.right) continue;
       const si = srcRow + sx;
       if (mask && !mask[si]) continue;
-      pixels[dstRow + tx] = data[si];
+      pixels[dstRow + (tx - bnd.left)] = data[si];
     }
   }
 }
@@ -95,19 +105,20 @@ export function blitSpriteInverted(
   const { width: sw, height: sh, data, mask } = sprite;
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
   const cl = getPortClip(port);
 
   for (let sy = 0; sy < sh; sy++) {
     const ty = dy + sy;
     if (ty < cl.top || ty >= cl.bottom) continue;
     const srcRow = sy * sw;
-    const dstRow = ty * rowBytes;
+    const dstRow = (ty - bnd.top) * rowBytes;
     for (let sx = 0; sx < sw; sx++) {
       const tx = dx + sx;
       if (tx < cl.left || tx >= cl.right) continue;
       const si = srcRow + sx;
       if (mask && !mask[si]) continue;
-      pixels[dstRow + tx] = data[si] ^ 1;
+      pixels[dstRow + (tx - bnd.left)] = data[si] ^ 1;
     }
   }
 }
@@ -128,25 +139,25 @@ export function blitSpriteShadowOutline(
   if (!mask) return blitSprite(port, sprite, dx, dy);
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
   const cl = getPortClip(port);
 
   for (let sy = 0; sy < sh; sy++) {
     const ty = dy + sy;
     if (ty < cl.top || ty >= cl.bottom) continue;
     const srcRow = sy * sw;
-    const dstRow = ty * rowBytes;
+    const dstRow = (ty - bnd.top) * rowBytes;
     for (let sx = 0; sx < sw; sx++) {
       const tx = dx + sx;
       if (tx < cl.left || tx >= cl.right) continue;
       const si = srcRow + sx;
       if (!mask[si]) continue;
-      // Same dither pattern as BitCanvas.blitShadowOutline
       const color =
         (tx % 4 === 0 && ty % 2 === 0) ||
         (tx % 2 === 0 && tx % 4 !== 0 && ty % 2 !== 0)
           ? 1
           : 0;
-      pixels[dstRow + tx] = color;
+      pixels[dstRow + (tx - bnd.left)] = color;
     }
   }
 }
@@ -168,13 +179,14 @@ export function blitSpriteOutline(
   if (!mask) return;
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
   const cl = getPortClip(port);
 
   for (let sy = 0; sy < sh; sy++) {
     const ty = dy + sy;
     if (ty < cl.top || ty >= cl.bottom) continue;
     const srcRow = sy * sw;
-    const dstRow = ty * rowBytes;
+    const dstRow = (ty - bnd.top) * rowBytes;
     for (let sx = 0; sx < sw; sx++) {
       const si = srcRow + sx;
       if (!mask[si]) continue;
@@ -190,7 +202,7 @@ export function blitSpriteOutline(
       if (!hasTransparentNeighbor) continue;
       const tx = dx + sx;
       if (tx < cl.left || tx >= cl.right) continue;
-      pixels[dstRow + tx] = color;
+      pixels[dstRow + (tx - bnd.left)] = color;
     }
   }
 }
@@ -210,19 +222,20 @@ export function blitImageData(
   const { width: sw, height: sh, data } = imageData;
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
   const cl = getPortClip(port);
 
   for (let sy = 0; sy < sh; sy++) {
     const ty = dy + sy;
     if (ty < cl.top || ty >= cl.bottom) continue;
-    const dstRow = ty * rowBytes;
+    const dstRow = (ty - bnd.top) * rowBytes;
     for (let sx = 0; sx < sw; sx++) {
       const tx = dx + sx;
       if (tx < cl.left || tx >= cl.right) continue;
       const si = (sy * sw + sx) * 4;
       const alpha = data[si + 3];
       if (alpha < 128) continue;
-      pixels[dstRow + tx] = data[si] < 128 ? 1 : 0;
+      pixels[dstRow + (tx - bnd.left)] = data[si] < 128 ? 1 : 0;
     }
   }
 }
@@ -241,11 +254,12 @@ export function blit1bitPixels(
 ): void {
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
   const cl = getPortClip(port);
 
   const sx0 = Math.max(0, cl.left - dx);
   const sy0 = Math.max(0, cl.top - dy);
-  const sx1 = Math.min(srcW, cl.right - dx, rowBytes - dx);
+  const sx1 = Math.min(srcW, cl.right - dx);
   const sy1 = Math.min(srcH, cl.bottom - dy);
 
   if (sx0 >= sx1 || sy0 >= sy1) return;
@@ -254,7 +268,7 @@ export function blit1bitPixels(
   for (let sy = sy0; sy < sy1; sy++) {
     pixels.set(
       src.subarray(sy * srcW + sx0, sy * srcW + sx0 + copyW),
-      (dy + sy) * rowBytes + dx + sx0
+      (dy + sy - bnd.top) * rowBytes + (dx + sx0 - bnd.left)
     );
   }
 }
@@ -278,6 +292,7 @@ export function fillSpriteTile(
   const { width: sw, height: sh, data } = sprite;
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
   const cl = getPortClip(port);
 
   const x0 = Math.max(x, cl.left);
@@ -286,11 +301,11 @@ export function fillSpriteTile(
   const y1 = Math.min(y + h, cl.bottom);
 
   for (let py = y0; py < y1; py++) {
-    const row = py * rowBytes;
+    const row = (py - bnd.top) * rowBytes;
     const sy = (((py - y) % sh) + sh) % sh;
     for (let px = x0; px < x1; px++) {
       const sx = (((px - x) % sw) + sw) % sw;
-      pixels[row + px] = data[sy * sw + sx];
+      pixels[row + (px - bnd.left)] = data[sy * sw + sx];
     }
   }
 }

@@ -16,7 +16,8 @@ export function GetPixel(h: number, v: number): boolean {
   if (!port) return false;
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
-  const idx = v * rowBytes + h;
+  const bnd = port.portBits.bounds;
+  const idx = (v - bnd.top) * rowBytes + (h - bnd.left);
   if (idx < 0 || idx >= pixels.length) return false;
   return pixels[idx] === 1;
 }

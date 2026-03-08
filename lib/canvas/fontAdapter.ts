@@ -227,6 +227,8 @@ export function drawBitmapText(
 export function drawBitmapTextToPixels(
   pixels: Uint8Array,
   rowBytes: number,
+  boundsLeft: number,
+  boundsTop: number,
   clipLeft: number,
   clipTop: number,
   clipRight: number,
@@ -269,11 +271,11 @@ export function drawBitmapTextToPixels(
         const ty = gy + gy2;
         if (ty < 0) continue;
         const srcRow = gy2 * gw;
-        const dstRow = ty * rowBytes;
+        const dstRow = (ty - boundsTop) * rowBytes;
         for (let gx2 = x0; gx2 < x1; gx2++) {
           if (data[srcRow + gx2]) {
             const tx = gx + gx2;
-            if (tx >= 0) pixels[dstRow + tx] = color;
+            if (tx >= 0) pixels[dstRow + (tx - boundsLeft)] = color;
           }
         }
       }
