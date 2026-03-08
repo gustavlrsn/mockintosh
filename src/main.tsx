@@ -3,13 +3,31 @@ import { WindowContext } from "../lib/toolbox/WindowContext";
 import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { AppRegistry } from "../lib/canvas/AppRegistry";
 import { EventManager, OSEvent } from "../lib/toolbox/EventManager";
-import { WindowManager, TITLE_BAR_HEIGHT } from "../lib/toolbox/WindowManager";
-import { getWindowPort } from "../lib/toolbox/WindowPort";
+import {
+  WindowManager,
+  TITLE_BAR_HEIGHT,
+  INFO_BAR_HEIGHT,
+  SCROLLBAR_WIDTH,
+  inContent,
+  inVScroll,
+  inHScroll,
+} from "../lib/toolbox/WindowManager";
+import {
+  FindControl,
+  FindControlInWindow,
+  TrackControl,
+  GetControlValue,
+  inThumb,
+  type ControlHandle,
+} from "../lib/toolbox/ControlManager";
+import { makePoint, type Point } from "@mockintosh/quickdraw";
 import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { registerAllSprites } from "../lib/canvas/sprites";
 import { HitRegionMap } from "../lib/canvas/HitRegion";
-import { drawBitmapTextToPixels, measureText } from "../lib/canvas/fontAdapter";
-import { InitFonts } from "../lib/toolbox/FontManager";
+import {
+  InitFonts,
+  installQuickDrawFontBridge,
+} from "../lib/toolbox/FontManager";
 import {
   InitGraf,
   __injectFontFunctions,
@@ -57,6 +75,7 @@ import { ChatGippityApp } from "../apps/ChatGippity";
 import { SpotifyPlayerApp } from "../apps/SpotifyPlayer";
 import { spotifySprites } from "../apps/sprites/spotify";
 import { DialogApp, computeDialogSize } from "../apps/Dialog";
+import { TestingApp } from "../apps/Testing";
 
 import { resolution } from "../lib/config";
 import getDefaultPosition from "../utils/getDefaultPosition";
@@ -316,6 +335,7 @@ async function main() {
     ChatGippityApp,
     SpotifyPlayerApp,
     DialogApp,
+    TestingApp,
   ].forEach((a) => appRegistry.register(a));
 
   // Register multi-window apps
@@ -330,6 +350,14 @@ async function main() {
   let cursorX = 0;
   let cursorY = 0;
   let zoom = 1;
+  /** When non-null, we are tracking a control (FindControl + TrackControl); consume next mouseUp and skip hit regions. */
+  let controlTracking: {
+    onTrackEnd: (upPoint: Point) => number;
+    onTrackMove?: (point: Point) => void;
+    windowId: string;
+    theControl: ControlHandle;
+    isScrollBar: boolean;
+  } | null = null;
   let mockFS!: FileManager;
   let finderAppBuilder!: AppBuilder;
   let finderServices!: FinderServices;
@@ -535,6 +563,12 @@ async function main() {
     const maxH = resolution.height - MENUBAR_HEIGHT - 6;
     const winW = Math.min(appDef.defaultSize.width, maxW);
     const winH = Math.min(appDef.defaultSize.height, maxH);
+    const sbW = appDef.scrollable ? SCROLLBAR_WIDTH : 0;
+    const contentWAtOpen = winW - 1 - sbW;
+    const initialContentWidth =
+      appDef.minSize?.width != null && contentWAtOpen < appDef.minSize.width
+        ? Math.max(contentWAtOpen, appDef.minSize.width)
+        : winW;
     // Keep position on screen: don't open with window extending past desktop (Mac: "don't open a window off of a user's screen")
     // win.y is title-bar top; window bottom = win.y + TITLE_BAR_HEIGHT + win.height
     const leftMin = 3;
@@ -569,7 +603,7 @@ async function main() {
       width: winW,
       height: winH,
       contentHeight: winH,
-      contentWidth: winW,
+      contentWidth: initialContentWidth,
       appId,
       props: props ?? {},
       scrollable: appDef.scrollable ?? false,
@@ -752,6 +786,10 @@ async function main() {
             label: "Control Panel",
             onClick: () => openWindow("control_panel"),
           },
+          {
+            label: "Testing",
+            onClick: () => openWindow("testing"),
+          },
         ],
       },
     ];
@@ -913,6 +951,28 @@ async function main() {
 
     // All other events dispatch through hit regions
     if (event.type === "mouseMove") {
+      if (controlTracking?.onTrackMove) {
+        const win = windowManager.windows.find(
+          (w) => w.id === controlTracking!.windowId
+        );
+        if (win) {
+          const localPt = makePoint(event.x! - win.x, event.y! - win.y);
+          controlTracking.onTrackMove(localPt);
+          if (controlTracking.theControl.ref.contrlDefProc === 4) {
+            const val = GetControlValue(controlTracking.theControl);
+            const data = controlTracking.theControl.ref.contrlData as {
+              vertical?: boolean;
+            } | null;
+            if (data?.vertical) {
+              win.scrollY = val;
+            } else {
+              win.scrollX = val;
+            }
+          }
+          scheduleRender();
+          return;
+        }
+      }
       hitRegions.handleMouseMove(event.x!, event.y!);
 
       const active = windowManager.getActiveWindow();
@@ -965,12 +1025,108 @@ async function main() {
         }
       }
 
+      const fw = windowManager.findWindowWithPartCode(event.x!, event.y!);
+      // New path: content click goes to FindControl/TrackControl when the window has controls.
+      if (
+        fw.partCode === inContent &&
+        fw.theWindow &&
+        fw.theWindow.controlList.length > 0
+      ) {
+        const localPt = windowManager.toContentLocal(
+          fw.theWindow,
+          event.x!,
+          event.y!
+        );
+        const pt = makePoint(localPt.x, localPt.y);
+        const fc = FindControl(pt, fw.theWindow);
+        if (fc.theControl !== null) {
+          const port = windowManager.ensureWindowPort(fw.theWindow, screenPort);
+          const result = TrackControl(fc.theControl, pt, port);
+          const onTrackEnd =
+            typeof result === "function" ? result : result.onTrackEnd;
+          controlTracking = {
+            onTrackEnd,
+            windowId: fw.theWindow.id,
+            theControl: fc.theControl,
+            isScrollBar: false,
+          };
+          scheduleRender();
+          return;
+        }
+      }
+
+      if (
+        (fw.partCode === inVScroll || fw.partCode === inHScroll) &&
+        fw.theWindow
+      ) {
+        const win = fw.theWindow;
+        const localPt = makePoint(event.x! - win.x, event.y! - win.y);
+        const fc = FindControlInWindow(win, localPt);
+        if (fc.theControl) {
+          const port = windowManager.ensureWindowPort(win, screenPort, {
+            useFrameRect: true,
+          });
+          const result = TrackControl(
+            fc.theControl,
+            localPt,
+            port,
+            fc.partCode
+          );
+          const onTrackEnd =
+            typeof result === "function" ? result : result.onTrackEnd;
+          const onTrackMove =
+            typeof result === "function" ? undefined : result.onTrackMove;
+          controlTracking = {
+            onTrackEnd,
+            onTrackMove,
+            windowId: win.id,
+            theControl: fc.theControl,
+            isScrollBar: true,
+          };
+          scheduleRender();
+          return;
+        }
+      }
+
+      // Legacy path: buttons and other content hit regions.
       hitRegions.handleMouseDown(event.x!, event.y!);
       scheduleRender();
       return;
     }
 
     if (event.type === "mouseUp") {
+      if (controlTracking !== null) {
+        const win = windowManager.windows.find(
+          (w) => w.id === controlTracking!.windowId
+        );
+        let partCode = 0;
+        if (win !== undefined) {
+          const local = controlTracking.isScrollBar
+            ? { x: event.x! - win.x, y: event.y! - win.y }
+            : windowManager.toContentLocal(win, event.x!, event.y!);
+          partCode = controlTracking.onTrackEnd(makePoint(local.x, local.y));
+          if (controlTracking.theControl.ref.contrlDefProc === 4) {
+            const val = GetControlValue(controlTracking.theControl);
+            const data = controlTracking.theControl.ref.contrlData as {
+              vertical?: boolean;
+            } | null;
+            if (data?.vertical) {
+              win.scrollY = val;
+            } else {
+              win.scrollX = val;
+            }
+          }
+          if (partCode !== 0 && controlTracking.theControl.ref.contrlAction) {
+            controlTracking.theControl.ref.contrlAction(
+              controlTracking.theControl,
+              partCode
+            );
+          }
+        }
+        controlTracking = null;
+        scheduleRender();
+        return;
+      }
       hitRegions.handleMouseUp(event.x!, event.y!);
       scheduleRender();
       return;
@@ -1171,6 +1327,13 @@ async function main() {
           instance.props,
           { width: win.width, height: win.height }
         );
+      } else if (win.scrollable && instance?.app.minSize?.width != null) {
+        const sbW = SCROLLBAR_WIDTH;
+        const contentW = win.width - 1 - sbW;
+        win.contentWidth =
+          contentW >= instance.app.minSize.width
+            ? contentW
+            : Math.max(contentW, instance.app.minSize.width);
       }
       if (instance?.app.getInfoBar) {
         instance.builder.resetForRender();
@@ -1202,7 +1365,15 @@ async function main() {
             resolution.height - MENUBAR_HEIGHT,
             0,
             0,
-            hitRegions
+            hitRegions,
+            undefined,
+            undefined,
+            undefined,
+            0,
+            0,
+            0,
+            0,
+            0
           );
           mwInst.appBuilder.resetForRender();
           mwInst.winBuilder.resetForRender();
@@ -1265,12 +1436,10 @@ async function main() {
         windowCallbacks
       );
 
-      const contentRect = windowManager.getContentRect(win);
-      const winPort = getWindowPort(win.id, contentRect, screenPort);
       const contentCtx = windowManager.createWindowContext(
-        winPort,
         win,
-        hitRegions
+        hitRegions,
+        screenPort
       );
 
       if (win.appId === "finder") {
@@ -1334,56 +1503,8 @@ async function main() {
 
   await InitFonts();
 
-  // Inject font functions into QuickDraw so DrawString/DrawText can render
-  // using the same bitmap font system used by BitCanvas.
-  __injectFontFunctions(
-    (text) => measureText(text, "ChiKareGo"),
-    (text: string, x: number, y: number, port: GrafPort) => {
-      const { baseAddr, rowBytes, bounds } = port.portBits;
-      const cl = port.clipRgn?.rgn.rgnBBox;
-      const vis = port.visRgn?.rgn.rgnBBox;
-      const pr = port.portRect;
-      const clipLeft = Math.max(
-        cl?.left ?? bounds.left,
-        vis?.left ?? bounds.left,
-        pr.left,
-        bounds.left
-      );
-      const clipTop = Math.max(
-        cl?.top ?? bounds.top,
-        vis?.top ?? bounds.top,
-        pr.top,
-        bounds.top
-      );
-      const clipRight = Math.min(
-        cl?.right ?? bounds.right,
-        vis?.right ?? bounds.right,
-        pr.right,
-        bounds.right
-      );
-      const clipBottom = Math.min(
-        cl?.bottom ?? bounds.bottom,
-        vis?.bottom ?? bounds.bottom,
-        pr.bottom,
-        bounds.bottom
-      );
-      drawBitmapTextToPixels(
-        baseAddr,
-        rowBytes,
-        bounds.left,
-        bounds.top,
-        clipLeft,
-        clipTop,
-        clipRight,
-        clipBottom,
-        text,
-        x,
-        y,
-        "ChiKareGo",
-        1
-      );
-    }
-  );
+  // Wire QuickDraw text to FontManager so DrawString/DrawText use port.txFont and port clipping.
+  installQuickDrawFontBridge(__injectFontFunctions);
 
   const fsBackend = new OPFSBackend();
   mockFS = new FileManager(fsBackend, sprites);

@@ -122,7 +122,7 @@ lib/canvas/                 Core OS engine
   AppRegistry.ts           App registration and lifecycle (SystemApp + MultiWindowSystemApp)
   AppLoader.ts             Dynamic ESM loading for third-party apps
   EventManager.ts          DOM event → OS event translation
-  WindowManager.ts         Window list, z-order, dragging, focus, chrome rendering
+  WindowManager.ts         Window list (WindowRecord: state + port/framePort), z-order, dragging, focus, chrome rendering; ports ensured on demand (render and control-tracking)
   SpriteRegistry.ts        Sprite cache, PNG loading, and 2bpp format decoder
   OSServices.ts            System services (camera, audio, storage, clipboard, file system)
   fontAdapter.ts           Bridge between PixelFontCanvas and BitCanvas
@@ -285,7 +285,7 @@ On the original Mac, the application passed a `sizeRect` (min/max) to `GrowWindo
 
 Document and utility windows support a zoom box in the right side of the title bar. Clicking it toggles between:
 
-- **Standard state** — application-defined ideal size (`standardBounds` on `WindowState`). If the app does not set one, the system default is the full gray region (screen minus menu bar) minus a 3 px border on all sides.
+- **Standard state** — application-defined ideal size (`standardBounds` on `WindowRecord`). If the app does not set one, the system default is the full gray region (screen minus menu bar) minus a 3 px border on all sides.
 - **User state** — the last position and size set by the user via drag or resize (`userBounds`).
 
 The transition fires on **mouse release** while the cursor is still inside the box (Mac WM behaviour).

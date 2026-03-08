@@ -84,10 +84,21 @@ async function init() {
   }
 
   // --- CRT material ---
+  const CRT_PHOSPHOR_TINT = "#bfe6ff";
+  const CRT_TINT_STRENGTH = 1;
+
+  // "#aeeccf" for greener phosphor
+  // "#bff5df" for subtle blue-green
+  // "#d8fff2" for a cooler pale cyan
+  // "#cfe8ff" for a cooler blue phosphor
+  // "#bfd8ff" for an icy blue phosphor
+  // "#ffffff" to go back to neutral monochrome
   const crtMaterial = createCRTPhysicalMaterial({
     screenTexture: upRT.texture,
     emissiveIntensity: 1.0,
     scanlineIntensity: 0.03,
+    phosphorTint: CRT_PHOSPHOR_TINT,
+    tintStrength: CRT_TINT_STRENGTH,
     rasterMin: [RASTER_UV_MIN_X, RASTER_UV_MIN_Y],
     rasterMax: [RASTER_UV_MAX_X, RASTER_UV_MAX_Y],
   });

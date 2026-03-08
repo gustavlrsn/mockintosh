@@ -4,7 +4,13 @@ import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { OSEvent } from "../lib/toolbox/EventManager";
 import { OSServices } from "../lib/canvas/OSServices";
+import { makeRect } from "@mockintosh/quickdraw";
 import { MenubarDefinition } from "../lib/toolbox/MenuManager";
+import {
+  NewControl,
+  DrawControls,
+  inButton,
+} from "../lib/toolbox/ControlManager";
 
 const WIDTH = 288;
 const HEIGHT = 288;
@@ -169,6 +175,7 @@ export const PhotoBoothApp: SystemApp = {
     const animRef = app.useRef<number | null>(null);
     const countdownRef = app.useRef<ReturnType<typeof setTimeout> | null>(null);
     const ditherRef = app.useRef<DitherState | null>(null);
+    const lastControlsKeyRef = app.useRef<string>("");
 
     ctx.clear(WHITE);
 
@@ -266,91 +273,167 @@ export const PhotoBoothApp: SystemApp = {
     ctx.fillRect(0, barY, ctx.width, 40, WHITE);
     ctx.drawHLine(0, barY, ctx.width, BLACK);
 
-    if (viewingPhoto === null) {
-      const isCountingDown = countdown !== null && countdown > 0;
-      ctx.drawButton({
-        x: WIDTH / 2 - 30,
-        y: barY + 8,
-        width: 60,
-        height: 24,
-        label: isCountingDown ? String(countdown) : "Snap",
-        id: "snap-btn",
-        onClick:
-          isCountingDown || loading || !!errorText
-            ? undefined
-            : () =>
-                startCountdown(setCountdown, countdownRef, () => takePhoto()),
-      });
+    const btnTop = barY + 8;
+    const btnH = 24;
 
-      if (photos.length > 0) {
-        ctx.drawButton({
-          x: WIDTH - 64,
-          y: barY + 8,
-          width: 56,
-          height: 24,
-          label: `${photos.length} pic${photos.length > 1 ? "s" : ""}`,
-          id: "gallery-btn",
-          onClick: () => setViewingPhoto(photos.length - 1),
-        });
+    const win = ctx.getWindow();
+    if (win !== null) {
+      const modeKey =
+        viewingPhoto === null
+          ? `list-${photos.length}`
+          : `view-${viewingPhoto}-${photos.length}`;
+      if (lastControlsKeyRef.current !== modeKey) {
+        win.controlList.length = 0;
+        lastControlsKeyRef.current = modeKey;
       }
-    } else {
-      let bx = 8;
-      ctx.drawButton({
-        x: bx,
-        y: barY + 8,
-        label: "Delete",
-        id: "delete-btn",
-        onClick: () => {
-          const newPhotos = photos.filter((_, i) => i !== viewingPhoto);
-          setPhotos(newPhotos);
-          setViewingPhoto(
-            newPhotos.length > 0
-              ? Math.min(viewingPhoto, newPhotos.length - 1)
-              : null
+
+      if (win.controlList.length === 0) {
+        if (viewingPhoto === null) {
+          const snapHandle = NewControl(
+            win,
+            makeRect(btnTop, WIDTH / 2 - 30, btnTop + btnH, WIDTH / 2 + 30),
+            "Snap",
+            true,
+            0,
+            0,
+            1,
+            0,
+            0
           );
-        },
-      });
-      bx += 64;
-      ctx.drawButton({
-        x: bx,
-        y: barY + 8,
-        label: "Save",
-        id: "save-btn",
-        onClick: () => {
-          savePhotoToFS(os, photos[viewingPhoto]);
-        },
-      });
-      bx += 56;
-
-      if (viewingPhoto > 0) {
-        ctx.drawButton({
-          x: bx,
-          y: barY + 8,
-          label: "<",
-          id: "prev-btn",
-          onClick: () => setViewingPhoto(viewingPhoto - 1),
-        });
-        bx += 32;
+          snapHandle.ref.contrlAction = (_c, partCode) => {
+            if (
+              partCode === inButton &&
+              countdown === null &&
+              !loading &&
+              !errorText
+            ) {
+              startCountdown(setCountdown, countdownRef, () => takePhoto());
+            }
+          };
+          if (photos.length > 0) {
+            const galleryHandle = NewControl(
+              win,
+              makeRect(btnTop, WIDTH - 64, btnTop + btnH, WIDTH - 8),
+              `${photos.length} pic${photos.length > 1 ? "s" : ""}`,
+              true,
+              0,
+              0,
+              1,
+              0,
+              0
+            );
+            galleryHandle.ref.contrlAction = (_c, partCode) => {
+              if (partCode === inButton) setViewingPhoto(photos.length - 1);
+            };
+          }
+        } else {
+          const deleteHandle = NewControl(
+            win,
+            makeRect(btnTop, 8, btnTop + 20, 72),
+            "Delete",
+            true,
+            0,
+            0,
+            1,
+            0,
+            0
+          );
+          deleteHandle.ref.contrlAction = (_c, partCode) => {
+            if (partCode === inButton) {
+              const newPhotos = photos.filter((_, i) => i !== viewingPhoto);
+              setPhotos(newPhotos);
+              setViewingPhoto(
+                newPhotos.length > 0
+                  ? Math.min(viewingPhoto, newPhotos.length - 1)
+                  : null
+              );
+            }
+          };
+          const saveHandle = NewControl(
+            win,
+            makeRect(btnTop, 72, btnTop + 20, 128),
+            "Save",
+            true,
+            0,
+            0,
+            1,
+            0,
+            0
+          );
+          saveHandle.ref.contrlAction = (_c, partCode) => {
+            if (partCode === inButton) savePhotoToFS(os, photos[viewingPhoto]);
+          };
+          let bx = 128;
+          if (viewingPhoto > 0) {
+            const prevHandle = NewControl(
+              win,
+              makeRect(btnTop, bx, btnTop + 20, bx + 32),
+              "<",
+              true,
+              0,
+              0,
+              1,
+              0,
+              0
+            );
+            prevHandle.ref.contrlAction = (_c, partCode) => {
+              if (partCode === inButton) setViewingPhoto(viewingPhoto - 1);
+            };
+            bx += 32;
+          }
+          if (viewingPhoto < photos.length - 1) {
+            const nextHandle = NewControl(
+              win,
+              makeRect(btnTop, bx, btnTop + 20, bx + 32),
+              ">",
+              true,
+              0,
+              0,
+              1,
+              0,
+              0
+            );
+            nextHandle.ref.contrlAction = (_c, partCode) => {
+              if (partCode === inButton) setViewingPhoto(viewingPhoto + 1);
+            };
+            bx += 32;
+          }
+          const backHandle = NewControl(
+            win,
+            makeRect(btnTop, WIDTH - 52, btnTop + 20, WIDTH),
+            "Back",
+            true,
+            0,
+            0,
+            1,
+            0,
+            0
+          );
+          backHandle.ref.contrlAction = (_c, partCode) => {
+            if (partCode === inButton) setViewingPhoto(null);
+          };
+        }
       }
-      if (viewingPhoto < photos.length - 1) {
-        ctx.drawButton({
-          x: bx,
-          y: barY + 8,
-          label: ">",
-          id: "next-btn",
-          onClick: () => setViewingPhoto(viewingPhoto + 1),
-        });
-        bx += 32;
+
+      // Update dynamic labels
+      if (viewingPhoto === null && win.controlList.length > 0) {
+        const isCountingDown = countdown !== null && countdown > 0;
+        win.controlList[0].ref.contrlTitle = isCountingDown
+          ? String(countdown!)
+          : "Snap";
+        win.controlList[0].ref.contrlHilite =
+          isCountingDown || loading || !!errorText ? 255 : 0;
+        if (photos.length > 0 && win.controlList[1]) {
+          win.controlList[1].ref.contrlTitle = `${photos.length} pic${
+            photos.length > 1 ? "s" : ""
+          }`;
+        }
       }
 
-      ctx.drawButton({
-        x: WIDTH - 52,
-        y: barY + 8,
-        label: "Back",
-        id: "back-btn",
-        onClick: () => setViewingPhoto(null),
-      });
+      DrawControls(win, ctx.port);
+    }
 
+    if (viewingPhoto !== null) {
       ctx.drawText(
         `${viewingPhoto + 1}/${photos.length}`,
         WIDTH / 2 - 12,
@@ -396,6 +479,7 @@ export const PhotoBoothApp: SystemApp = {
     app.useRef(null); // animRef
     app.useRef(null); // countdownRef
     app.useRef(null); // ditherRef
+    app.useRef(""); // lastControlsKeyRef
   },
 
   getMenubar(app: AppBuilder, props: any): MenubarDefinition[] {
@@ -410,6 +494,7 @@ export const PhotoBoothApp: SystemApp = {
     app.useRef(null); // animRef
     app.useRef(null); // countdownRef
     app.useRef(null); // ditherRef
+    app.useRef(""); // lastControlsKeyRef
 
     return [
       {

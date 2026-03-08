@@ -1,7 +1,15 @@
-import { BitCanvas, BLACK, WHITE, Sprite } from "../canvas/BitCanvas";
-import { drawBitmapText, measureText } from "../canvas/fontAdapter";
+import { BLACK, WHITE, Sprite } from "../canvas/BitCanvas";
 import { HitRegionMap } from "../canvas/HitRegion";
 import type { GrafPort } from "@mockintosh/quickdraw";
+import {
+  SetPort,
+  MoveTo,
+  TextFont,
+  TextFace,
+  DrawString,
+} from "@mockintosh/quickdraw";
+import { GetFNum, FMTextWidth } from "./FontManager";
+import type { FontName } from "../canvas/fontAdapter";
 import {
   qdFillRect,
   qdDrawHLine,
@@ -12,14 +20,7 @@ import {
 } from "../canvas/qdDraw";
 import { blitSprite, blitSpriteInverted } from "../canvas/SpriteManager";
 
-/** Wrap a GrafPort in a temporary BitCanvas shim for drawBitmapText (shares pixel buffer). */
-function _bc(port: GrafPort): BitCanvas {
-  const { baseAddr, rowBytes } = port.portBits;
-  const height = (baseAddr.length / rowBytes) | 0;
-  const bc = new BitCanvas(rowBytes, height);
-  (bc as any).pixels = baseAddr;
-  return bc;
-}
+const CHIKAREGO = "ChiKareGo" as FontName;
 
 export interface MenubarDefinition {
   label: string;
@@ -73,12 +74,12 @@ function getMenuWidth(menu: MenubarDefinition): number {
     if ("type" in item && item.type === "separator") continue;
     if ("type" in item && item.type === "radiogroup") {
       for (const ri of item.items) {
-        maxW = Math.max(maxW, measureText(ri.label, "ChiKareGo") + 24);
+        maxW = Math.max(maxW, FMTextWidth(ri.label, CHIKAREGO) + 24);
       }
     } else {
       const ai = item as MenubarActionItem;
-      let w = measureText(ai.label, "ChiKareGo") + 12;
-      if (ai.shortcut) w += measureText(ai.shortcut, "ChiKareGo") + 20;
+      let w = FMTextWidth(ai.label, CHIKAREGO) + 12;
+      if (ai.shortcut) w += FMTextWidth(ai.shortcut, CHIKAREGO) + 20;
       maxW = Math.max(maxW, w);
     }
   }
@@ -132,8 +133,6 @@ export function drawMenubar(
   hitRegions: HitRegionMap,
   scheduleRender: () => void
 ) {
-  const bc = _bc(port);
-
   // Background
   qdFillRect(port, 0, 0, screenWidth, MENUBAR_HEIGHT, WHITE);
   qdDrawHLine(port, 0, MENUBAR_HEIGHT - 1, screenWidth, BLACK);
@@ -212,21 +211,22 @@ export function drawMenubar(
       continue;
     }
 
-    const textW = measureText(menu.label, "ChiKareGo");
+    const textW = FMTextWidth(menu.label, CHIKAREGO);
     const labelX = x - 5;
     const labelW = textW + 14;
 
+    SetPort(port);
+    TextFont(GetFNum(CHIKAREGO));
+    TextFace(0);
     if (isOpen) {
       qdFillRect(port, labelX, 0, labelW, MENUBAR_HEIGHT - 1, BLACK);
-      drawBitmapText(bc, menu.label, x, 2, {
-        font: "ChiKareGo",
-        color: WHITE,
-      });
+      (port as GrafPort & { txColor?: number }).txColor = WHITE;
+      MoveTo(x, 2);
+      DrawString(menu.label);
+      (port as GrafPort & { txColor?: number }).txColor = BLACK;
     } else {
-      drawBitmapText(bc, menu.label, x, 2, {
-        font: "ChiKareGo",
-        color: BLACK,
-      });
+      MoveTo(x, 2);
+      DrawString(menu.label);
     }
 
     hitRegions.add({
@@ -310,19 +310,29 @@ export function drawMenubar(
 
       const textColor = highlighted ? WHITE : BLACK;
       const textX = mx + MENU_PADDING + (it.isRadio ? 16 : 0);
-      drawBitmapText(bc, it.label, textX, iy, {
-        font: "ChiKareGo",
-        color: textColor,
-        height: ITEM_HEIGHT,
-      });
+      SetPort(port);
+      TextFont(GetFNum(CHIKAREGO));
+      TextFace(0);
+      if (textColor === WHITE) {
+        (port as GrafPort & { txColor?: number }).txColor = WHITE;
+      }
+      MoveTo(textX, iy);
+      DrawString(it.label);
+      if (textColor === WHITE) {
+        (port as GrafPort & { txColor?: number }).txColor = BLACK;
+      }
 
       if (it.shortcut) {
-        const sw = measureText(it.shortcut, "ChiKareGo");
-        drawBitmapText(bc, it.shortcut, mx + mw - MENU_PADDING - sw - 2, iy, {
-          font: "ChiKareGo",
-          color: textColor,
-          height: ITEM_HEIGHT,
-        });
+        const sw = FMTextWidth(it.shortcut, CHIKAREGO);
+        const sx = mx + mw - MENU_PADDING - sw - 2;
+        if (textColor === WHITE) {
+          (port as GrafPort & { txColor?: number }).txColor = WHITE;
+        }
+        MoveTo(sx, iy);
+        DrawString(it.shortcut);
+        if (textColor === WHITE) {
+          (port as GrafPort & { txColor?: number }).txColor = BLACK;
+        }
       }
 
       if (it.isRadio && it.radioChecked) {
@@ -372,7 +382,7 @@ function _getMenuX(
   let x = APPLE_MENU_WIDTH + 8;
   for (let i = 0; i < index; i++) {
     if (i === 0 && hasAppleMenu) continue;
-    x += measureText(state.menus[i].label, "ChiKareGo") + 14;
+    x += FMTextWidth(state.menus[i].label, CHIKAREGO) + 14;
   }
   if (index === 0 && hasAppleMenu) {
     return 6;

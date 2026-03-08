@@ -11,7 +11,7 @@
  * clockwise**.  A negative `arcAngle` sweeps counter-clockwise.
  */
 
-import { Rect, Pattern, GrafPort, cloneRect } from "./types";
+import { Rect, Pattern, GrafPort } from "./types";
 import { globals } from "./globals";
 import { drawRectToPort, drawHSpan } from "./bitblt";
 import {
@@ -23,172 +23,351 @@ import {
   INVERT,
   FILL,
 } from "./constants";
-import { StdLine } from "./lines";
+import { SlopeFromAngle, AngleFromSlope } from "./angles";
+import { FixMul, FixRatio, LongMul } from "./fixmath";
+import type { Fixed } from "./fixmath";
 
 // -------------------------------------------------------------------------
-// Core scanline arc/oval rasterizer
-// Matches DrawArc.a's "oval state record" approach.
-//
-// Fills between two ellipses (outer and inner) for hollow shapes,
-// or a single ellipse for solid shapes.
-// startAngle and arcAngle control the angular sweep.
+// Oval state record (DrawArc.a InitOval/BumpOval)
 // -------------------------------------------------------------------------
 
-// Generate scanline spans for an ellipse bounded by r.
-// Returns: array of {y, x0, x1} sorted top to bottom.
-function ellipseSpans(r: Rect): Array<{ y: number; x0: number; x1: number }> {
-  const cx = (r.left + r.right) / 2;
-  const cy = (r.top + r.bottom) / 2;
-  const a = (r.right - r.left) / 2;
-  const b = (r.bottom - r.top) / 2;
+const ONEHALF: Fixed = 0x00008000;
 
-  if (a <= 0 || b <= 0) return [];
-
-  const spans: Array<{ y: number; x0: number; x1: number }> = [];
-
-  // Midpoint ellipse algorithm — integer arithmetic
-  let x = 0;
-  let y = Math.round(b);
-  let a2 = a * a;
-  let b2 = b * b;
-  let fa2 = 4 * a2;
-  let fb2 = 4 * b2;
-  let sigma = Math.round(2 * b2 + a2 * (1 - 2 * b));
-
-  const addSpan = (row: number, hw: number) => {
-    const y0 = Math.floor(cy + row);
-    const y1 = Math.floor(cy - row);
-    const x0 = Math.floor(cx - hw);
-    const x1 = Math.ceil(cx + hw);
-    if (y0 >= r.top && y0 < r.bottom) spans.push({ y: y0, x0, x1 });
-    if (y1 !== y0 && y1 >= r.top && y1 < r.bottom)
-      spans.push({ y: y1, x0, x1 });
-  };
-
-  while (b2 * x <= a2 * y) {
-    addSpan(y, x);
-    if (sigma >= 0) {
-      sigma += fa2 * (1 - y);
-      y--;
-    }
-    sigma += b2 * (4 * x + 6);
-    x++;
-  }
-
-  sigma = Math.round(2 * a2 + b2 * (1 - 2 * a));
-  x = Math.round(a);
-  y = 0;
-  while (a2 * y <= b2 * x) {
-    addSpan(y, x);
-    if (sigma >= 0) {
-      sigma += fb2 * (1 - x);
-      x--;
-    }
-    sigma += a2 * (4 * y + 6);
-    y++;
-  }
-
-  spans.sort((a, b) => a.y - b.y);
-  return spans;
+export interface OvalRec {
+  ovalTop: number;
+  ovalBot: number;
+  ovalY: number;
+  rsqysq: number;
+  squareHi: number;
+  squareLo: number;
+  oddNumHi: number;
+  oddNumLo: number;
+  oddBumpHi: number;
+  oddBumpLo: number;
+  leftEdge: Fixed;
+  rightEdge: Fixed;
+  oneHalf: Fixed;
 }
 
-// Convert angle (degrees, 0=12-o-clock, clockwise) to unit direction
-// QuickDraw convention: 0° = up (12-o-clock), increases clockwise
-function angleToVec(deg: number): { x: number; y: number } {
-  const rad = ((deg - 90) * Math.PI) / 180;
-  return { x: Math.cos(rad), y: Math.sin(rad) };
+export function initOval(
+  dstRect: Rect,
+  ovalWidth: number,
+  ovalHeight: number,
+  oval: OvalRec
+): void {
+  oval.ovalTop = dstRect.top;
+  oval.ovalBot = dstRect.bottom;
+  if (ovalWidth < 0) ovalWidth = 0;
+  if (ovalHeight < 0) ovalHeight = 0;
+  const dstWidth = dstRect.right - dstRect.left;
+  const dstHeight = dstRect.bottom - dstRect.top;
+  if (ovalWidth > dstWidth) ovalWidth = dstWidth;
+  if (ovalHeight > dstHeight) ovalHeight = dstHeight;
+
+  const centerH = (dstRect.left + dstRect.right) >> 1;
+  let leftEdge: Fixed = (centerH << 16) | 0;
+  let rightEdge: Fixed = (centerH << 16) | 0;
+  rightEdge = (rightEdge + ONEHALF) | 0;
+  oval.leftEdge = leftEdge;
+  oval.rightEdge = rightEdge;
+  oval.oneHalf = ONEHALF;
+
+  oval.ovalY = 1 - ovalHeight;
+  oval.rsqysq = 2 * ovalHeight - 1;
+  oval.squareHi = 0;
+  oval.squareLo = 0;
+
+  const aspect = FixRatio(ovalHeight, ovalWidth);
+  const { hiLong: oddHi, loLong: oddLo } = LongMul(aspect, aspect);
+  oval.oddNumHi = oddHi;
+  oval.oddNumLo = oddLo;
+  const hiCarry = oddLo >>> 0 >= 0x80000000 ? 1 : 0;
+  oval.oddBumpLo = (oddLo << 1) | 0;
+  oval.oddBumpHi = ((oddHi << 1) + hiCarry) | 0;
 }
 
-// Test whether a point (dx, dy) relative to ellipse centre is within the
-// angular range [startAngle, startAngle+arcAngle].
-// QuickDraw: 0° = up (−y direction), clockwise.
-function inArcSector(
-  dx: number,
-  dy: number,
+export function bumpOval(oval: OvalRec, vert: number): void {
+  if (vert < oval.ovalTop || vert >= oval.ovalBot) return;
+  const ovalY = oval.ovalY;
+  oval.ovalY += 2;
+  let rsqysq = oval.rsqysq;
+  let squareHi = oval.squareHi;
+  let squareLo = oval.squareLo;
+  let oddNumHi = oval.oddNumHi;
+  let oddNumLo = oval.oddNumLo;
+  const oddBumpHi = oval.oddBumpHi;
+  const oddBumpLo = oval.oddBumpLo;
+  let leftEdge = oval.leftEdge;
+  let rightEdge = oval.rightEdge;
+
+  while (squareHi < rsqysq) {
+    rightEdge = (rightEdge + ONEHALF) | 0;
+    leftEdge = (leftEdge - ONEHALF) | 0;
+    const sumLo = (squareLo + oddNumLo) | 0;
+    const carry = (squareLo >>> 0) + (oddNumLo >>> 0) > 0xffffffff ? 1 : 0;
+    squareLo = sumLo;
+    squareHi = (squareHi + oddNumHi + carry) | 0;
+    const oddSumLo = (oddNumLo + oddBumpLo) | 0;
+    const oddCarry = (oddNumLo >>> 0) + (oddBumpLo >>> 0) > 0xffffffff ? 1 : 0;
+    oddNumLo = oddSumLo;
+    oddNumHi = (oddNumHi + oddBumpHi + oddCarry) | 0;
+  }
+  while (squareHi > rsqysq) {
+    rightEdge = (rightEdge - ONEHALF) | 0;
+    leftEdge = (leftEdge + ONEHALF) | 0;
+    oddNumLo = (oddNumLo - oddBumpLo) | 0;
+    const oddBorrow = oddNumLo >>> 0 < oddBumpLo >>> 0 ? 1 : 0;
+    oddNumHi = (oddNumHi - oddBumpHi - oddBorrow) | 0;
+    squareLo = (squareLo - oddNumLo) | 0;
+    const sqBorrow = squareLo >>> 0 < oddNumLo >>> 0 ? 1 : 0;
+    squareHi = (squareHi - oddNumHi - sqBorrow) | 0;
+  }
+
+  const oy1 = ovalY + 1;
+  rsqysq = (rsqysq - 4 * oy1) | 0;
+  oval.rsqysq = rsqysq;
+  oval.squareHi = squareHi;
+  oval.squareLo = squareLo;
+  oval.oddNumHi = oddNumHi;
+  oval.oddNumLo = oddNumLo;
+  oval.leftEdge = leftEdge;
+  oval.rightEdge = rightEdge;
+}
+
+function fixedToInt(x: Fixed): number {
+  return x >> 16;
+}
+
+// -------------------------------------------------------------------------
+// DrawArc-style scanline loop (oval + optional arc rays)
+// -------------------------------------------------------------------------
+
+function drawArcLoop(
+  r: Rect,
+  ovalWidth: number,
+  ovalHeight: number,
+  hollow: boolean,
+  arcAngle: number,
   startAngle: number,
-  arcAngle: number
-): boolean {
-  if (arcAngle === 0) return false;
-  if (Math.abs(arcAngle) >= 360) return true;
+  stopAngle: number,
+  pat: Pattern,
+  mode: number,
+  port: GrafPort
+): void {
+  const minRect = r;
+  const outerOval: OvalRec = {
+    ovalTop: 0,
+    ovalBot: 0,
+    ovalY: 0,
+    rsqysq: 0,
+    squareHi: 0,
+    squareLo: 0,
+    oddNumHi: 0,
+    oddNumLo: 0,
+    oddBumpHi: 0,
+    oddBumpLo: 0,
+    leftEdge: 0,
+    rightEdge: 0,
+    oneHalf: ONEHALF,
+  };
+  initOval(r, ovalWidth, ovalHeight, outerOval);
 
-  let angle = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
-  const start = ((startAngle % 360) + 360) % 360;
-  const sweep = Math.abs(arcAngle);
-  let end = (start + sweep) % 360;
-
-  if (arcAngle < 0) {
-    const s = (start - sweep + 360) % 360;
-    end = start;
-    if (s <= end) return angle >= s && angle <= end;
-    return angle >= s || angle <= end;
+  let innerOval: OvalRec | null = null;
+  if (hollow) {
+    const pw = Math.max(1, port.pnSize.h);
+    const ph = Math.max(1, port.pnSize.v);
+    const innerTop = r.top + ph;
+    const innerBottom = r.bottom - ph;
+    const innerLeft = r.left + pw;
+    const innerRight = r.right - pw;
+    if (innerLeft < innerRight && innerTop < innerBottom) {
+      innerOval = {
+        ovalTop: innerTop,
+        ovalBot: innerBottom,
+        ovalY: 0,
+        rsqysq: 0,
+        squareHi: 0,
+        squareLo: 0,
+        oddNumHi: 0,
+        oddNumLo: 0,
+        oddBumpHi: 0,
+        oddBumpLo: 0,
+        leftEdge: 0,
+        rightEdge: 0,
+        oneHalf: ONEHALF,
+      };
+      initOval(
+        {
+          top: innerTop,
+          left: innerLeft,
+          bottom: innerBottom,
+          right: innerRight,
+        },
+        Math.max(0, ovalWidth - 2 * pw),
+        Math.max(0, ovalHeight - 2 * ph),
+        innerOval
+      );
+    }
   }
-  if (start <= end) return angle >= start && angle <= end;
-  return angle >= start || angle <= end;
-}
 
-// -------------------------------------------------------------------------
-// Solid oval fill (paint/erase/invert/fill verbs)
-// -------------------------------------------------------------------------
+  const width = r.right - r.left;
+  const height = r.bottom - r.top;
+  const midVert = (r.top + r.bottom) >> 1;
+  const midHoriz = (r.left + r.right) >> 1;
+  const skipTop = outerOval.ovalTop + (ovalHeight >> 1);
+  const skipBot = r.bottom - r.top - ovalHeight + skipTop;
+
+  let line1: Fixed = 0;
+  let line2: Fixed = 0;
+  let slope1: Fixed = 0;
+  let slope2: Fixed = 0;
+  let flag1 = 0;
+  let flag2 = 0;
+  let skipFlag = false;
+  const isArc = arcAngle < 360;
+
+  if (isArc) {
+    const aspect = FixRatio(width, height);
+    slope1 = FixMul(SlopeFromAngle(startAngle), aspect);
+    slope2 = FixMul(SlopeFromAngle(stopAngle), aspect);
+    const midH64 = (midHoriz << 16) | 0;
+    const halfHt = height >> 1;
+    line1 = (midH64 - slope1 * halfHt) | 0;
+    line2 = (midH64 - slope2 * halfHt) | 0;
+    flag1 = startAngle < 180 ? startAngle - 90 : -(270 - startAngle);
+    flag2 = stopAngle < 180 ? stopAngle - 90 : -(270 - stopAngle);
+    if (arcAngle > 180) {
+      skipFlag = false;
+    } else if (arcAngle < 180) {
+      skipFlag = flag1 >= 0 && flag2 >= 0;
+    } else {
+      skipFlag = startAngle === 90;
+    }
+  }
+
+  let vert = outerOval.ovalTop;
+  const bottom = outerOval.ovalBot;
+
+  while (vert < bottom) {
+    const doBump = vert < skipTop || vert >= skipBot;
+    if (doBump) {
+      bumpOval(outerOval, vert);
+      if (innerOval) bumpOval(innerOval, vert);
+    }
+
+    if (isArc && vert === midVert) {
+      flag1 = -flag1;
+      flag2 = -flag2;
+      skipFlag = false;
+      if (arcAngle > 180) {
+      } else if (arcAngle < 180) {
+        if (flag1 >= 0 && flag2 >= 0) break;
+      } else {
+        if (startAngle === 270) break;
+      }
+      const t1 = line1;
+      line1 = line2;
+      line2 = t1;
+      const t2 = slope1;
+      slope1 = slope2;
+      slope2 = t2;
+    }
+
+    if (vert < minRect.top || skipFlag) {
+      line1 = (line1 + slope1) | 0;
+      line2 = (line2 + slope2) | 0;
+      vert++;
+      continue;
+    }
+
+    let outerLeft = fixedToInt(outerOval.leftEdge);
+    let outerRight = fixedToInt(outerOval.rightEdge);
+    const line1Int = fixedToInt(line1);
+    const line2Int = fixedToInt(line2);
+
+    if (isArc) {
+      if (flag1 < 0 && line1Int > outerLeft) outerLeft = line1Int;
+      if (flag2 < 0 && line2Int < outerRight) outerRight = line2Int;
+    }
+
+    if (!isArc) {
+      if (!innerOval) {
+        if (outerLeft < outerRight)
+          drawHSpan(outerLeft, outerRight, vert, pat, mode, port);
+      } else {
+        const il = fixedToInt(innerOval.leftEdge);
+        const ir = fixedToInt(innerOval.rightEdge);
+        if (outerLeft < il) drawHSpan(outerLeft, il, vert, pat, mode, port);
+        if (ir < outerRight) drawHSpan(ir, outerRight, vert, pat, mode, port);
+      }
+    } else {
+      if (!innerOval) {
+        if (outerLeft < outerRight) {
+          drawHSpan(outerLeft, outerRight, vert, pat, mode, port);
+        } else if (flag1 < 0 && flag2 < 0 && arcAngle > 180) {
+          const oL = fixedToInt(outerOval.leftEdge);
+          const oR = fixedToInt(outerOval.rightEdge);
+          drawHSpan(oL, outerRight, vert, pat, mode, port);
+          drawHSpan(outerLeft, oR, vert, pat, mode, port);
+        }
+      } else {
+        let innerLeft = fixedToInt(innerOval.leftEdge);
+        let innerRight = fixedToInt(innerOval.rightEdge);
+        if (flag2 < 0 && line2Int < innerLeft) innerLeft = line2Int;
+        if (flag1 < 0 && line1Int > innerRight) innerRight = line1Int;
+        if (outerLeft < outerRight) {
+          drawHSpan(outerLeft, innerLeft, vert, pat, mode, port);
+          drawHSpan(innerRight, outerRight, vert, pat, mode, port);
+        } else if (flag1 < 0 && flag2 < 0 && arcAngle > 180) {
+          if (innerLeft === outerRight) {
+            drawHSpan(
+              fixedToInt(innerOval.leftEdge),
+              innerLeft,
+              vert,
+              pat,
+              mode,
+              port
+            );
+          }
+          drawHSpan(
+            fixedToInt(outerOval.leftEdge),
+            innerLeft,
+            vert,
+            pat,
+            mode,
+            port
+          );
+          drawHSpan(
+            innerRight,
+            fixedToInt(outerOval.rightEdge),
+            vert,
+            pat,
+            mode,
+            port
+          );
+        }
+      }
+    }
+
+    line1 = (line1 + slope1) | 0;
+    line2 = (line2 + slope2) | 0;
+    vert++;
+  }
+}
 
 function fillOval(r: Rect, pat: Pattern, mode: number, port: GrafPort): void {
-  const spans = ellipseSpans(r);
-  // Collect one span per row (widest)
-  const rowSpan = new Map<number, { x0: number; x1: number }>();
-  for (const s of spans) {
-    const cur = rowSpan.get(s.y);
-    if (!cur || s.x1 - s.x0 > cur.x1 - cur.x0) rowSpan.set(s.y, s);
-  }
-  rowSpan.forEach(({ x0, x1 }, y) => {
-    drawHSpan(x0, x1, y, pat, mode, port);
-  });
+  const w = r.right - r.left;
+  const h = r.bottom - r.top;
+  if (w <= 0 || h <= 0) return;
+  drawArcLoop(r, w, h, false, 360, 0, 360, pat, mode, port);
 }
-
-// -------------------------------------------------------------------------
-// Hollow oval outline (frame verb)
-// -------------------------------------------------------------------------
 
 function frameOval(r: Rect, port: GrafPort): void {
-  const pw = Math.max(1, port.pnSize.h);
-  const ph = Math.max(1, port.pnSize.v);
-  const outer = r;
-  const inner = {
-    top: r.top + ph,
-    left: r.left + pw,
-    bottom: r.bottom - ph,
-    right: r.right - pw,
-  };
-
-  const outerSpans = ellipseSpans(outer);
-  const innerSpans = ellipseSpans(inner);
-
-  const innerMap = new Map<number, { x0: number; x1: number }>();
-  for (const s of innerSpans) {
-    const cur = innerMap.get(s.y);
-    if (!cur || s.x1 - s.x0 > cur.x1 - cur.x0) innerMap.set(s.y, s);
-  }
-
-  const outerMap = new Map<number, { x0: number; x1: number }>();
-  for (const s of outerSpans) {
-    const cur = outerMap.get(s.y);
-    if (!cur || s.x1 - s.x0 > cur.x1 - cur.x0) outerMap.set(s.y, s);
-  }
-
-  outerMap.forEach(({ x0: ox0, x1: ox1 }, y) => {
-    const inn = innerMap.get(y);
-    if (!inn || inner.top > r.bottom || inner.left >= inner.right) {
-      drawHSpan(ox0, ox1, y, port.pnPat, port.pnMode, port);
-    } else {
-      const { x0: ix0, x1: ix1 } = inn;
-      if (ox0 < ix0) drawHSpan(ox0, ix0, y, port.pnPat, port.pnMode, port);
-      if (ix1 < ox1) drawHSpan(ix1, ox1, y, port.pnPat, port.pnMode, port);
-    }
-  });
+  const w = r.right - r.left;
+  const h = r.bottom - r.top;
+  if (w <= 0 || h <= 0) return;
+  drawArcLoop(r, w, h, true, 360, 0, 360, port.pnPat, port.pnMode, port);
 }
-
-// -------------------------------------------------------------------------
-// Arc rasterizer
-// Clips ellipse spans to the angular sector [startAngle, arcAngle].
-// -------------------------------------------------------------------------
 
 function fillArcSector(
   r: Rect,
@@ -199,77 +378,14 @@ function fillArcSector(
   mode: number,
   port: GrafPort
 ): void {
-  const cx = (r.left + r.right) / 2;
-  const cy = (r.top + r.bottom) / 2;
-  const pw = Math.max(1, port.pnSize.h);
-  const ph = Math.max(1, port.pnSize.v);
-
-  const outer = r;
-  const inner = hollow
-    ? {
-        top: r.top + ph,
-        left: r.left + pw,
-        bottom: r.bottom - ph,
-        right: r.right - pw,
-      }
-    : null;
-
-  const outerSpans = ellipseSpans(outer);
-  const innerSpans =
-    inner && inner.right > inner.left && inner.bottom > inner.top
-      ? ellipseSpans(inner)
-      : [];
-
-  const innerMap = new Map<number, { x0: number; x1: number }>();
-  for (const s of innerSpans) {
-    const cur = innerMap.get(s.y);
-    if (!cur || s.x1 - s.x0 > cur.x1 - cur.x0) innerMap.set(s.y, s);
-  }
-
-  const outerMap = new Map<number, { x0: number; x1: number }>();
-  for (const s of outerSpans) {
-    const cur = outerMap.get(s.y);
-    if (!cur || s.x1 - s.x0 > cur.x1 - cur.x0) outerMap.set(s.y, s);
-  }
-
-  outerMap.forEach(({ x0: ox0, x1: ox1 }, y) => {
-    const inn = innerMap.get(y);
-    const iy = y + 0.5;
-
-    // For each x in the outer row, check if it's in the sector
-    const lo = inn ? inn.x0 : Math.round(cx);
-    const hi = inn ? inn.x1 : Math.round(cx);
-
-    // Left arc band
-    let runStart = -1;
-    for (let x = ox0; x < (inn ? lo : ox1); x++) {
-      if (inArcSector(x + 0.5 - cx, iy - cy, startAngle, arcAngle)) {
-        if (runStart < 0) runStart = x;
-      } else {
-        if (runStart >= 0) {
-          drawHSpan(runStart, x, y, pat, mode, port);
-          runStart = -1;
-        }
-      }
-    }
-    if (runStart >= 0) drawHSpan(runStart, inn ? lo : ox1, y, pat, mode, port);
-
-    if (inn) {
-      // Right arc band
-      runStart = -1;
-      for (let x = hi; x < ox1; x++) {
-        if (inArcSector(x + 0.5 - cx, iy - cy, startAngle, arcAngle)) {
-          if (runStart < 0) runStart = x;
-        } else {
-          if (runStart >= 0) {
-            drawHSpan(runStart, x, y, pat, mode, port);
-            runStart = -1;
-          }
-        }
-      }
-      if (runStart >= 0) drawHSpan(runStart, ox1, y, pat, mode, port);
-    }
-  });
+  const w = r.right - r.left;
+  const h = r.bottom - r.top;
+  if (w <= 0 || h <= 0) return;
+  let start = startAngle % 360;
+  if (start < 0) start += 360;
+  let stop = (start + arcAngle) % 360;
+  if (stop < 0) stop += 360;
+  drawArcLoop(r, w, h, hollow, arcAngle, start, stop, pat, mode, port);
 }
 
 // -------------------------------------------------------------------------
@@ -297,23 +413,33 @@ function verbPat(
 
 /**
  * Compute the angle in QuickDraw convention (0° = up, clockwise) from the
- * centre of `r` to point `pt`, and store the result (rounded to the nearest
- * degree) in `angle.value`.
+ * centre of `r` to point `pt`, and store the result in `angle.value`.
+ * Uses aspect-correct slope and AngleFromSlope table (Angles.a PtToAngle).
  *
  * `PROCEDURE PtToAngle(r: Rect; pt: Point; VAR angle: INTEGER)`.
  */
-
 export function PtToAngle(
   r: Rect,
   pt: { v: number; h: number },
   angle: { value: number }
 ): void {
-  const cx = (r.left + r.right) / 2;
-  const cy = (r.top + r.bottom) / 2;
-  const dx = pt.h - cx;
-  const dy = pt.v - cy;
-  let deg = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
-  angle.value = Math.round(deg);
+  const centerV = (r.top + r.bottom) >> 1;
+  const centerH = (r.left + r.right) >> 1;
+  const dv = pt.v - centerV;
+  const dh = pt.h - centerH;
+  if (dh === 0) {
+    angle.value = dv <= 0 ? 0 : 180;
+    return;
+  }
+  const slope = FixRatio(dh, dv);
+  const height = r.bottom - r.top;
+  const width = r.right - r.left;
+  const aspect = FixRatio(height, width);
+  const slope2 = FixMul(slope, aspect);
+  let deg = AngleFromSlope(slope2);
+  if (dh < 0) deg += 180;
+  if (deg === 360) deg = 0;
+  angle.value = deg;
 }
 
 // -------------------------------------------------------------------------
@@ -407,14 +533,19 @@ export function StdArc(
   const hollow = verb === FRAME;
   const { pat, mode } = verbPat(verb, port, fillPat);
 
-  if (Math.abs(arcAngle) >= 360) {
-    // Full circle — use oval routines
+  if (arcAngle === 0) return;
+  let sa = startAngle;
+  let aa = arcAngle;
+  if (aa < 0) {
+    sa += aa;
+    aa = -aa;
+  }
+  if (aa >= 360) {
     if (hollow) frameOval(r, port);
     else fillOval(r, pat, mode, port);
     return;
   }
-
-  fillArcSector(r, startAngle, arcAngle, hollow, pat, mode, port);
+  fillArcSector(r, sa, aa, hollow, pat, mode, port);
 }
 
 export function FrameArc(r: Rect, startAngle: number, arcAngle: number): void {

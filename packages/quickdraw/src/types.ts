@@ -100,16 +100,20 @@ export interface Rect {
 
 /**
  * Construct a {@link Rect} from explicit edge coordinates.
- * @param left   Left edge (inclusive).
+ * Parameter order matches the {@link Rect} field order (top, left, bottom, right).
+ * Original Mac used SetRect(VAR r; left, top, right, bottom); this is a pure
+ * functional helper we added when porting.
+ *
  * @param top    Top edge (inclusive).
- * @param right  Right edge (exclusive).
+ * @param left   Left edge (inclusive).
  * @param bottom Bottom edge (exclusive).
+ * @param right  Right edge (exclusive).
  */
 export function makeRect(
-  left: number,
   top: number,
-  right: number,
-  bottom: number
+  left: number,
+  bottom: number,
+  right: number
 ): Rect {
   return { top, left, bottom, right };
 }

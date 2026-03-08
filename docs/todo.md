@@ -1,0 +1,3 @@
+- review all "Managers" of macintosh
+- add zoom in/out illusions
+- pause camera using the deactivate/activate event in photobooth

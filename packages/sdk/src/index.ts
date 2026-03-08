@@ -218,16 +218,36 @@ export interface TextOptions {
   align?: "left" | "center" | "right";
 }
 
+/**
+ * QuickDraw-style rectangle (top, left, bottom, right).
+ * Control bounds use this convention; top/left inclusive, bottom/right exclusive.
+ */
+export interface Rect {
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
+}
+
+/** Build a Rect from edge coordinates (top, left, bottom, right). */
+export function makeRect(
+  top: number,
+  left: number,
+  bottom: number,
+  right: number
+): Rect {
+  return { top, left, bottom, right };
+}
+
 export interface ButtonOptions {
-  x: number;
-  y: number;
+  /** Button bounds in local content coordinates (top, left, bottom, right). */
+  boundsRect: Rect;
   label: string;
   id?: string;
   onClick?: () => void;
   onMouseDown?: () => void;
   onMouseUp?: () => void;
   onMouseLeave?: () => void;
-  width?: number;
   disabled?: boolean;
   pressed?: boolean;
   /** Default (primary) button: double border per classic Mac (e.g. OK in dialogs). */
@@ -311,12 +331,12 @@ export interface WindowContext {
   pushClip(x: number, y: number, w: number, h: number): void;
   popClip(): void;
   drawText(text: string, x: number, y: number, opts?: TextOptions): void;
-  drawButton(btn: ButtonOptions): {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-  };
+  /**
+   * Return the window record for this context, or null if this context has no
+   * window (e.g. scroll-area content). Use with NewControl + DrawControls for
+   * buttons and other controls. See docs/control-manager-migration.md.
+   */
+  getWindow(): { id: string; controlList: unknown[] } | null;
   drawTextInput(
     state: TextInputState,
     x: number,

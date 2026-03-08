@@ -9,7 +9,13 @@ import {
   handleTextInputKey,
 } from "../lib/toolbox/TextEdit";
 import { measureText, getLineHeight } from "../lib/canvas/fontAdapter";
+import { makeRect } from "@mockintosh/quickdraw";
 import { MenubarDefinition } from "../lib/toolbox/MenuManager";
+import {
+  NewControl,
+  DrawControls,
+  inButton,
+} from "../lib/toolbox/ControlManager";
 import { ditherBlobToPixels } from "../lib/canvas/dither";
 
 // ---------------------------------------------------------------------------
@@ -289,7 +295,7 @@ export const ChatGippityApp: SystemApp = {
   resizable: false,
   minSize: { width: 200, height: 160 },
 
-  // Hook order: messages, inputState, loading, scrollOffset
+  // Hook order: messages, inputState, loading, scrollOffset, controlsCreatedRef
   render(app: AppBuilder, ctx: WindowContext, props: any) {
     const [messages, setMessages] = app.useState<ChatMessage[]>([]);
     const [inputState] = app.useState<TextInputState>(createTextInputState(""));
@@ -297,6 +303,7 @@ export const ChatGippityApp: SystemApp = {
     if (!inputState.focused) inputState.focused = true;
     const [loading, setLoading] = app.useState(false);
     const [scrollOffset, setScrollOffset] = app.useState(0);
+    const controlsCreatedRef = app.useRef(false);
 
     ctx.clear(WHITE);
 
@@ -407,34 +414,56 @@ export const ChatGippityApp: SystemApp = {
       onChange: () => app.scheduleRender(),
     });
 
-    ctx.drawButton({
-      x: ctx.width - sendBtnWidth - 4,
-      y: inputY - 1,
-      label: "Send",
-      id: "chat-send-btn",
-      onClick: () => {
-        if (loading) return;
-        doSend(
-          messages,
-          inputState,
-          setMessages,
-          setLoading,
-          setScrollOffset,
-          () => app.scheduleRender(),
-          chatAreaHeight,
-          totalContentHeight,
-          contentWidth
+    const sendBtnH = 20;
+    const win = ctx.getWindow();
+    if (win !== null) {
+      if (!controlsCreatedRef.current) {
+        const sendHandle = NewControl(
+          win,
+          makeRect(
+            inputY - 1,
+            ctx.width - sendBtnWidth - 4,
+            inputY - 1 + sendBtnH,
+            ctx.width - 4
+          ),
+          "Send",
+          true,
+          0,
+          0,
+          1,
+          0,
+          0
         );
-      },
-    });
+        sendHandle.ref.contrlAction = (_c, partCode) => {
+          if (partCode !== inButton || loading) return;
+          doSend(
+            messages,
+            inputState,
+            setMessages,
+            setLoading,
+            setScrollOffset,
+            () => app.scheduleRender(),
+            chatAreaHeight,
+            totalContentHeight,
+            contentWidth
+          );
+        };
+        controlsCreatedRef.current = true;
+      }
+      if (win.controlList[0]) {
+        win.controlList[0].ref.contrlHilite = loading ? 255 : 0;
+      }
+      DrawControls(win, ctx.port);
+    }
   },
 
-  // Hook order must match render: messages, inputState, loading, scrollOffset
+  // Hook order must match render: messages, inputState, loading, scrollOffset, controlsCreatedRef
   onEvent(app: AppBuilder, event: OSEvent, props: any, size: any) {
     const [messages, setMessages] = app.useState<ChatMessage[]>([]);
     const [inputState] = app.useState<TextInputState>(createTextInputState(""));
     const [loading, setLoading] = app.useState(false);
     const [scrollOffset, setScrollOffset] = app.useState(0);
+    app.useRef(false); // controlsCreatedRef
 
     if (event.type === "keyDown") {
       if (event.key === "Enter") {

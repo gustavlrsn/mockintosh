@@ -4,6 +4,12 @@ Items not fully migrated during the current plan but that could be addressed for
 
 ---
 
+## Done: Control Manager uses QuickDraw directly for buttons
+
+Button drawing now calls QuickDraw directly from Control Manager (SetPort, FrameRoundRect, PaintRoundRect, InvertRoundRect, MoveTo, DrawString, PenSize, PenPat). Press feedback uses InvertRoundRect on mouse down and again on mouse up. See `.cursor/plans/original_mac_button_drawing.plan.md`. **Do not change packages/quickdraw** unless a discrepancy with reference/QuickDraw is found; treat visual/placement issues as GrafPort or coordinate fixes first.
+
+---
+
 ## Deferred: visRgn occlusion (CalcVis)
 
 The original Mac Window Manager maintained **visRgn** per window so that drawing was clipped to the visible content minus windows in front. We currently use the painter's algorithm and repaint every frame, so occlusion is implicit. A more faithful version would compute visRgn (e.g. CalcVis) and set it on each window's port so that QuickDraw only draws into truly visible pixels.
@@ -22,6 +28,10 @@ The original Mac only redrew **dirty** areas (updateRgn per window). We currentl
 
 ---
 
+## WindowRecord
+
+**Done:** We now use `WindowRecord` (replacing `WindowState`) as the window type; each record holds window state plus optional `port` and `framePort` GrafPorts, ensured on demand via `ensureWindowPort(record, screenPort)`. `BeginUpdate(theWindow)` uses `theWindow.port` (must be ensured before calling). This aligns with the original Mac where the window record started with a GrafPort (WindowPtr = GrafPtr).
+
 ## Sprite type → QuickDraw BitMap
 
 The `Sprite` interface (`data` + `mask` as 1-byte-per-pixel arrays) is a Mockintosh invention. The Mac equivalent is a `BitMap` (packed 1-bit-per-pixel rows) plus a mask `BitMap`. Converting sprites to native BitMaps would allow `CopyBits` to handle all blitting, eliminating `SpriteManager.ts` entirely.
@@ -30,9 +40,11 @@ The `Sprite` interface (`data` + `mask` as 1-byte-per-pixel arrays) is a Mockint
 
 ---
 
-## fontAdapter.ts → FONT resources + native DrawString
+## fontAdapter.ts → FONT resources + native DrawString (text path done)
 
-Currently fonts are loaded as bitmap textures via PixelFontCanvas and rendered by blitting glyphs into a raw pixel buffer. The Mac stored fonts as FONT/NFNT resources and rendered via `DrawString`/`DrawText` through the bottleneck. A faithful version would store font resources in ResourceManager and have QuickDraw's text routines render them natively. The `__injectFontFunctions` bridge in `main.tsx` is already halfway there.
+**Done:** All in-repo text drawing goes through QuickDraw. WindowContext.drawText and drawTextBlock, WindowManager (window titles, info bar), Finder (measurement via FMTextWidth), TextEdit, and MenuManager use SetPort + MoveTo + DrawString; the bridge delegates to `drawBitmapTextToPixels` for glyph blitting. FontManager owns the injection and uses port.txFont (and optional txColor). There are no remaining `drawBitmapText` callers in the repo; it is deprecated and kept only for external/legacy BitCanvas paths.
+
+**Remaining:** Font data is still from PixelFontCanvas; NFNT/FONT resources are optional later. BitCanvas pushClip/popClip and getBitCanvas() remain for scroll area and SDK until a separate clip migration.
 
 **Files:** `lib/canvas/fontAdapter.ts`, `src/main.tsx` (font injection), `lib/toolbox/FontManager.ts`
 
@@ -46,17 +58,27 @@ Patterns are stored as 64-byte flat arrays (1 byte per pixel). `patternBridge.ts
 
 ---
 
+## Original Mac split: TextEdit vs Control Manager
+
+On the original Mac, **editable text** was handled by the **TextEdit** manager (TEHandle, TEKey, TEClick, TEUpdate), not by the Control Manager. The Control Manager was for buttons, scroll bars, checkboxes, and similar controls; in dialogs, the DITL had separate item types for Controls vs Editable Text. Our design follows this: text inputs use the TextEdit path (`drawTextInput` → `drawTextEditField`, state/handlers in ui/TextInput) and are **not** intended to become Control Manager controls. The TextEdit path owns hit-region registration for the field when the app passes `options.id` to `drawTextInput`, so **apps do not need to call hitRegion separately** for text inputs; this matches the original Mac where the Dialog Manager did hit testing for dialog items.
+
+---
+
 ## HitRegion → Control Manager controls
 
-The original Mac tracked clickable UI elements (buttons, scrollbars, popup menus) as Controls in the Control Manager, not as ad-hoc rectangles. A more faithful version would register Controls with the ControlManager (which tracks their rects, hilite states, and action procs), and `FindControl`/`TrackControl` would replace the HitRegion hit-testing. This would collapse HitRegion, the scrollbar drawing in WindowContext, and the button hit-region logic into the ControlManager's native tracking.
+The original Mac tracked clickable UI elements (buttons, scrollbars, popup menus) as Controls in the Control Manager, not as ad-hoc rectangles. The migration below applies to **buttons, scroll bars, and other Control Manager-style controls**; **editable text fields** remain on the TextEdit path and are out of scope for this migration. A more faithful version would register Controls with the ControlManager (which tracks their rects, hilite states, and action procs), and `FindControl`/`TrackControl` would replace the HitRegion hit-testing. This would collapse HitRegion, the scrollbar drawing in WindowContext, and the button hit-region logic into the ControlManager's native tracking.
+
+**Done — scroll bars:** Scroll bars are now fully in Control Manager. WindowManager calls `CreateOrUpdateScrollBarControls` and `DrawScrollBarControls`; FindControlInWindow does five-part hit-test for procID 4; TrackControl (including thumb with onTrackMove) and GetControlValue drive scroll state. See [control-manager-migration.md](control-manager-migration.md) Phase 7.
+
+**Concrete migration plan (legacy drawButton → NewControl + DrawControls):** See [control-manager-migration.md](control-manager-migration.md).
 
 **Files:** `lib/canvas/HitRegion.ts`, `lib/toolbox/WindowContext.ts` (scrollArea), `lib/toolbox/ControlManager.ts`
 
 ---
 
-## TextEdit BitCanvas shim → native GrafPort text rendering
+## TextEdit BitCanvas shim → native GrafPort text rendering (done)
 
-TextEdit and fontAdapter currently create a fake BitCanvas from a GrafPort's pixel buffer to draw text fields. A faithful version would use QuickDraw's `DrawString`/`TEUpdate` directly on the GrafPort, with `SetPort`/`ClipRect` for clipping. This would allow deleting the remaining `drawRect`/`fillRect`/`drawVLine` methods from BitCanvas.
+**Done:** TextEdit uses SetPort, ClipRect (with GetClip/SetClip save/restore), MoveTo, and DrawString for both `drawTextEditField` and `drawTextBlockToPort`. The BitCanvas-based `drawTextInput(canvas, ...)` has been removed from lib/canvas/ui/TextInput.ts; that file now only exports state and event handlers (createTextInputState, handleTextInputKey, etc.). All text field drawing goes through WindowContext.drawTextInput → drawTextEditField(port, ...). BitCanvas pushClip/popClip and getBitCanvas() remain for scroll area and SDK until a separate clip migration.
 
 **Files:** `lib/toolbox/TextEdit.ts`, `lib/canvas/ui/TextInput.ts`, `lib/canvas/fontAdapter.ts`, `lib/canvas/BitCanvas.ts` (legacy drawing methods)
 
@@ -112,6 +134,6 @@ Camera, audio, and storage are currently ad-hoc properties on `OSServices`. The 
 
 ## ui/TextBlock.ts and ui/TextInput.ts
 
-These legacy drawing modules still operate on BitCanvas directly. Once font rendering uses native QuickDraw `DrawString`, these can be rewritten to use GrafPort-only drawing and deleted from `lib/canvas/ui/`.
+**Done:** TextInput’s BitCanvas drawing path has been removed. ui/TextInput.ts now only provides state and event handlers; text field rendering is GrafPort-based via TextEdit.drawTextEditField. ui/TextBlock.ts remains layout/measurement-only (getWrappedLines, measureTextBlock) with no drawing; it is used by WindowContext.drawTextBlock and TextEdit.drawTextBlockToPort.
 
 **Files:** `lib/canvas/ui/TextInput.ts`, `lib/canvas/ui/TextBlock.ts`

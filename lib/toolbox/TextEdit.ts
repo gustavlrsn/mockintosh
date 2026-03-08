@@ -1,9 +1,9 @@
 /**
- * TextEdit.ts
+ * TextEdit.ts — TextEdit path for editable text (original Mac architecture).
  *
- * QuickDraw-native text input and text block rendering.
- * Consolidates and replaces the BitCanvas-based TextInput.ts and TextBlock.ts
- * drawing functions with GrafPort-based equivalents.
+ * Editable text is separate from the Control Manager (buttons, scroll bars, etc.).
+ * QuickDraw-native text input and text block rendering; uses SetPort, ClipRect,
+ * MoveTo, DrawString so text respects port clipping.
  *
  * Non-drawing state management and key/mouse handlers from TextInput.ts are
  * re-exported unchanged — they are pure state logic, independent of rendering.
@@ -11,13 +11,22 @@
 
 import type { GrafPort } from "@mockintosh/quickdraw";
 import {
-  drawBitmapText,
-  measureText,
-  getLineHeight,
-  type FontName,
-} from "../canvas/fontAdapter";
+  SetPort,
+  MoveTo,
+  TextFont,
+  TextFace,
+  DrawString,
+  ClipRect,
+  GetClip,
+  SetClip,
+  makeRect,
+  NewRgn,
+  DisposeRgn,
+} from "@mockintosh/quickdraw";
+import { GetFNum, FMTextWidth } from "./FontManager";
+import { getLineHeight, type FontName } from "../canvas/fontAdapter";
 import { qdFillRect, qdDrawRect, qdDrawVLine } from "../canvas/qdDraw";
-import { BitCanvas, BLACK, WHITE } from "../canvas/BitCanvas";
+import { BLACK, WHITE } from "../canvas/BitCanvas";
 
 // Re-export state management and event handling from TextInput.ts
 export {
@@ -40,51 +49,7 @@ export {
 
 import { getWrappedLines as _getWrappedLines } from "../canvas/ui/TextBlock";
 
-// -------------------------------------------------------------------------
-// Internal: BitCanvas shim that shares the port's pixel buffer
-// -------------------------------------------------------------------------
-
-function _shim(port: GrafPort): BitCanvas {
-  const { baseAddr, rowBytes } = port.portBits;
-  const h = (baseAddr.length / rowBytes) | 0;
-  const bc = new BitCanvas(rowBytes, h);
-  (bc as any).pixels = baseAddr;
-  return bc;
-}
-
-function _clip(port: GrafPort): { x: number; y: number; w: number; h: number } {
-  const vis = port.visRgn?.rgn.rgnBBox;
-  const clip = port.clipRgn?.rgn.rgnBBox;
-  const pr = port.portRect;
-  const bnd = port.portBits.bounds;
-  const x = Math.max(
-    vis?.left ?? bnd.left,
-    clip?.left ?? bnd.left,
-    pr.left,
-    bnd.left
-  );
-  const y = Math.max(
-    vis?.top ?? bnd.top,
-    clip?.top ?? bnd.top,
-    pr.top,
-    bnd.top
-  );
-  const x2 = Math.min(
-    vis?.right ?? bnd.right,
-    clip?.right ?? bnd.right,
-    pr.right,
-    bnd.right
-  );
-  const y2 = Math.min(
-    vis?.bottom ?? bnd.bottom,
-    clip?.bottom ?? bnd.bottom,
-    pr.bottom,
-    bnd.bottom
-  );
-  const w = Math.max(0, x2 - x);
-  const h = Math.max(0, y2 - y);
-  return { x: x - bnd.left, y: y - bnd.top, w, h };
-}
+const CHIKAREGO = "ChiKareGo" as FontName;
 
 // -------------------------------------------------------------------------
 // drawTextEditField — text input using QuickDraw GrafPort
@@ -98,14 +63,14 @@ export function drawTextEditField(
   width: number,
   height: number = 16
 ): void {
-  const bc = _shim(port);
+  SetPort(port);
+  (port as GrafPort & { txColor?: number }).txColor = BLACK;
+  const savedClip = NewRgn();
+  GetClip(savedClip);
+  ClipRect(makeRect(y, x, y + height, x + width));
 
-  // Sync clip from port to BitCanvas
-  const cl = _clip(port);
-  bc.pushClip(cl.x, cl.y, cl.w, cl.h);
-
-  bc.drawRect(x, y, width, height, BLACK);
-  bc.fillRect(x + 1, y + 1, width - 2, height - 2, WHITE);
+  qdDrawRect(port, x, y, width, height, BLACK);
+  qdFillRect(port, x + 1, y + 1, width - 2, height - 2, WHITE);
 
   const textX = x + 3;
   const textY = y + 1;
@@ -120,42 +85,42 @@ export function drawTextEditField(
   const lo = hasSel ? Math.min(state.selectionStart, state.selectionEnd) : 0;
   const hi = hasSel ? Math.max(state.selectionStart, state.selectionEnd) : 0;
 
+  TextFont(GetFNum(CHIKAREGO));
+  TextFace(0);
+
   if (state.focused && hasSel) {
     const selStartX =
-      textX + measureText(state.value.substring(0, lo), "ChiKareGo");
+      textX + FMTextWidth(state.value.substring(0, lo), CHIKAREGO);
     const selEndX =
-      textX + measureText(state.value.substring(0, hi), "ChiKareGo");
-    bc.fillRect(selStartX, y + 2, selEndX - selStartX, height - 4, BLACK);
+      textX + FMTextWidth(state.value.substring(0, hi), CHIKAREGO);
+    qdFillRect(port, selStartX, y + 2, selEndX - selStartX, height - 4, BLACK);
 
-    if (lo > 0)
-      drawBitmapText(bc, state.value.substring(0, lo), textX, textY, {
-        font: "ChiKareGo",
-        color: BLACK,
-      });
-    drawBitmapText(bc, state.value.substring(lo, hi), selStartX, textY, {
-      font: "ChiKareGo",
-      color: WHITE,
-    });
-    if (hi < state.value.length)
-      drawBitmapText(bc, state.value.substring(hi), selEndX, textY, {
-        font: "ChiKareGo",
-        color: BLACK,
-      });
+    if (lo > 0) {
+      MoveTo(textX, textY);
+      DrawString(state.value.substring(0, lo));
+    }
+    (port as GrafPort & { txColor?: number }).txColor = WHITE;
+    MoveTo(selStartX, textY);
+    DrawString(state.value.substring(lo, hi));
+    (port as GrafPort & { txColor?: number }).txColor = BLACK;
+    if (hi < state.value.length) {
+      MoveTo(selEndX, textY);
+      DrawString(state.value.substring(hi));
+    }
   } else {
-    drawBitmapText(bc, state.value, textX, textY, {
-      font: "ChiKareGo",
-      color: BLACK,
-    });
+    MoveTo(textX, textY);
+    DrawString(state.value);
 
     const cursorPos = state.cursorPos;
     if (state.focused && isCursorVisible()) {
       const beforeCursor = state.value.substring(0, cursorPos);
-      const cx = textX + measureText(beforeCursor, "ChiKareGo");
-      bc.drawVLine(cx, y + 2, height - 4, BLACK);
+      const cx = textX + FMTextWidth(beforeCursor, CHIKAREGO);
+      qdDrawVLine(port, cx, y + 2, height - 4, BLACK);
     }
   }
 
-  bc.popClip();
+  SetClip(savedClip);
+  DisposeRgn(savedClip);
 }
 
 // -------------------------------------------------------------------------
@@ -186,9 +151,12 @@ export function drawTextBlockToPort(
   const lines = _getWrappedLines(opts.text, opts.maxWidth, font);
   const totalHeight = lines.length * lineH;
 
-  const bc = _shim(port);
-  const cl = _clip(port);
-  bc.pushClip(cl.x, cl.y, cl.w, cl.h);
+  SetPort(port);
+  TextFont(GetFNum(font));
+  TextFace(0);
+  if (color === WHITE) {
+    (port as GrafPort & { txColor?: number }).txColor = WHITE;
+  }
 
   const scrollOffset = opts.scrollOffset ?? 0;
   const viewBottom = scrollOffset + (opts.viewHeight ?? Infinity);
@@ -197,9 +165,13 @@ export function drawTextBlockToPort(
     const ly = opts.y + i * lineH;
     if (ly + lineH <= scrollOffset || ly >= viewBottom) continue;
     if (!lines[i]) continue;
-    drawBitmapText(bc, lines[i], opts.x, ly - scrollOffset, { font, color });
+    const drawY = ly - scrollOffset;
+    MoveTo(opts.x, drawY);
+    DrawString(lines[i]);
   }
 
-  bc.popClip();
+  if (color === WHITE) {
+    (port as GrafPort & { txColor?: number }).txColor = BLACK;
+  }
   return totalHeight;
 }

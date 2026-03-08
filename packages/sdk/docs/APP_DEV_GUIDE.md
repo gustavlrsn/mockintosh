@@ -32,13 +32,11 @@ const MyApp: App = {
       font: "ChiKareGo",
       color: BLACK,
     });
-    ctx.drawButton({
-      x: 10,
-      y: 30,
-      label: "+1",
-      id: "increment",
-      onClick: () => setCount((c) => c + 1),
-    });
+    const win = ctx.getWindow();
+    if (win) {
+      // Create controls once with useRef, then DrawControls(win, ctx.port).
+      // See examples/counter.ts for full pattern with NewControl + contrlAction.
+    }
   },
 };
 
@@ -88,7 +86,7 @@ Apps render imperatively — there is no virtual DOM, no reconciliation. Every f
 
 **UI Components:**
 
-- `drawButton({ x, y, label, id?, onClick?, ... })` — draw a Mac-style button
+- `getWindow()` — return the window record (or null). Use with **NewControl** + **DrawControls** for buttons: create controls once (e.g. in a useRef), set `contrlAction` for click handling, call `DrawControls(win, ctx.port)` each frame. See `examples/counter.ts` and docs/control-manager-migration.md.
 - `drawTextInput(state, x, y, width, height?, options?)` — draw a text input field
 
 **Hit Regions:**
@@ -361,7 +359,7 @@ const MyApp: App = {
 
     // This draws below the scroll area, fixed in place
     ctx.drawHLine(0, scrollableH, ctx.width, BLACK);
-    ctx.drawButton({ x: 8, y: scrollableH + 6, label: "Action", id: "btn" });
+    // Use ctx.getWindow() and NewControl + DrawControls for buttons (see counter example).
   },
 };
 ```

@@ -1,10 +1,31 @@
-import { BitCanvas, BLACK, WHITE } from "../canvas/BitCanvas";
+import { BLACK, WHITE } from "../canvas/BitCanvas";
 import { WindowContext } from "./WindowContext";
-import { drawBitmapText, measureText } from "../canvas/fontAdapter";
 import { OSEvent } from "./EventManager";
+import { GetFNum, FMTextWidth } from "./FontManager";
 import { ResourceManager } from "./ResourceManager";
 import { HitRegionMap } from "../canvas/HitRegion";
-import type { GrafPort } from "@mockintosh/quickdraw";
+import type { GrafPort, Rect, RgnHandle } from "@mockintosh/quickdraw";
+import {
+  makeRect,
+  cloneRect,
+  UnionRect,
+  RectRgn,
+  SetClip,
+  NewRgn,
+  SetPort,
+  MoveTo,
+  TextFont,
+  TextFace,
+  DrawString,
+  patCopy,
+  blackColor,
+  whiteColor,
+} from "@mockintosh/quickdraw";
+import { type ControlHandle } from "./ControlManager";
+import {
+  CreateOrUpdateScrollBarControls,
+  DrawScrollBarControls,
+} from "./ControlManager";
 import {
   qdFillRect,
   qdDrawRect,
@@ -16,8 +37,7 @@ import {
   qdXorPatternRect,
   qdSetPixel,
 } from "../canvas/qdDraw";
-import { blitSprite, fillSpriteTile } from "../canvas/SpriteManager";
-import { closeWindowPort } from "./WindowPort";
+import { blitSprite } from "../canvas/SpriteManager";
 
 // ---------------------------------------------------------------------------
 // Window kind — Mac-aligned classification of every window
@@ -31,8 +51,22 @@ export type WindowKind =
   | "desktop"; // Finder desktop (chromeless, below everything)
 
 // ---------------------------------------------------------------------------
-// FindWindow part codes — Mac-aligned hit-testing enum
+// FindWindow part codes — Mac-aligned hit-testing
 // ---------------------------------------------------------------------------
+
+/** Integer part codes returned by FindWindow (Mac Event Manager / FindWindow). */
+export const inDesk = 0;
+export const inMenuBar = 1;
+export const inSysWindow = 2;
+export const inContent = 3;
+export const inDrag = 4;
+export const inGrow = 5;
+export const inGoAway = 6;
+export const inZoomIn = 7;
+export const inZoomOut = 8;
+export const inVScroll = 9;
+export const inHScroll = 10;
+export const inWindowBackground = 11;
 
 export type WindowHitPart =
   | "inMenuBar"
@@ -51,11 +85,28 @@ export interface FindWindowResult {
   part: WindowHitPart;
 }
 
+/** WindowPtr = reference to window record (Mac: WindowPtr = GrafPtr; we use WindowRecord). */
+export type WindowPtr = WindowRecord;
+
+/** Result of FindWindow with Mac-style (theWindow, partCode). */
+export interface FindWindowResultWithPtr {
+  theWindow: WindowPtr | null;
+  partCode: number;
+}
+
+/** Rect shape for port creation (content or frame). */
+interface ContentRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 // ---------------------------------------------------------------------------
-// WindowState
+// WindowRecord
 // ---------------------------------------------------------------------------
 
-export interface WindowState {
+export interface WindowRecord {
   id: string;
   title: string;
   x: number;
@@ -93,6 +144,16 @@ export interface WindowState {
   /** Height in pixels of the non-scrolling strip at the top of the content area.
    *  The window scrollbar starts below this; only content below scrolls. */
   contentTopInset?: number;
+  /** Controls owned by this window (Mac: controlList). NewControl appends here. */
+  controlList: ControlHandle[];
+  /** Scroll bar part controls (up, down, thumb) in window-local coordinates. Used by FindControlInWindow. */
+  scrollBarControls: ControlHandle[];
+  /** Rect-based dirty region for update (Mac: updateRgn). InvalRect unions here; BeginUpdate clips to it. Content-local coordinates. */
+  updateRect: Rect | null;
+  /** Content-area GrafPort; set by ensureWindowPort(record, screenPort). Origin (0,0) = content top-left. */
+  port?: GrafPort;
+  /** Frame GrafPort (window top-left = origin); set by ensureWindowPort(record, screenPort, { useFrameRect: true }). Used for scroll-bar TrackControl. */
+  framePort?: GrafPort;
 }
 
 export interface WindowManagerConfig {
@@ -115,26 +176,11 @@ const ZOOM_BOX_SIZE = 11;
 const GROW_BOX_SIZE = 16;
 
 // ---------------------------------------------------------------------------
-// Helper: wrap a GrafPort's pixel buffer in a temporary BitCanvas for
-// legacy drawing functions that still accept BitCanvas directly.
-// Both share the same Uint8Array so writes are immediately visible.
-// ---------------------------------------------------------------------------
-// TODO: Remove once we have the proper Font Manager
-function _portToBitCanvas(port: GrafPort): BitCanvas {
-  const { baseAddr, rowBytes } = port.portBits;
-  const height = (baseAddr.length / rowBytes) | 0;
-  const bc = new BitCanvas(rowBytes, height);
-  // Replace the internal pixel array with the port's (shared reference)
-  (bc as any).pixels = baseAddr;
-  return bc;
-}
-
-// ---------------------------------------------------------------------------
 // WindowManager
 // ---------------------------------------------------------------------------
 
 export class WindowManager {
-  windows: WindowState[] = [];
+  windows: WindowRecord[] = [];
   private config: WindowManagerConfig;
 
   private dragging: {
@@ -155,18 +201,6 @@ export class WindowManager {
     /** Prospective size updated on each mouse-move; applied on mouse-up */
     prospectiveWidth: number;
     prospectiveHeight: number;
-  } | null = null;
-
-  private scrollDragging: {
-    windowId: string;
-    startY: number;
-    startScrollY: number;
-  } | null = null;
-
-  private hScrollDragging: {
-    windowId: string;
-    startX: number;
-    startScrollX: number;
   } | null = null;
 
   /** Window whose zoom box is currently pressed (for highlight feedback) */
@@ -195,7 +229,17 @@ export class WindowManager {
   // ---------------------------------------------------------------------------
 
   openWindow(
-    win: Omit<WindowState, "active" | "scrollY" | "scrollX"> & {
+    win: Omit<
+      WindowRecord,
+      | "active"
+      | "scrollY"
+      | "scrollX"
+      | "controlList"
+      | "scrollBarControls"
+      | "updateRect"
+      | "port"
+      | "framePort"
+    > & {
       scrollY?: number;
       scrollX?: number;
     }
@@ -211,13 +255,16 @@ export class WindowManager {
       win.chromeless ?? WindowManager.isChromeless(win.windowKind);
     const modal = win.modal ?? WindowManager.isModal(win.windowKind);
 
-    const newWin: WindowState = {
+    const newWin: WindowRecord = {
       ...win,
       scrollY: win.scrollY ?? 0,
       scrollX: win.scrollX ?? 0,
       active: true,
       chromeless,
       modal,
+      controlList: [],
+      scrollBarControls: [],
+      updateRect: null,
     };
 
     // Initialise userBounds from opening position/size
@@ -234,7 +281,7 @@ export class WindowManager {
 
   /** Insert window respecting kind-based layering:
    *  desktop → document / dialog → utility → alert */
-  private _insertInLayerOrder(win: WindowState) {
+  private _insertInLayerOrder(win: WindowRecord) {
     if (win.windowKind === "desktop") {
       this.windows.unshift(win);
       return;
@@ -267,7 +314,11 @@ export class WindowManager {
   }
 
   closeWindow(id: string) {
-    closeWindowPort(id);
+    const rec = this.windows.find((w) => w.id === id);
+    if (rec) {
+      rec.port = undefined;
+      rec.framePort = undefined;
+    }
     this.windows = this.windows.filter((w) => w.id !== id);
     this._notifyActiveChange(() => this._updateActive());
   }
@@ -317,7 +368,7 @@ export class WindowManager {
     return this.windows.some((w) => w.modal);
   }
 
-  getActiveWindow(): WindowState | null {
+  getActiveWindow(): WindowRecord | null {
     // Active window = frontmost non-desktop window
     for (let i = this.windows.length - 1; i >= 0; i--) {
       if (this.windows[i].windowKind !== "desktop") {
@@ -386,7 +437,7 @@ export class WindowManager {
 
   /** Toggle the window between standard state and user state. Called by the
    *  zoom-box hit region on mouse-up while cursor is still in the box. */
-  zoomWindow(win: WindowState) {
+  zoomWindow(win: WindowRecord) {
     const std = win.standardBounds ?? this._defaultStandardBounds();
 
     const isAtStandard =
@@ -448,8 +499,45 @@ export class WindowManager {
     return { windowId: null, part: "inDesktop" };
   }
 
+  /** Map WindowHitPart to integer part code (Mac FindWindow). */
+  private _partToCode(part: WindowHitPart): number {
+    const map: Record<WindowHitPart, number> = {
+      inMenuBar: inMenuBar,
+      inDesktop: inDesk,
+      inWindowBackground: inWindowBackground,
+      inDrag: inDrag,
+      inGoAway: inGoAway,
+      inZoom: inZoomIn,
+      inGrow: inGrow,
+      inVScroll: inVScroll,
+      inHScroll: inHScroll,
+      inContent: inContent,
+    };
+    return map[part];
+  }
+
+  /** FindWindow(globalPt): returns theWindow and integer partCode (Mac API). */
+  findWindowWithPartCode(
+    globalX: number,
+    globalY: number
+  ): FindWindowResultWithPtr {
+    const result = this.findWindow(globalX, globalY);
+    if (result.windowId === null) {
+      return {
+        theWindow: null,
+        partCode: this._partToCode(result.part),
+      };
+    }
+    const theWindow =
+      this.windows.find((w) => w.id === result.windowId) ?? null;
+    return {
+      theWindow,
+      partCode: this._partToCode(result.part),
+    };
+  }
+
   private _hitTestWindow(
-    win: WindowState,
+    win: WindowRecord,
     gx: number,
     gy: number
   ): WindowHitPart | null {
@@ -528,8 +616,8 @@ export class WindowManager {
       }
     }
 
-    // Horizontal scroll bar
-    if (win.resizable) {
+    // Horizontal scroll bar (scrollable windows always have it)
+    if (win.scrollable) {
       const hsby = y + headerH + this._bodyHeight(win);
       const hsbh = SCROLLBAR_WIDTH;
       if (gy >= hsby && gy < hsby + hsbh) {
@@ -550,25 +638,25 @@ export class WindowManager {
   // Geometry helpers
   // ---------------------------------------------------------------------------
 
-  private _headerHeight(win: WindowState): number {
+  private _headerHeight(win: WindowRecord): number {
     return TITLE_BAR_HEIGHT + (win.infoBar ? INFO_BAR_HEIGHT : 0);
   }
 
-  private _bottomBarHeight(win: WindowState): number {
-    return win.resizable ? SCROLLBAR_WIDTH : 0;
+  private _bottomBarHeight(win: WindowRecord): number {
+    return win.scrollable || win.resizable ? SCROLLBAR_WIDTH : 0;
   }
 
-  private _bodyHeight(win: WindowState): number {
+  private _bodyHeight(win: WindowRecord): number {
     return win.height - this._bottomBarHeight(win);
   }
 
   /** Height of the content region that scrolls (body minus content top inset). */
-  private _scrollableBodyHeight(win: WindowState): number {
+  private _scrollableBodyHeight(win: WindowRecord): number {
     const inset = win.contentTopInset ?? 0;
     return Math.max(0, this._bodyHeight(win) - inset);
   }
 
-  getContentRect(win: WindowState): {
+  getContentRect(win: WindowRecord): {
     x: number;
     y: number;
     w: number;
@@ -588,11 +676,150 @@ export class WindowManager {
     };
   }
 
+  // -------------------------------------------------------------------------
+  // Per-window GrafPort (content and frame)
+  // -------------------------------------------------------------------------
+
+  private static makeRegion(r: Rect): RgnHandle {
+    return { rgn: { rgnSize: 10, rgnBBox: cloneRect(r) } };
+  }
+
+  /**
+   * Create or update a GrafPort for the given rect. Port has local (0,0) at rect top-left
+   * and shares the screen buffer. Assign result to record.port or record.framePort.
+   */
+  private _createOrUpdatePort(
+    rect: ContentRect,
+    screenPort: GrafPort,
+    existing: GrafPort | undefined
+  ): GrafPort {
+    const screenW = screenPort.portRect.right;
+    const screenH = screenPort.portRect.bottom;
+    const baseAddr = screenPort.portBits.baseAddr;
+    const rowBytes = screenPort.portBits.rowBytes;
+    const portRect = makeRect(0, 0, rect.h, rect.w);
+    const bounds = makeRect(
+      -rect.y,
+      -rect.x,
+      screenH - rect.y,
+      screenW - rect.x
+    );
+
+    if (existing) {
+      existing.portRect = cloneRect(portRect);
+      existing.portBits.baseAddr = baseAddr;
+      existing.portBits.rowBytes = rowBytes;
+      existing.portBits.bounds = cloneRect(bounds);
+      existing.visRgn.rgn.rgnBBox = cloneRect(portRect);
+      existing.visRgn.rgn.scanlines = undefined;
+      existing.clipRgn.rgn.rgnBBox = cloneRect(portRect);
+      existing.clipRgn.rgn.scanlines = undefined;
+      return existing;
+    }
+
+    const port: GrafPort = {
+      device: 0,
+      portBits: { baseAddr, rowBytes, bounds: cloneRect(bounds) },
+      portRect: cloneRect(portRect),
+      visRgn: WindowManager.makeRegion(portRect),
+      clipRgn: WindowManager.makeRegion(portRect),
+      bkPat: new Uint8Array(8),
+      fillPat: new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+      pnLoc: { v: 0, h: 0 },
+      pnSize: { v: 1, h: 1 },
+      pnMode: patCopy,
+      pnPat: new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+      pnVis: 0,
+      txFont: 0,
+      txFace: 0,
+      txMode: 1,
+      txSize: 0,
+      spExtra: 0,
+      fgColor: blackColor,
+      bkColor: whiteColor,
+      colrBit: 0,
+      patStretch: 0,
+      picSave: null,
+      rgnSave: null,
+      polySave: null,
+      grafProcs: screenPort.grafProcs,
+    };
+    return port;
+  }
+
+  /**
+   * Ensure the window has a content or frame GrafPort; create or update it and return it.
+   * Default: content port (record.port). With useFrameRect: true, frame port (record.framePort) for window-local coords (e.g. scroll-bar TrackControl).
+   */
+  ensureWindowPort(
+    record: WindowRecord,
+    screenPort: GrafPort,
+    options?: { useFrameRect?: boolean }
+  ): GrafPort {
+    if (options?.useFrameRect) {
+      const headerH = this._headerHeight(record);
+      const bodyH = this._bodyHeight(record);
+      const rect: ContentRect = {
+        x: record.x,
+        y: record.y,
+        w: record.width,
+        h: headerH + bodyH,
+      };
+      record.framePort = this._createOrUpdatePort(
+        rect,
+        screenPort,
+        record.framePort
+      );
+      return record.framePort;
+    }
+    const rect = this.getContentRect(record);
+    record.port = this._createOrUpdatePort(rect, screenPort, record.port);
+    return record.port;
+  }
+
+  // -------------------------------------------------------------------------
+  // Update region (Mac BeginUpdate / EndUpdate / InvalRect / ValidRect)
+  // -------------------------------------------------------------------------
+
+  /** Mark rect (content-local) as needing redraw. Unions into window updateRect. */
+  InvalRect(theWindow: WindowPtr, badRect: Rect): void {
+    if (theWindow.updateRect === null) {
+      theWindow.updateRect = cloneRect(badRect);
+      return;
+    }
+    const dst = makeRect(0, 0, 0, 0);
+    UnionRect(theWindow.updateRect, badRect, dst);
+    theWindow.updateRect = cloneRect(dst);
+  }
+
+  /** Mark rect as valid (no redraw needed). Rect-based: clears entire updateRect. */
+  ValidRect(theWindow: WindowPtr, _goodRect: Rect): void {
+    theWindow.updateRect = null;
+  }
+
+  /** Begin redrawing: set port clip to window update region (Mac BeginUpdate). theWindow.port must be ensured first. */
+  BeginUpdate(theWindow: WindowPtr): void {
+    if (theWindow.updateRect === null || !theWindow.port) return;
+    SetPort(theWindow.port);
+    const u = theWindow.updateRect;
+    const r = makeRect(u.top, u.left, u.bottom, u.right);
+    const rgn = NewRgn();
+    RectRgn(rgn, r);
+    SetClip(rgn);
+  }
+
+  /** End redrawing (Mac EndUpdate). Clears updateRect so next InvalRect starts fresh. */
+  EndUpdate(theWindow: WindowPtr): void {
+    theWindow.updateRect = null;
+  }
+
   createWindowContext(
-    port: GrafPort,
-    win: WindowState,
-    hitRegions?: HitRegionMap
+    win: WindowRecord,
+    hitRegions: HitRegionMap | undefined,
+    screenPort: GrafPort
   ): WindowContext {
+    this.ensureWindowPort(win, screenPort);
+    const port = win.port!;
     const r = this.getContentRect(win);
     const onStartResize = (
       startX: number,
@@ -629,12 +856,13 @@ export class WindowManager {
       win.scrollY,
       win.scrollX,
       r.x,
-      r.y
+      r.y,
+      win
     );
   }
 
   toContentLocal(
-    win: WindowState,
+    win: WindowRecord,
     x: number,
     y: number
   ): { x: number; y: number } {
@@ -691,49 +919,6 @@ export class WindowManager {
       return { consumed: true };
     }
 
-    if (this.scrollDragging) {
-      const win = this.windows.find(
-        (w) => w.id === this.scrollDragging!.windowId
-      );
-      if (win) {
-        const scrollableBodyH = this._scrollableBodyHeight(win);
-        const trackH = scrollableBodyH - 30;
-        const maxScroll = Math.max(0, win.contentHeight - scrollableBodyH);
-        const delta = y - this.scrollDragging.startY;
-        const scrollRatio = delta / Math.max(1, trackH);
-        win.scrollY = Math.max(
-          0,
-          Math.min(
-            maxScroll,
-            this.scrollDragging.startScrollY + scrollRatio * maxScroll
-          )
-        );
-      }
-      return { consumed: true };
-    }
-
-    if (this.hScrollDragging) {
-      const win = this.windows.find(
-        (w) => w.id === this.hScrollDragging!.windowId
-      );
-      if (win) {
-        const sbW = win.scrollable ? SCROLLBAR_WIDTH : 0;
-        const trackW = win.width - GROW_BOX_SIZE - 30 - sbW;
-        const contentW = win.width - 2 - sbW;
-        const maxScrollX = Math.max(0, win.contentWidth - contentW);
-        const delta = x - this.hScrollDragging.startX;
-        const scrollRatio = delta / Math.max(1, trackW);
-        win.scrollX = Math.max(
-          0,
-          Math.min(
-            maxScrollX,
-            this.hScrollDragging.startScrollX + scrollRatio * maxScrollX
-          )
-        );
-      }
-      return { consumed: true };
-    }
-
     return { consumed: false };
   }
 
@@ -772,24 +957,11 @@ export class WindowManager {
       this.resizing = null;
       return { consumed: true };
     }
-    if (this.scrollDragging) {
-      this.scrollDragging = null;
-      return { consumed: true };
-    }
-    if (this.hScrollDragging) {
-      this.hScrollDragging = null;
-      return { consumed: true };
-    }
     return { consumed: false };
   }
 
   isDraggingOrResizing(): boolean {
-    return !!(
-      this.dragging ||
-      this.resizing ||
-      this.scrollDragging ||
-      this.hScrollDragging
-    );
+    return !!(this.dragging || this.resizing);
   }
 
   /** Expose current drag/resize prospective outline for the render loop. */
@@ -830,13 +1002,13 @@ export class WindowManager {
     return null;
   }
 
-  handleScroll(win: WindowState, deltaY: number) {
+  handleScroll(win: WindowRecord, deltaY: number) {
     const scrollableBodyH = this._scrollableBodyHeight(win);
     const maxScroll = Math.max(0, win.contentHeight - scrollableBodyH);
     win.scrollY = Math.max(0, Math.min(maxScroll, win.scrollY + deltaY));
   }
 
-  handleHScroll(win: WindowState, deltaX: number) {
+  handleHScroll(win: WindowRecord, deltaX: number) {
     const sbW = win.scrollable ? SCROLLBAR_WIDTH : 0;
     const contentW = win.width - 2 - sbW;
     const maxScrollX = Math.max(0, win.contentWidth - contentW);
@@ -849,7 +1021,7 @@ export class WindowManager {
 
   drawWindowChrome(
     port: GrafPort,
-    win: WindowState,
+    win: WindowRecord,
     sprites: ResourceManager,
     hitRegions: HitRegionMap,
     callbacks: {
@@ -879,8 +1051,19 @@ export class WindowManager {
       qdInvertRect(port, x, y, w, h);
     const blitS = (sprite: any, x: number, y: number) =>
       blitSprite(port, sprite, x, y);
-    const drawTxt = (text: string, x: number, y: number, opts: any) =>
-      drawBitmapText(_portToBitCanvas(port), text, x, y, opts);
+    const drawTxt = (text: string, x: number, y: number, opts: any) => {
+      SetPort(port);
+      TextFont(GetFNum(opts?.font ?? "Geneva9"));
+      TextFace(0);
+      if (opts?.color === WHITE) {
+        (port as GrafPort & { txColor?: number }).txColor = WHITE;
+      }
+      MoveTo(x, y);
+      DrawString(text);
+      if (opts?.color === WHITE) {
+        (port as GrafPort & { txColor?: number }).txColor = BLACK;
+      }
+    };
     const hasModal = this.hasModalWindow();
     const interactionBlocked = hasModal && !win.modal;
 
@@ -1032,7 +1215,7 @@ export class WindowManager {
     hLine(x, y + TITLE_BAR_HEIGHT - 1, width, BLACK);
 
     // Title text
-    const titleW = measureText(title, "ChiKareGo");
+    const titleW = FMTextWidth(title, "ChiKareGo");
     const titleX = x + Math.floor((width - titleW) / 2);
     const titleY = y + 3;
 
@@ -1141,14 +1324,54 @@ export class WindowManager {
       this._drawInfoBar(port, win);
     }
 
-    // Vertical scrollbar
+    // Scroll bars (Control Manager): create/update controls and draw
     if (win.scrollable) {
-      this._drawScrollbar(port, win, sprites, hitRegions, callbacks);
+      const headerH = this._headerHeight(win);
+      const bodyH = this._bodyHeight(win);
+      const scrollableBodyH = this._scrollableBodyHeight(win);
+      const inset = win.contentTopInset ?? 0;
+      const growW = win.resizable ? GROW_BOX_SIZE : 0;
+      const sbW = SCROLLBAR_WIDTH;
+      const contentW = win.width - 1 - sbW;
+
+      if (inset > 0) {
+        const sbx = win.x + win.width - SCROLLBAR_WIDTH;
+        qdFillRect(port, sbx, win.y + headerH, SCROLLBAR_WIDTH, inset, WHITE);
+      }
+
+      const verticalRect = makeRect(
+        headerH + inset - 1,
+        win.width - SCROLLBAR_WIDTH,
+        headerH + inset - 1 + scrollableBodyH,
+        win.width
+      );
+      const horizontalRect = makeRect(
+        headerH + bodyH,
+        0,
+        headerH + bodyH + SCROLLBAR_WIDTH,
+        win.width - growW
+      );
+
+      CreateOrUpdateScrollBarControls(win, {
+        verticalRect,
+        horizontalRect,
+        scrollY: win.scrollY,
+        scrollX: win.scrollX,
+        contentHeight: win.contentHeight,
+        contentWidth: win.contentWidth,
+        scrollableBodyH,
+        contentW,
+        scheduleRender: callbacks.scheduleRender,
+      });
+
+      const framePort = this.ensureWindowPort(win, port, {
+        useFrameRect: true,
+      });
+      DrawScrollBarControls(win, framePort, (id) => sprites.get(id) ?? null);
     }
 
-    // Horizontal scrollbar + grow box
+    // Grow box (resizable only)
     if (win.resizable) {
-      this._drawHScrollbar(port, win, sprites, hitRegions, callbacks);
       this._drawGrowBox(port, win, sprites, hitRegions, callbacks);
     }
   }
@@ -1173,7 +1396,7 @@ export class WindowManager {
     );
   }
 
-  private _drawInfoBar(port: GrafPort, win: WindowState) {
+  private _drawInfoBar(port: GrafPort, win: WindowRecord) {
     const { x, y, width } = win;
     const infoY = y + TITLE_BAR_HEIGHT;
     const items = win.infoBar!;
@@ -1181,14 +1404,15 @@ export class WindowManager {
     qdDrawHLine(port, x, infoY + INFO_BAR_HEIGHT - 1, width, BLACK);
 
     if (items.length > 0) {
+      SetPort(port);
+      TextFont(GetFNum("Geneva9"));
+      TextFace(0);
       const colW = Math.floor((width - 2) / items.length);
       for (let i = 0; i < items.length; i++) {
-        const tw = measureText(items[i], "Geneva9");
+        const tw = FMTextWidth(items[i], "Geneva9");
         const tx = x + 1 + i * colW + Math.floor((colW - tw) / 2);
-        drawBitmapText(_portToBitCanvas(port), items[i], tx, infoY + 4, {
-          font: "Geneva9",
-          color: BLACK,
-        });
+        MoveTo(tx, infoY + 4);
+        DrawString(items[i]);
         if (i < items.length - 1) {
           qdDrawVLine(
             port,
@@ -1202,244 +1426,9 @@ export class WindowManager {
     }
   }
 
-  private _drawScrollbar(
-    port: GrafPort,
-    win: WindowState,
-    sprites: ResourceManager,
-    hitRegions: HitRegionMap,
-    callbacks: { scheduleRender: () => void }
-  ) {
-    const headerH = this._headerHeight(win);
-    const scrollableBodyH = this._scrollableBodyHeight(win);
-    const inset = win.contentTopInset ?? 0;
-
-    const sbx = win.x + win.width - SCROLLBAR_WIDTH;
-    const sby = win.y + headerH + inset - 1;
-    const needsScroll = win.contentHeight > scrollableBodyH;
-
-    if (inset > 0) {
-      qdFillRect(port, sbx, win.y + headerH, SCROLLBAR_WIDTH, inset, WHITE);
-    }
-
-    const upSprite = sprites.get("chrome/up");
-    if (upSprite) blitSprite(port, upSprite, sbx, sby);
-
-    const downTop = sby + scrollableBodyH - SCROLLBAR_WIDTH + 1;
-    const downSprite = sprites.get("chrome/down");
-    if (downSprite) blitSprite(port, downSprite, sbx, downTop);
-
-    const trackTop = sby + SCROLLBAR_WIDTH;
-    const trackHeight = downTop - trackTop;
-
-    hitRegions.add({
-      id: `win-scroll-up-${win.id}`,
-      x: sbx,
-      y: sby,
-      w: SCROLLBAR_WIDTH,
-      h: SCROLLBAR_WIDTH,
-      onMouseDown: () => {
-        win.scrollY = Math.max(0, win.scrollY - 12);
-        callbacks.scheduleRender();
-      },
-    });
-
-    hitRegions.add({
-      id: `win-scroll-down-${win.id}`,
-      x: sbx,
-      y: downTop,
-      w: SCROLLBAR_WIDTH,
-      h: SCROLLBAR_WIDTH,
-      onMouseDown: () => {
-        const maxScroll = Math.max(0, win.contentHeight - scrollableBodyH);
-        win.scrollY = Math.min(maxScroll, win.scrollY + 12);
-        callbacks.scheduleRender();
-      },
-    });
-
-    if (needsScroll) {
-      const trackSprite = sprites.get("scrollbar-bg");
-      if (trackSprite) {
-        fillSpriteTile(
-          port,
-          trackSprite,
-          sbx,
-          trackTop,
-          SCROLLBAR_WIDTH,
-          trackHeight
-        );
-      } else {
-        qdFillPattern(
-          port,
-          sbx,
-          trackTop,
-          SCROLLBAR_WIDTH,
-          trackHeight,
-          "gray50"
-        );
-      }
-      qdDrawVLine(
-        port,
-        sbx + SCROLLBAR_WIDTH - 1,
-        trackTop,
-        trackHeight,
-        BLACK
-      );
-
-      const maxScroll = win.contentHeight - scrollableBodyH;
-      const thumbH = Math.max(
-        12,
-        Math.floor((scrollableBodyH / win.contentHeight) * trackHeight)
-      );
-      const thumbY =
-        trackTop +
-        Math.floor((win.scrollY / maxScroll) * (trackHeight - thumbH));
-      qdFillRect(port, sbx + 1, thumbY, SCROLLBAR_WIDTH - 2, thumbH, WHITE);
-      qdDrawRect(port, sbx + 1, thumbY, SCROLLBAR_WIDTH - 2, thumbH, BLACK);
-
-      hitRegions.add({
-        id: `win-scroll-track-${win.id}`,
-        x: sbx,
-        y: trackTop,
-        w: SCROLLBAR_WIDTH,
-        h: trackHeight,
-        onMouseDown: (_lx: number, ly: number) => {
-          this.scrollDragging = {
-            windowId: win.id,
-            startY: trackTop + ly,
-            startScrollY: win.scrollY,
-          };
-        },
-      });
-    } else {
-      qdFillRect(port, sbx, trackTop, SCROLLBAR_WIDTH, trackHeight, WHITE);
-      qdDrawVLine(
-        port,
-        sbx + SCROLLBAR_WIDTH - 1,
-        trackTop,
-        trackHeight,
-        BLACK
-      );
-    }
-
-    qdDrawVLine(port, sbx, win.y + headerH + inset, scrollableBodyH, BLACK);
-  }
-
-  private _drawHScrollbar(
-    port: GrafPort,
-    win: WindowState,
-    sprites: ResourceManager,
-    hitRegions: HitRegionMap,
-    callbacks: { scheduleRender: () => void }
-  ) {
-    const headerH = this._headerHeight(win);
-    const bodyH = this._bodyHeight(win);
-
-    const hsby = win.y + headerH + bodyH;
-    const hsbx = win.x;
-    const hsbw = win.width - GROW_BOX_SIZE;
-    const sbW = win.scrollable ? SCROLLBAR_WIDTH : 0;
-    const contentW = win.width - 1 - sbW;
-    const needsScroll = win.contentWidth > contentW;
-
-    qdDrawHLine(port, win.x, hsby, win.width - GROW_BOX_SIZE, BLACK);
-
-    const leftSprite = sprites.get("chrome/left");
-    if (leftSprite) blitSprite(port, leftSprite, hsbx, hsby);
-
-    const rightLeft = hsbx + hsbw - SCROLLBAR_WIDTH + 1;
-    const rightSprite = sprites.get("chrome/right");
-    if (rightSprite) blitSprite(port, rightSprite, rightLeft, hsby);
-
-    const trackLeft = hsbx + SCROLLBAR_WIDTH;
-    const trackWidth = rightLeft - trackLeft;
-
-    hitRegions.add({
-      id: `win-hscroll-left-${win.id}`,
-      x: hsbx,
-      y: hsby,
-      w: SCROLLBAR_WIDTH,
-      h: SCROLLBAR_WIDTH,
-      onMouseDown: () => {
-        win.scrollX = Math.max(0, win.scrollX - 12);
-        callbacks.scheduleRender();
-      },
-    });
-
-    hitRegions.add({
-      id: `win-hscroll-right-${win.id}`,
-      x: rightLeft,
-      y: hsby,
-      w: SCROLLBAR_WIDTH,
-      h: SCROLLBAR_WIDTH,
-      onMouseDown: () => {
-        const maxScrollX = Math.max(0, win.contentWidth - contentW);
-        win.scrollX = Math.min(maxScrollX, win.scrollX + 12);
-        callbacks.scheduleRender();
-      },
-    });
-
-    if (needsScroll) {
-      const trackSprite = sprites.get("scrollbar-bg");
-      if (trackSprite) {
-        fillSpriteTile(
-          port,
-          trackSprite,
-          trackLeft,
-          hsby + 1,
-          trackWidth,
-          SCROLLBAR_WIDTH - 2
-        );
-      } else {
-        qdFillPattern(
-          port,
-          trackLeft,
-          hsby + 1,
-          trackWidth,
-          SCROLLBAR_WIDTH - 2,
-          "gray50"
-        );
-      }
-
-      const maxScrollX = win.contentWidth - contentW;
-      const thumbW = Math.max(
-        12,
-        Math.floor((contentW / win.contentWidth) * trackWidth)
-      );
-      const thumbX =
-        trackLeft +
-        Math.floor((win.scrollX / maxScrollX) * (trackWidth - thumbW));
-      qdFillRect(port, thumbX, hsby + 1, thumbW, SCROLLBAR_WIDTH - 2, WHITE);
-      qdDrawRect(port, thumbX, hsby + 1, thumbW, SCROLLBAR_WIDTH - 2, BLACK);
-
-      hitRegions.add({
-        id: `win-hscroll-track-${win.id}`,
-        x: trackLeft,
-        y: hsby,
-        w: trackWidth,
-        h: SCROLLBAR_WIDTH,
-        onMouseDown: (lx: number) => {
-          this.hScrollDragging = {
-            windowId: win.id,
-            startX: trackLeft + lx,
-            startScrollX: win.scrollX,
-          };
-        },
-      });
-    } else {
-      qdFillRect(
-        port,
-        trackLeft,
-        hsby + 1,
-        trackWidth,
-        SCROLLBAR_WIDTH - 2,
-        WHITE
-      );
-    }
-  }
-
   private _drawGrowBox(
     port: GrafPort,
-    win: WindowState,
+    win: WindowRecord,
     sprites: ResourceManager,
     hitRegions: HitRegionMap,
     _callbacks: { scheduleRender: () => void }
@@ -1477,7 +1466,7 @@ export class WindowManager {
     });
   }
 
-  getScrollableBodyHeight(win: WindowState): number {
+  getScrollableBodyHeight(win: WindowRecord): number {
     return this._bodyHeight(win);
   }
 }

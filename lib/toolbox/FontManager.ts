@@ -12,14 +12,18 @@
  *   RealFont     → RealFont(fontNum, size)
  *
  * Internals: wraps fontAdapter.ts glyph cache and measurement functions.
+ * installQuickDrawFontBridge() wires QuickDraw's text path to this manager.
  */
 
 import {
   loadFonts,
   measureText,
   getLineHeight,
+  drawBitmapTextToPixels,
   type FontName,
 } from "../canvas/fontAdapter";
+import { globals } from "@mockintosh/quickdraw";
+import type { GrafPort } from "@mockintosh/quickdraw";
 
 // -------------------------------------------------------------------------
 // Types — aligned to original Mac structures
@@ -149,6 +153,80 @@ export function FMTextWidth(text: string, fontName: FontName): number {
  */
 export function FMLineHeight(fontName: FontName): number {
   return getLineHeight(fontName);
+}
+
+// -------------------------------------------------------------------------
+// QuickDraw font bridge (Option A: FontManager is the single injection point)
+// -------------------------------------------------------------------------
+
+/**
+ * Register measure and draw callbacks with QuickDraw so DrawString/DrawText
+ * use FontManager (and thus port.txFont). Call once after InitFonts().
+ * Delegates actual glyph rendering to fontAdapter.drawBitmapTextToPixels.
+ */
+export function installQuickDrawFontBridge(
+  inject: (
+    measure: (text: string) => number,
+    draw: (text: string, x: number, y: number, port: GrafPort) => void
+  ) => void
+): void {
+  const measure = (text: string): number => {
+    const port = globals.thePort;
+    const fontName = port
+      ? GetFontName(port.txFont) ?? "ChiKareGo"
+      : "ChiKareGo";
+    return measureText(text, fontName);
+  };
+
+  const draw = (text: string, x: number, y: number, port: GrafPort): void => {
+    const fontName = GetFontName(port.txFont) ?? "ChiKareGo";
+    const { baseAddr, rowBytes, bounds } = port.portBits;
+    const cl = port.clipRgn?.rgn.rgnBBox;
+    const vis = port.visRgn?.rgn.rgnBBox;
+    const pr = port.portRect;
+    const clipLeft = Math.max(
+      cl?.left ?? bounds.left,
+      vis?.left ?? bounds.left,
+      pr.left,
+      bounds.left
+    );
+    const clipTop = Math.max(
+      cl?.top ?? bounds.top,
+      vis?.top ?? bounds.top,
+      pr.top,
+      bounds.top
+    );
+    const clipRight = Math.min(
+      cl?.right ?? bounds.right,
+      vis?.right ?? bounds.right,
+      pr.right,
+      bounds.right
+    );
+    const clipBottom = Math.min(
+      cl?.bottom ?? bounds.bottom,
+      vis?.bottom ?? bounds.bottom,
+      pr.bottom,
+      bounds.bottom
+    );
+    const color = (port as GrafPort & { txColor?: number }).txColor ?? 1;
+    drawBitmapTextToPixels(
+      baseAddr,
+      rowBytes,
+      bounds.left,
+      bounds.top,
+      clipLeft,
+      clipTop,
+      clipRight,
+      clipBottom,
+      text,
+      x,
+      y,
+      fontName,
+      color
+    );
+  };
+
+  inject(measure, draw);
 }
 
 export type { FontName };

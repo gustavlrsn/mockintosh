@@ -40,7 +40,7 @@ So: one content area, split into (1) fixed strip at top, (2) scrollable region b
 
 - **SystemApp** ([lib/canvas/AppRegistry.ts](lib/canvas/AppRegistry.ts)): Add optional `getContentTopInset?(app, props, size): number`.
 - **MultiWindowSystemApp**: Add optional `getContentTopInset?(app, win, windowId, props, size): number`.
-- **WindowState** ([lib/canvas/WindowManager.ts](lib/canvas/WindowManager.ts)): Add `contentTopInset?: number` (default 0).
+- **WindowRecord** ([lib/toolbox/WindowManager.ts](lib/toolbox/WindowManager.ts)): Add `contentTopInset?: number` (default 0).
 - **main.tsx**: In the same loop that calls `getContentHeight` / `getInfoBar`, call `getContentTopInset` for single-window apps and for Finder (per window); set `win.contentTopInset`.
 
 ### 2. WindowManager: scrollbar and scroll logic

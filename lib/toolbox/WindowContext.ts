@@ -10,13 +10,24 @@
 
 import { BitCanvas, Sprite, BLACK, WHITE } from "../canvas/BitCanvas";
 import { PatternName } from "../canvas/patterns";
-import {
-  drawBitmapText,
-  TextOptions,
-  getLineHeight,
-} from "../canvas/fontAdapter";
+import { TextOptions, getLineHeight } from "../canvas/fontAdapter";
 import { HitRegion, HitRegionMap } from "../canvas/HitRegion";
-import type { GrafPort } from "@mockintosh/quickdraw";
+import type { GrafPort, Rect } from "@mockintosh/quickdraw";
+import {
+  makeRect,
+  NewRgn,
+  CopyRgn,
+  RectRgn,
+  SectRgn,
+  DisposeRgn,
+  SetPort,
+  MoveTo,
+  TextFont,
+  TextFace,
+  DrawString,
+} from "@mockintosh/quickdraw";
+import { GetFNum, FMTextWidth, FMLineHeight } from "./FontManager";
+import type { WindowRecord } from "./WindowManager";
 import {
   qdFillRect,
   qdDrawRect,
@@ -38,10 +49,6 @@ import {
   blit1bitPixels as _blit1bitPixels,
   fillSpriteTile as _fillSpriteTile,
 } from "../canvas/SpriteManager";
-import {
-  drawButton as drawControl,
-  type ButtonDef as ControlDef,
-} from "./ControlManager";
 import { drawTextEditField } from "./TextEdit";
 import {
   TextInputState,
@@ -106,6 +113,7 @@ export class WindowContext {
   /** Screen position of this context's content area (for hit region registration). */
   private _contentRectX: number;
   private _contentRectY: number;
+  private _window: WindowRecord | null;
 
   constructor(
     port: GrafPort,
@@ -128,9 +136,11 @@ export class WindowContext {
     windowScrollY: number = 0,
     windowScrollX: number = 0,
     contentRectX?: number,
-    contentRectY?: number
+    contentRectY?: number,
+    window?: WindowRecord | null
   ) {
     this.port = port;
+    this._window = window ?? null;
     this.bc = _portToBitCanvas(port);
     this.ox = x;
     this.oy = y;
@@ -152,6 +162,11 @@ export class WindowContext {
   // -----------------------------------------------------------------------
   // Accessors
   // -----------------------------------------------------------------------
+
+  /** Return the window record when this context is for a window (Mac-style controls). */
+  getWindow(): WindowRecord | null {
+    return this._window;
+  }
 
   get width() {
     return this.w;
@@ -363,47 +378,50 @@ export class WindowContext {
   // -----------------------------------------------------------------------
 
   drawText(text: string, x: number, y: number, opts: TextOptions = {}) {
-    drawBitmapText(this.bc, text, this.screenX(x), this.screenY(y), opts);
+    const fontName = opts.font ?? "Geneva9";
+    const lineH = FMLineHeight(fontName);
+    const textW = FMTextWidth(text, fontName);
+    const width = opts.width ?? textW;
+    let penX = x;
+    if (opts.align === "center") penX = x + Math.floor((width - textW) / 2);
+    else if (opts.align === "right") penX = x + width - textW;
+
+    SetPort(this.port);
+    if (opts.bg !== null && opts.bg !== undefined && width > 0 && lineH > 0) {
+      this.fillRect(x, y, width, lineH, opts.bg);
+    }
+    TextFont(GetFNum(fontName));
+    TextFace(0);
+    if (opts.color === WHITE) {
+      (this.port as GrafPort & { txColor?: number }).txColor = WHITE;
+    }
+    MoveTo(this.tx(penX), this.ty(y));
+    DrawString(text);
+    if (opts.color === WHITE) {
+      (this.port as GrafPort & { txColor?: number }).txColor = BLACK;
+    }
   }
 
   // -----------------------------------------------------------------------
   // High-level widgets
   // -----------------------------------------------------------------------
 
-  drawButton(
-    btn: Omit<ControlDef, "x" | "y"> & {
-      x: number;
-      y: number;
-      id?: string;
-      onClick?: () => void;
-      onMouseDown?: () => void;
-      onMouseUp?: () => void;
-      onMouseLeave?: () => void;
-    }
-  ) {
-    const absRect = drawControl(this.port, {
-      ...btn,
-      x: this.tx(btn.x),
-      y: this.ty(btn.y),
-    });
-    const localRect = { x: btn.x, y: btn.y, w: absRect.w, h: absRect.h };
-
-    if (
-      this._hitRegions &&
-      (btn.onClick || btn.onMouseDown || btn.onMouseUp || btn.onMouseLeave) &&
-      btn.id
-    ) {
-      this.hitRegion(btn.id, localRect, {
-        onClick: btn.onClick ? () => btn.onClick!() : undefined,
-        onMouseDown: btn.onMouseDown ? () => btn.onMouseDown!() : undefined,
-        onMouseUp: btn.onMouseUp ? () => btn.onMouseUp!() : undefined,
-        onMouseLeave: btn.onMouseLeave ? () => btn.onMouseLeave!() : undefined,
-      });
-    }
-
-    return localRect;
+  /**
+   * @deprecated Use NewControl + DrawControls instead. See docs/control-manager-migration.md.
+   */
+  drawButton(_btn: unknown): { x: number; y: number; w: number; h: number } {
+    throw new Error(
+      "drawButton is removed. Use NewControl + DrawControls (see docs/control-manager-migration.md)."
+    );
   }
 
+  /**
+   * Draw an editable text field (TextEdit path). When `options.id` is provided,
+   * the TextEdit path registers a hit region for focus, selection, and drag;
+   * apps should pass `options.id` (and optionally `onChange`) so that this
+   * path owns the hit region. Do not call `hitRegion` separately for the same
+   * text field.
+   */
   drawTextInput(
     state: TextInputState,
     x: number,
@@ -416,14 +434,7 @@ export class WindowContext {
     }
   ) {
     const h = height ?? 16;
-    drawTextEditField(
-      this.port,
-      state,
-      this.screenX(x),
-      this.screenY(y),
-      width,
-      h
-    );
+    drawTextEditField(this.port, state, this.tx(x), this.ty(y), width, h);
 
     if (this._hitRegions && options?.id) {
       const onChange = options.onChange;
@@ -462,17 +473,21 @@ export class WindowContext {
     const visibleTop = this.scrollOffsetY;
     const visibleBottom = this.scrollOffsetY + this.h;
 
+    SetPort(this.port);
+    TextFont(GetFNum(font));
+    TextFace(0);
+    if (color === WHITE) {
+      (this.port as GrafPort & { txColor?: number }).txColor = WHITE;
+    }
     for (let i = 0; i < lines.length; i++) {
       const ly = opts.y + i * lineH;
       if (ly + lineH <= visibleTop || ly >= visibleBottom) continue;
       if (!lines[i]) continue;
-      drawBitmapText(
-        this.bc,
-        lines[i],
-        this.screenX(opts.x),
-        this.screenY(ly),
-        { font, color }
-      );
+      MoveTo(this.tx(opts.x), this.ty(ly));
+      DrawString(lines[i]);
+    }
+    if (color === WHITE) {
+      (this.port as GrafPort & { txColor?: number }).txColor = BLACK;
     }
 
     return totalHeight;
@@ -509,6 +524,9 @@ export class WindowContext {
     const sbW = SCROLL_AREA_BAR_WIDTH;
     const contentW = rect.w - sbW;
 
+    // Scroll-area content context intentionally has no window (window param omitted),
+    // so contentCtx.getWindow() === null. Controls in that sub-context would use legacy
+    // drawButton if any; after migration there are no buttons in scroll-area content.
     const contentCtx = new WindowContext(
       this.port,
       rect.x,
@@ -681,6 +699,8 @@ export class WindowContext {
     const inset = this._contentTopInset;
     const scrollH = this.h - inset;
     if (scrollH <= 0) return;
+    // Sub-context for the scrollable region: origin at (ox, oy+inset), size (w, scrollH).
+    // Use _contentRectY (not +inset) so screenY(y) = contentRect.y + inset + y - scrollY.
     const scrollCtx = new WindowContext(
       this.port,
       this.ox,
@@ -697,9 +717,29 @@ export class WindowContext {
       this._windowScrollY,
       this._windowScrollX,
       this._contentRectX,
-      this._contentRectY + inset
+      this._contentRectY
     );
-    drawContent(scrollCtx);
+    // Clip port and BitCanvas to the scrollable rect so content doesn't draw over fixed strip or scroll bar.
+    const scrollRect = makeRect(inset, 0, inset + scrollH, this.w);
+    const originalClip = this.port.clipRgn;
+    const savedClip = NewRgn();
+    CopyRgn(originalClip, savedClip);
+    const scrollRgn = NewRgn();
+    RectRgn(scrollRgn, scrollRect);
+    const newClip = NewRgn();
+    SectRgn(originalClip, scrollRgn, newClip);
+    this.port.clipRgn = newClip;
+    scrollCtx.pushClip(0, 0, this.w, scrollH);
+    try {
+      drawContent(scrollCtx);
+    } finally {
+      scrollCtx.popClip();
+      this.port.clipRgn = originalClip;
+      CopyRgn(savedClip, originalClip);
+      DisposeRgn(savedClip);
+      DisposeRgn(scrollRgn);
+      DisposeRgn(newClip);
+    }
     scrollCtx.release();
   }
 

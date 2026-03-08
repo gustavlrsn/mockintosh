@@ -1,5 +1,4 @@
-import { BitCanvas, BLACK, WHITE } from "../BitCanvas";
-import { drawBitmapText, measureText } from "../fontAdapter";
+import { measureText } from "../fontAdapter";
 
 const BLINK_INTERVAL_MS = 530;
 
@@ -84,62 +83,6 @@ function findWordAt(text: string, pos: number): [number, number] {
   while (start > 0 && text[start - 1] !== " ") start--;
   while (end < text.length && text[end] !== " ") end++;
   return [start, end];
-}
-
-/**
- * Draw a text input field with optional selection highlight.
- * Cursor blink is derived from _lastEditTime — no external timer needed.
- */
-export function drawTextInput(
-  canvas: BitCanvas,
-  state: TextInputState,
-  x: number,
-  y: number,
-  width: number,
-  height: number = 16
-) {
-  canvas.drawRect(x, y, width, height, BLACK);
-  canvas.fillRect(x + 1, y + 1, width - 2, height - 2, WHITE);
-
-  const textX = x + 3;
-  const textY = y + 1;
-
-  if (state.focused && hasSelection(state)) {
-    const [lo, hi] = getSelectionRange(state);
-    const selStartX =
-      textX + measureText(state.value.substring(0, lo), "ChiKareGo");
-    const selEndX =
-      textX + measureText(state.value.substring(0, hi), "ChiKareGo");
-    canvas.fillRect(selStartX, y + 2, selEndX - selStartX, height - 4, BLACK);
-
-    if (lo > 0) {
-      drawBitmapText(canvas, state.value.substring(0, lo), textX, textY, {
-        font: "ChiKareGo",
-        color: BLACK,
-      });
-    }
-    drawBitmapText(canvas, state.value.substring(lo, hi), selStartX, textY, {
-      font: "ChiKareGo",
-      color: WHITE,
-    });
-    if (hi < state.value.length) {
-      drawBitmapText(canvas, state.value.substring(hi), selEndX, textY, {
-        font: "ChiKareGo",
-        color: BLACK,
-      });
-    }
-  } else {
-    drawBitmapText(canvas, state.value, textX, textY, {
-      font: "ChiKareGo",
-      color: BLACK,
-    });
-
-    if (state.focused && isCursorVisible(state)) {
-      const beforeCursor = state.value.substring(0, state.cursorPos);
-      const cursorX = textX + measureText(beforeCursor, "ChiKareGo");
-      canvas.drawVLine(cursorX, y + 2, height - 4, BLACK);
-    }
-  }
 }
 
 /**

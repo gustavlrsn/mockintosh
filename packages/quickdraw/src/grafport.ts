@@ -53,7 +53,7 @@ export function InitGraf(screen: QDScreen): void {
   globals.screenBits = {
     baseAddr: screen.pixels,
     rowBytes: screen.width,
-    bounds: makeRect(0, 0, screen.width, screen.height),
+    bounds: makeRect(0, 0, screen.height, screen.width),
   };
   globals.randSeed = 1;
   globals.thePort = null;
@@ -338,7 +338,7 @@ export function BackPat(pat: Pattern): void {
 
 export function newGrafPort(): GrafPort {
   const bounds = globals._screen
-    ? makeRect(0, 0, globals._screen.width, globals._screen.height)
+    ? makeRect(0, 0, globals._screen.height, globals._screen.width)
     : makeRect(0, 0, 0, 0);
   const pixels = globals._screen ? globals._screen.pixels : new Uint8Array(0);
   const rowBytes = globals._screen ? globals._screen.width : 0;

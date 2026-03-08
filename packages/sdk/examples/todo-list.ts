@@ -10,12 +10,18 @@ import {
   AppProps,
   Sprite,
   fromGrid,
+  makeRect,
   OSEvent,
   WindowSize,
   TextInputState,
   BLACK,
   WHITE,
 } from "@mockintosh/sdk";
+import {
+  NewControl,
+  DrawControls,
+  inButton,
+} from "../../../lib/toolbox/ControlManager";
 
 const ICON = fromGrid(32, 32, [
   "................................",
@@ -85,6 +91,8 @@ const TodoApp: App = {
       focused: true,
     });
     const [loaded, setLoaded] = app.useState(false);
+    const controlsCreatedRef = app.useRef(false);
+    const lastInputYRef = app.useRef(-1);
 
     app.useEffect(() => {
       props.storage.read(STORAGE_KEY).then((raw) => {
@@ -157,19 +165,37 @@ const TodoApp: App = {
       onChange: () => app.scheduleRender(),
     });
 
-    ctx.drawButton({
-      x: ctx.width - 48,
-      y: inputY - 1,
-      label: "Add",
-      id: "todo-add",
-      onClick: () => {
-        const text = input.value.trim();
-        if (!text) return;
-        saveTodos([...todos, { text, done: false }]);
-        input.value = "";
-        input.cursor = 0;
-      },
-    });
+    const win = ctx.getWindow();
+    if (win !== null) {
+      if (!controlsCreatedRef.current || lastInputYRef.current !== inputY) {
+        if (controlsCreatedRef.current) {
+          win.controlList.length = 0;
+        }
+        lastInputYRef.current = inputY;
+        controlsCreatedRef.current = true;
+        const addHandle = NewControl(
+          win,
+          makeRect(inputY - 1, ctx.width - 48, inputY + 19, ctx.width - 4),
+          "Add",
+          true,
+          0,
+          0,
+          1,
+          0,
+          0
+        );
+        addHandle.ref.contrlAction = (_c, partCode) => {
+          if (partCode === inButton) {
+            const text = input.value.trim();
+            if (!text) return;
+            saveTodos([...todos, { text, done: false }]);
+            input.value = "";
+            input.cursor = 0;
+          }
+        };
+      }
+      DrawControls(win, ctx.port);
+    }
   },
 
   onEvent(app: AppBuilder, event: OSEvent, props: AppProps, size: WindowSize) {

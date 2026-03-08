@@ -4,7 +4,14 @@ import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { OSEvent } from "../lib/toolbox/EventManager";
 import { MenubarDefinition } from "../lib/toolbox/MenuManager";
+import { makeRect } from "@mockintosh/quickdraw";
+import { measureText } from "../lib/canvas/fontAdapter";
 import { AppManifest } from "../lib/canvas/AppLoader";
+import {
+  NewControl,
+  DrawControls,
+  inButton,
+} from "../lib/toolbox/ControlManager";
 
 interface RegistryEntry {
   id: string;
@@ -77,6 +84,7 @@ export const AppStoreApp: SystemApp = {
       new Set()
     );
     const [installing, setInstalling] = app.useState<string | null>(null);
+    const lastControlsKeyRef = app.useRef<string>("");
 
     app.useEffect(() => {
       fetchRegistry()
@@ -249,88 +257,139 @@ export const AppStoreApp: SystemApp = {
     const barY = y + 4;
     ctx.drawHLine(0, barY, ctx.width, BLACK);
 
+    const win = ctx.getWindow();
+    if (win !== null && selectedIdx === null) {
+      win.controlList.length = 0;
+      lastControlsKeyRef.current = "";
+    }
+
     if (selectedIdx !== null && selectedIdx < items.length) {
       const selected = items[selectedIdx];
       const isInstalled = installedIds.has(selected.id);
       const isCurrentlyInstalling = installing === selected.id;
 
-      if (isInstalled) {
-        ctx.drawButton({
-          x: 8,
-          y: barY + 4,
-          label: "Open",
-          id: "appstore-open-btn",
-          onClick: () => {
-            props._os?.openWindow(selected.id);
-          },
-        });
-        ctx.drawButton({
-          x: 60,
-          y: barY + 4,
-          label: "Uninstall",
-          id: "appstore-uninstall-btn",
-          onClick: () => {
-            setInstalledIds((prev: Set<string>) => {
-              const next = new Set(prev);
-              next.delete(selected.id);
-              return next;
-            });
-            setSelectedIdx(null);
-          },
-        });
-      } else {
-        const isFree = !selected.pricing || selected.pricing.type === "free";
-        const label = isCurrentlyInstalling
-          ? "Installing..."
-          : isFree
-          ? "Install"
-          : `Buy ${formatPrice(selected.pricing)}`;
+      if (win !== null) {
+        const modeKey = `${selectedIdx}-${selected.id}-${isInstalled}-${
+          installing ?? ""
+        }`;
+        if (lastControlsKeyRef.current !== modeKey) {
+          win.controlList.length = 0;
+          lastControlsKeyRef.current = modeKey;
+        }
 
-        ctx.drawButton({
-          x: 8,
-          y: barY + 4,
-          label,
-          id: "appstore-install-btn",
-          disabled: isCurrentlyInstalling,
-          onClick: () => {
-            if (isCurrentlyInstalling) return;
-
-            if (isFree && selected.entry) {
-              setInstalling(selected.id);
-              const appLoader = props._appLoader;
-              if (appLoader) {
-                const manifest: AppManifest = {
-                  id: selected.id,
-                  title: selected.title,
-                  description: selected.description ?? "",
-                  icon: selected.id + "/icon",
-                  author: selected.author,
-                  version: selected.version,
-                  sdk: selected.sdk,
-                  permissions: selected.permissions,
-                  entry: selected.entry!,
-                };
-                appLoader
-                  .load(manifest)
-                  .then(() => {
-                    setInstalledIds((prev: Set<string>) => {
-                      const next = new Set(prev);
-                      next.add(selected.id);
-                      return next;
-                    });
-                    setInstalling(null);
-                  })
-                  .catch((err: Error) => {
-                    console.error("Install failed:", err);
-                    setInstalling(null);
-                    setError(`Failed to install ${selected.title}`);
-                  });
+        if (win.controlList.length === 0) {
+          if (isInstalled) {
+            const openW = measureText("Open", "ChiKareGo") + 20;
+            const uninstallW = measureText("Uninstall", "ChiKareGo") + 20;
+            const openHandle = NewControl(
+              win,
+              makeRect(barY + 4, 8, barY + 24, 8 + openW),
+              "Open",
+              true,
+              0,
+              0,
+              1,
+              0,
+              0
+            );
+            openHandle.ref.contrlAction = (_c, partCode) => {
+              if (partCode === inButton) props._os?.openWindow(selected.id);
+            };
+            const uninstallHandle = NewControl(
+              win,
+              makeRect(barY + 4, 60, barY + 24, 60 + uninstallW),
+              "Uninstall",
+              true,
+              0,
+              0,
+              1,
+              0,
+              0
+            );
+            uninstallHandle.ref.contrlAction = (_c, partCode) => {
+              if (partCode === inButton) {
+                setInstalledIds((prev: Set<string>) => {
+                  const next = new Set(prev);
+                  next.delete(selected.id);
+                  return next;
+                });
+                setSelectedIdx(null);
               }
-            } else if (!isFree) {
-              // TODO: Polar.sh checkout integration (see FUTURE.md)
-            }
-          },
-        });
+            };
+          } else {
+            const isFree =
+              !selected.pricing || selected.pricing.type === "free";
+            const label = isCurrentlyInstalling
+              ? "Installing..."
+              : isFree
+              ? "Install"
+              : `Buy ${formatPrice(selected.pricing)}`;
+            const installW = measureText(label, "ChiKareGo") + 20;
+            const installHandle = NewControl(
+              win,
+              makeRect(barY + 4, 8, barY + 24, 8 + installW),
+              label,
+              true,
+              0,
+              0,
+              1,
+              0,
+              0
+            );
+            installHandle.ref.contrlAction = (_c, partCode) => {
+              if (partCode !== inButton || isCurrentlyInstalling) return;
+              if (isFree && selected.entry) {
+                setInstalling(selected.id);
+                const appLoader = props._appLoader;
+                if (appLoader) {
+                  const manifest: AppManifest = {
+                    id: selected.id,
+                    title: selected.title,
+                    description: selected.description ?? "",
+                    icon: selected.id + "/icon",
+                    author: selected.author,
+                    version: selected.version,
+                    sdk: selected.sdk,
+                    permissions: selected.permissions,
+                    entry: selected.entry!,
+                  };
+                  appLoader
+                    .load(manifest)
+                    .then(() => {
+                      setInstalledIds((prev: Set<string>) => {
+                        const next = new Set(prev);
+                        next.add(selected.id);
+                        return next;
+                      });
+                      setInstalling(null);
+                    })
+                    .catch((err: Error) => {
+                      console.error("Install failed:", err);
+                      setInstalling(null);
+                      setError(`Failed to install ${selected.title}`);
+                    });
+                }
+              }
+            };
+          }
+        } else {
+          // Update Install button label when installing state changes
+          if (!isInstalled && win.controlList[0]) {
+            const isFree =
+              !selected.pricing || selected.pricing.type === "free";
+            const label = isCurrentlyInstalling
+              ? "Installing..."
+              : isFree
+              ? "Install"
+              : `Buy ${formatPrice(selected.pricing)}`;
+            win.controlList[0].ref.contrlTitle = label;
+            win.controlList[0].ref.contrlHilite = isCurrentlyInstalling
+              ? 255
+              : 0;
+          }
+        }
+
+        DrawControls(win, ctx.port);
       }
     }
   },

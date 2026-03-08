@@ -13,6 +13,12 @@ import {
 } from "../lib/toolbox/TextEdit";
 import { OSEvent } from "../lib/toolbox/EventManager";
 import { ResourceManager } from "../lib/toolbox/ResourceManager";
+import { makeRect } from "@mockintosh/quickdraw";
+import {
+  NewControl,
+  DrawControls,
+  inButton,
+} from "../lib/toolbox/ControlManager";
 import {
   parseSiteMarkup,
   renderSiteNodes,
@@ -304,7 +310,9 @@ export const SafariApp: SystemApp = {
   title: "Safari",
   icon: "icon/safari",
   defaultSize: { width: 384, height: 220 },
+  minSize: { width: 200, height: 220 },
   scrollable: true,
+  resizable: true,
 
   render(app: AppBuilder, ctx: WindowContext, props: any) {
     const sprites: ResourceManager = props._sprites;
@@ -323,56 +331,80 @@ export const SafariApp: SystemApp = {
     const [searchResults, setSearchResults] = app.useState<SearchResult[]>([]);
     const [currentCard, setCurrentCard] = app.useState("home");
     const linksRef = app.useRef<LinkRect[]>([]);
+    const controlsCreatedRef = app.useRef(false);
 
     // --- Header bar ---
     ctx.clear(WHITE);
     ctx.fillRect(0, 0, ctx.width, HEADER_HEIGHT, WHITE);
     ctx.drawHLine(0, HEADER_HEIGHT - 1, ctx.width, BLACK);
 
-    ctx.drawButton({
-      x: 4,
-      y: 4,
-      width: 20,
-      height: 20,
-      label: "<",
-      disabled: historyIdx <= 0,
-      id: "safari-back",
-      onClick: () => {
-        if (historyIdx > 0) {
-          const newIdx = historyIdx - 1;
-          setHistoryIdx(newIdx);
-          setCurrentUrl(history[newIdx]);
-          setCurrentCard("home");
-          setSearchInput(createTextInputState(""));
-          setSearchResults([]);
-          const newUrlState = createTextInputState(history[newIdx]);
-          setUrlInput(newUrlState);
-        }
-      },
-    });
-    ctx.drawButton({
-      x: 24,
-      y: 4,
-      width: 20,
-      height: 20,
-      label: ">",
-      disabled: historyIdx >= history.length - 1,
-      id: "safari-forward",
-      onClick: () => {
-        if (historyIdx < history.length - 1) {
-          const newIdx = historyIdx + 1;
-          setHistoryIdx(newIdx);
-          setCurrentUrl(history[newIdx]);
-          setCurrentCard("home");
-          setSearchInput(createTextInputState(""));
-          setSearchResults([]);
-          const newUrlState = createTextInputState(history[newIdx]);
-          setUrlInput(newUrlState);
-        }
-      },
-    });
+    const win = ctx.getWindow();
+    if (win !== null) {
+      if (!controlsCreatedRef.current) {
+        const backHandle = NewControl(
+          win,
+          makeRect(4, 4, 24, 24),
+          "<",
+          true,
+          0,
+          0,
+          1,
+          0,
+          0
+        );
+        backHandle.ref.contrlAction = (_c, partCode) => {
+          if (partCode === inButton && historyIdx > 0) {
+            const newIdx = historyIdx - 1;
+            setHistoryIdx(newIdx);
+            setCurrentUrl(history[newIdx]);
+            setCurrentCard("home");
+            setSearchInput(createTextInputState(""));
+            setSearchResults([]);
+            setUrlInput(createTextInputState(history[newIdx]));
+          }
+        };
+        const fwdHandle = NewControl(
+          win,
+          makeRect(4, 24, 24, 44),
+          ">",
+          true,
+          0,
+          0,
+          1,
+          0,
+          0
+        );
+        fwdHandle.ref.contrlAction = (_c, partCode) => {
+          if (partCode === inButton && historyIdx < history.length - 1) {
+            const newIdx = historyIdx + 1;
+            setHistoryIdx(newIdx);
+            setCurrentUrl(history[newIdx]);
+            setCurrentCard("home");
+            setSearchInput(createTextInputState(""));
+            setSearchResults([]);
+            setUrlInput(createTextInputState(history[newIdx]));
+          }
+        };
+        controlsCreatedRef.current = true;
+      }
+      // Update disabled state (contrlHilite 255 = inactive)
+      const backControl = win.controlList[0];
+      const fwdControl = win.controlList[1];
+      if (backControl) backControl.ref.contrlHilite = historyIdx <= 0 ? 255 : 0;
+      if (fwdControl)
+        fwdControl.ref.contrlHilite =
+          historyIdx >= history.length - 1 ? 255 : 0;
+      DrawControls(win, ctx.port);
+    }
 
-    ctx.drawTextInput(urlInput, 50, 6, ctx.width - 58, 16);
+    ctx.drawTextInput(urlInput, 50, 6, ctx.width - 58, 16, {
+      id: "url-input",
+      onChange: () => {
+        setUrlInput((prev) => ({ ...prev, focused: true }));
+        setSearchInput((prev) => ({ ...prev, focused: false }));
+        app.scheduleRender();
+      },
+    });
 
     // --- Scrollable content (page) below the fixed URL bar ---
     ctx.drawScrollableContent((scrollCtx) => {
@@ -434,6 +466,7 @@ export const SafariApp: SystemApp = {
     const [searchResults, setSearchResults] = app.useState<SearchResult[]>([]);
     const [, setCurrentCard] = app.useState("home");
     const linksRef = app.useRef<LinkRect[]>([]);
+    app.useRef(false); // controlsCreatedRef
 
     // --- Keyboard ---
     if (event.type === "keyDown") {
@@ -490,8 +523,6 @@ export const SafariApp: SystemApp = {
       let focusedSearch = false;
       let newDragging: "url" | "search" | null = null;
 
-      const urlInputX = 50;
-      const urlInputW = size.width - 58;
       const inFixedStrip =
         event.contentRegion === "fixed" ||
         (event.contentRegion === undefined && event.y! < HEADER_HEIGHT);
@@ -499,25 +530,9 @@ export const SafariApp: SystemApp = {
         event.contentRegion === "scrollable" ||
         (event.contentRegion === undefined && event.y! >= HEADER_HEIGHT);
 
-      if (
-        inFixedStrip &&
-        event.y! >= 6 &&
-        event.y! < 22 &&
-        event.x! >= urlInputX &&
-        event.x! < urlInputX + urlInputW
-      ) {
-        // URL bar click
-        focusedUrl = true;
-        const localX = event.x! - urlInputX;
-        if (event.type === "doubleClick") {
-          handleTextInputDoubleClick(urlInput, localX);
-        } else {
-          handleTextInputClick(urlInput, localX, event.shiftKey);
-          newDragging = "url";
-        }
-        setUrlInput({ ...urlInput, focused: true });
-      } else if (inFixedStrip) {
-        // Nav buttons handled by hit regions
+      if (inFixedStrip) {
+        // URL bar: hit region from drawTextInput (id: url-input) handles clicks/drag
+        // Nav buttons handled by Control Manager
       } else if (inScrollable) {
         // Content area click — check links first (event.y is in scrollable-content space)
         const links = linksRef.current;
@@ -587,12 +602,7 @@ export const SafariApp: SystemApp = {
 
     // --- Mouse drag ---
     if (event.type === "mouseMove" && dragging) {
-      if (dragging === "url") {
-        const localX = event.x! - 50;
-        if (handleTextInputDrag(urlInput, localX)) {
-          setUrlInput({ ...urlInput });
-        }
-      } else if (dragging === "search") {
+      if (dragging === "search") {
         const contentH = size.height - HEADER_HEIGHT;
         const hasResults =
           searchResults.length > 0 || searchInput.value.trim() !== "";
@@ -623,6 +633,7 @@ export const SafariApp: SystemApp = {
     const [searchResults] = app.useState<SearchResult[]>([]);
     const [currentCard] = app.useState("home");
     app.useRef<LinkRect[]>([]); // linksRef — keep hook alignment
+    app.useRef(false); // controlsCreatedRef
 
     if (currentUrl === "google.com") {
       const baseH =

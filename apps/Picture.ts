@@ -4,6 +4,13 @@ import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { OSEvent } from "../lib/toolbox/EventManager";
+import { measureText } from "../lib/canvas/fontAdapter";
+import { makeRect } from "@mockintosh/quickdraw";
+import {
+  NewControl,
+  DrawControls,
+  inButton,
+} from "../lib/toolbox/ControlManager";
 
 export const PictureApp: SystemApp = {
   id: "picture",
@@ -15,15 +22,35 @@ export const PictureApp: SystemApp = {
   render(app: AppBuilder, ctx: WindowContext, props: any) {
     const sprites: ResourceManager = props._sprites;
     const src: string = props.src ?? "";
+    const controlsCreatedRef = app.useRef(false);
 
     ctx.clear(WHITE);
 
-    // Print button at top
-    ctx.drawButton({
-      x: 4,
-      y: 4,
-      label: "Print",
-    });
+    const win = ctx.getWindow();
+    if (win !== null) {
+      if (!controlsCreatedRef.current) {
+        const printW = measureText("Print", "ChiKareGo") + 20;
+        const boundsRect = makeRect(4, 4, 24, 4 + printW);
+        const handle = NewControl(
+          win,
+          boundsRect,
+          "Print",
+          true,
+          0,
+          0,
+          1,
+          0,
+          0
+        );
+        handle.ref.contrlAction = (_c, partCode) => {
+          if (partCode === inButton) {
+            // Future: trigger print
+          }
+        };
+        controlsCreatedRef.current = true;
+      }
+      DrawControls(win, ctx.port);
+    }
 
     // Image
     const sprite = sprites?.get(src);

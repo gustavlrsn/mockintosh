@@ -3,7 +3,13 @@ import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { OSEvent } from "../lib/toolbox/EventManager";
+import { makeRect } from "@mockintosh/quickdraw";
 import Dither from "canvas-dither";
+import {
+  NewControl,
+  DrawControls,
+  inButton,
+} from "../lib/toolbox/ControlManager";
 
 const VIDEO_WIDTH = 340;
 
@@ -18,6 +24,7 @@ export const VideoPlayerApp: SystemApp = {
     const [isPlaying, setIsPlaying] = app.useState(false);
     const frameRef = app.useRef<ImageData | null>(null);
     const videoRef = app.useRef<HTMLVideoElement | null>(null);
+    const controlsCreatedRef = app.useRef(false);
 
     ctx.clear(WHITE);
 
@@ -28,15 +35,25 @@ export const VideoPlayerApp: SystemApp = {
     const controlY = ctx.height - 18;
     ctx.fillRect(0, controlY, ctx.width, 18, WHITE);
 
-    ctx.drawButton({
-      x: 4,
-      y: controlY + 1,
-      width: 16,
-      height: 16,
-      label: isPlaying ? "||" : ">",
-      id: "play-btn",
-      onClick: () => setIsPlaying(!isPlaying),
-    });
+    const win = ctx.getWindow();
+    if (win !== null) {
+      if (!controlsCreatedRef.current) {
+        const boundsRect = makeRect(controlY + 1, 4, controlY + 17, 20);
+        const handle = NewControl(win, boundsRect, ">", true, 0, 0, 1, 0, 0);
+        handle.ref.contrlAction = (_c, partCode) => {
+          if (partCode === inButton) {
+            setIsPlaying((p) => !p);
+          }
+        };
+        controlsCreatedRef.current = true;
+      }
+      // Update label for play/pause
+      const playControl = win.controlList[0];
+      if (playControl) {
+        playControl.ref.contrlTitle = isPlaying ? "||" : ">";
+      }
+      DrawControls(win, ctx.port);
+    }
 
     const trackX = 24;
     const trackW = ctx.width - 28;
@@ -56,5 +73,6 @@ export const VideoPlayerApp: SystemApp = {
     app.useState(false); // isPlaying
     app.useRef<ImageData | null>(null); // frameRef
     app.useRef<HTMLVideoElement | null>(null); // videoRef
+    app.useRef(false); // controlsCreatedRef
   },
 };

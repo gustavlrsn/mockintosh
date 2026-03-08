@@ -3,14 +3,18 @@ import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { measureText } from "../lib/canvas/fontAdapter";
+import { makeRect } from "@mockintosh/quickdraw";
 import { OSEvent } from "../lib/toolbox/EventManager";
+import {
+  NewControl,
+  DrawControls,
+  inButton,
+} from "../lib/toolbox/ControlManager";
 import {
   getWrappedLines,
   TextInputState,
   createTextInputState,
   handleTextInputKey,
-  handleTextInputClick,
-  handleTextInputDoubleClick,
 } from "../lib/toolbox/TextEdit";
 
 const DIALOG_PADDING = 16;
@@ -57,8 +61,8 @@ export const DialogApp: SystemApp = {
     const [inputState] = app.useState<TextInputState>(
       createTextInputState(props.inputDefault ?? "")
     );
-    const [activeButton, setActiveButton] = app.useState<number | null>(null);
     const isInitRef = app.useRef(false);
+    const controlsCreatedRef = app.useRef(false);
 
     if (!isInitRef.current) {
       isInitRef.current = true;
@@ -95,50 +99,39 @@ export const DialogApp: SystemApp = {
       ty += 4;
       const ix = DIALOG_PADDING;
       const iw = w - DIALOG_PADDING * 2;
-      ctx.drawTextInput(inputState, ix, ty, iw, INPUT_H);
-
-      ctx.hitRegion(
-        `dialog-input`,
-        { x: ix, y: ty, w: iw, h: INPUT_H },
-        {
-          onMouseDown: (lx: number) => {
-            handleTextInputClick(inputState, lx, false);
-          },
-          onDoubleClick: (lx: number) => {
-            handleTextInputDoubleClick(inputState, lx);
-          },
-        }
-      );
+      ctx.drawTextInput(inputState, ix, ty, iw, INPUT_H, {
+        id: "dialog-input",
+        onChange: () => app.scheduleRender(),
+      });
 
       ty += INPUT_H + 4;
     }
 
     ty += 8;
-    let bx = w - DIALOG_PADDING;
-    for (let i = buttons.length - 1; i >= 0; i--) {
-      const label = buttons[i];
-      const bw = measureText(label, "ChiKareGo") + 24;
-      bx -= bw + (i < buttons.length - 1 ? 12 : 0);
-      const btnIdx = i;
-      const isDefaultButton = btnIdx === buttons.length - 1;
-      ctx.drawButton({
-        x: bx,
-        y: ty,
-        width: bw,
-        label,
-        default: isDefaultButton,
-        active: activeButton === btnIdx,
-        id: `dialog-btn-${btnIdx}`,
-        onMouseDown: () => setActiveButton(btnIdx),
-        onMouseUp: () => setActiveButton(null),
-        onMouseLeave: () => setActiveButton(null),
-        onClick: () => {
-          const resolve = props._resolve as (val: string | null) => void;
-          const val = showInput ? inputState.value : label;
-          resolve(val);
-        },
-      });
+    const win = ctx.getWindow();
+    if (win === null) {
+      throw new Error("Dialog requires a window context");
     }
+
+    if (!controlsCreatedRef.current) {
+      let buttonX = w - DIALOG_PADDING;
+      for (let i = buttons.length - 1; i >= 0; i--) {
+        const label = buttons[i];
+        const bw = measureText(label, "ChiKareGo") + 24;
+        buttonX -= bw + (i < buttons.length - 1 ? 12 : 0);
+        const boundsRect = makeRect(ty, buttonX, ty + BUTTON_H, buttonX + bw);
+        const handle = NewControl(win, boundsRect, label, true, 0, 0, 1, 0, i);
+        const resolve = (props as DialogAppProps)._resolve;
+        handle.ref.contrlAction = (c, partCode) => {
+          if (partCode === inButton) {
+            const val = showInput ? inputState.value : c.ref.contrlTitle;
+            resolve(val);
+          }
+        };
+      }
+      controlsCreatedRef.current = true;
+    }
+    DrawControls(win, ctx.port);
   },
 
   onEvent(app: AppBuilder, event: OSEvent, props: any, size: WindowSize) {
@@ -146,8 +139,6 @@ export const DialogApp: SystemApp = {
     const [inputState] = app.useState<TextInputState>(
       createTextInputState(props.inputDefault ?? "")
     );
-    // Skip the activeButton slot to keep hook order
-    app.useState<number | null>(null);
     // Skip isInitRef
     app.useRef(false);
 

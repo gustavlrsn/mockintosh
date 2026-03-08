@@ -1,6 +1,6 @@
 /**
  * Counter — The simplest possible Mockintosh app.
- * Demonstrates: useState, drawText, drawButton, sprites.
+ * Demonstrates: useState, drawText, NewControl + DrawControls, sprites.
  */
 import {
   App,
@@ -9,9 +9,15 @@ import {
   AppProps,
   Sprite,
   fromGrid,
+  makeRect,
   BLACK,
   WHITE,
 } from "@mockintosh/sdk";
+import {
+  NewControl,
+  DrawControls,
+  inButton,
+} from "../../../lib/toolbox/ControlManager";
 
 const ICON = fromGrid(32, 32, [
   "................................",
@@ -60,6 +66,7 @@ const CounterApp: App = {
 
   render(app: AppBuilder, ctx: WindowContext, props: AppProps) {
     const [count, setCount] = app.useState(0);
+    const controlsCreatedRef = app.useRef(false);
 
     ctx.clear(WHITE);
 
@@ -75,21 +82,41 @@ const CounterApp: App = {
       color: BLACK,
     });
 
-    ctx.drawButton({
-      x: 10,
-      y: 65,
-      label: "- 1",
-      id: "decrement",
-      onClick: () => setCount((c) => c - 1),
-    });
-
-    ctx.drawButton({
-      x: ctx.width - 50,
-      y: 65,
-      label: "+ 1",
-      id: "increment",
-      onClick: () => setCount((c) => c + 1),
-    });
+    const win = ctx.getWindow();
+    if (win !== null) {
+      if (!controlsCreatedRef.current) {
+        const decHandle = NewControl(
+          win,
+          makeRect(65, 10, 85, 46),
+          "- 1",
+          true,
+          0,
+          0,
+          1,
+          0,
+          0
+        );
+        decHandle.ref.contrlAction = (_c, partCode) => {
+          if (partCode === inButton) setCount((c) => c - 1);
+        };
+        const incHandle = NewControl(
+          win,
+          makeRect(65, ctx.width - 50, 85, ctx.width - 10),
+          "+ 1",
+          true,
+          0,
+          0,
+          1,
+          0,
+          0
+        );
+        incHandle.ref.contrlAction = (_c, partCode) => {
+          if (partCode === inButton) setCount((c) => c + 1);
+        };
+        controlsCreatedRef.current = true;
+      }
+      DrawControls(win, ctx.port);
+    }
   },
 };
 

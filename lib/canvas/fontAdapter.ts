@@ -155,6 +155,10 @@ function blitGlyph(
 /**
  * Draw bitmap text directly into a BitCanvas using the pre-rasterized glyph cache.
  * No temp canvas, no getImageData — just direct array blits.
+ *
+ * @deprecated All in-repo text drawing now uses QuickDraw (SetPort + MoveTo + DrawString
+ * via FontManager). Use that for GrafPort-based drawing. This export is kept for any
+ * external or legacy BitCanvas-only paths.
  */
 export function drawBitmapText(
   canvas: BitCanvas,

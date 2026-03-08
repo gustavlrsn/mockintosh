@@ -16,6 +16,8 @@ export interface CRTShaderOptions {
   screenTexture: THREE.Texture;
   emissiveIntensity?: number;
   scanlineIntensity?: number;
+  phosphorTint?: THREE.ColorRepresentation;
+  tintStrength?: number;
   rasterMin?: [number, number];
   rasterMax?: [number, number];
 }
@@ -27,9 +29,12 @@ export function createCRTPhysicalMaterial(
     screenTexture,
     emissiveIntensity = 1.5,
     scanlineIntensity = 0.03,
+    phosphorTint = 0xbff5df,
+    tintStrength = 1.0,
     rasterMin = [0.0, 0.0],
     rasterMax = [1.0, 1.0],
   } = options;
+  const phosphorColor = new THREE.Color(phosphorTint);
 
   // A 1x1 black texture ensures Three.js includes UV varyings and the
   // emissive map code path in the compiled shader.
@@ -56,6 +61,8 @@ export function createCRTPhysicalMaterial(
     shader.uniforms.uScreen = { value: screenTexture };
     shader.uniforms.uCrtEmissiveIntensity = { value: emissiveIntensity };
     shader.uniforms.uScanlineIntensity = { value: scanlineIntensity };
+    shader.uniforms.uPhosphorTint = { value: phosphorColor };
+    shader.uniforms.uTintStrength = { value: tintStrength };
     shader.uniforms.uRasterMin = {
       value: new THREE.Vector2(rasterMin[0], rasterMin[1]),
     };
@@ -71,6 +78,8 @@ export function createCRTPhysicalMaterial(
         uniform sampler2D uScreen;
         uniform float uCrtEmissiveIntensity;
         uniform float uScanlineIntensity;
+        uniform vec3 uPhosphorTint;
+        uniform float uTintStrength;
         uniform vec2 uRasterMin;
         uniform vec2 uRasterMax;
         void main() {
@@ -87,8 +96,11 @@ export function createCRTPhysicalMaterial(
                        && rUv.y >= 0.0 && rUv.y <= 1.0;
           if (inRaster) {
             vec4 osTexel = texture2D(uScreen, rUv);
+            float mono = dot(osTexel.rgb, vec3(0.299, 0.587, 0.114));
+            vec3 screenColor = mix(vec3(mono), mono * uPhosphorTint, uTintStrength);
             float scanline = 1.0 - uScanlineIntensity * mod(floor(rUv.y * 342.0), 2.0);
-            totalEmissiveRadiance = osTexel.rgb * scanline * uCrtEmissiveIntensity;
+            totalEmissiveRadiance =
+              screenColor * scanline * uCrtEmissiveIntensity;
           } else {
             totalEmissiveRadiance = vec3(0.0);
           }

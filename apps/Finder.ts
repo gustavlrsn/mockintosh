@@ -6,7 +6,7 @@ import type { GrafPort } from "@mockintosh/quickdraw";
 import { blitSpriteOutline } from "../lib/canvas/SpriteManager";
 import { qdDrawRect } from "../lib/canvas/qdDraw";
 import { ResourceManager } from "../lib/toolbox/ResourceManager";
-import { drawBitmapText, measureText } from "../lib/canvas/fontAdapter";
+import { FMTextWidth } from "../lib/toolbox/FontManager";
 import { OSEvent } from "../lib/toolbox/EventManager";
 import {
   FileManager,
@@ -854,11 +854,11 @@ export function finderRenderDragGhost(
 
   blitSpriteOutline(port, sprite, ix, ghostY, BLACK);
 
-  const textW = measureText(drag.title, "Geneva9");
+  const textW = FMTextWidth(drag.title, "Geneva9");
   const labelW = textW + 4;
   const labelH = 12;
   const labelX = ghostX + Math.floor((cellW - labelW) / 2);
-  const labelY = ghostY + ICON_SIZE + 2;
+  const labelY = ghostY + ICON_SIZE;
   if (labelW > 0 && labelH > 0) {
     qdDrawRect(port, labelX, labelY, labelW, labelH, BLACK);
   }
@@ -1110,7 +1110,7 @@ function renderFolderWindow(
   if (infoItems.length > 0) {
     const colW = Math.floor((ctx.width - 2) / infoItems.length);
     for (let i = 0; i < infoItems.length; i++) {
-      const tw = measureText(infoItems[i], "Geneva9");
+      const tw = FMTextWidth(infoItems[i], "Geneva9");
       const tx = 1 + i * colW + Math.floor((colW - tw) / 2);
       ctx.drawText(infoItems[i], tx, 4, { font: "Geneva9", color: BLACK });
       if (i < infoItems.length - 1) {
@@ -1300,9 +1300,9 @@ function drawIcon(
     }
   }
 
-  const textW = measureText(icon.title, "Geneva9");
-  const labelX = cellX + Math.floor((cellW - textW) / 2) - 2;
-  const labelY = cellY + ICON_SIZE + 2;
+  const textW = FMTextWidth(icon.title, "Geneva9");
+  const labelX = cellX + Math.floor((cellW - textW) / 2);
+  const labelY = cellY + ICON_SIZE;
 
   if (selected || isDropTarget) {
     ctx.drawText(icon.title, labelX, labelY, {

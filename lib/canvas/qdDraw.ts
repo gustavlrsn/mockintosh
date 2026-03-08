@@ -72,7 +72,7 @@ export function qdFillRect(
   color: number
 ): void {
   withPort(port, () => {
-    const r = makeRect(x, y, x + w, y + h);
+    const r = makeRect(y, x, y + h, x + w);
     if (color !== 0) {
       // Set pnPat to black and pnMode to patCopy, then PaintRect
       PenNormal();
@@ -95,7 +95,7 @@ export function qdDrawRect(
   withPort(port, () => {
     PenNormal();
     PenPat(colorToPat(color));
-    FrameRect(makeRect(x, y, x + w, y + h));
+    FrameRect(makeRect(y, x, y + h, x + w));
     PenNormal();
   });
 }
@@ -109,7 +109,7 @@ export function qdInvertRect(
 ): void {
   withPort(port, () => {
     PenNormal();
-    InvertRect(makeRect(x, y, x + w, y + h));
+    InvertRect(makeRect(y, x, y + h, x + w));
   });
 }
 
@@ -126,7 +126,7 @@ export function qdFillPattern(
       typeof pattern === "string"
         ? namedPatternToQD(pattern)
         : (pattern as Pattern);
-    FillRect(makeRect(x, y, x + w, y + h), pat);
+    FillRect(makeRect(y, x, y + h, x + w), pat);
   });
 }
 
@@ -155,10 +155,10 @@ export function qdFillRoundRect(
     const halfOvW = Math.floor(ovalW / 2);
     const halfOvH = Math.floor(ovalH / 2);
     const cornerRects = [
-      makeRect(x, y, x + ovalW, y + ovalH),
-      makeRect(x + w - ovalW, y, x + w, y + ovalH),
-      makeRect(x + w - ovalW, y + h - ovalH, x + w, y + h),
-      makeRect(x, y + h - ovalH, x + ovalW, y + h),
+      makeRect(y, x, y + ovalH, x + ovalW),
+      makeRect(y, x + w - ovalW, y + ovalH, x + w),
+      makeRect(y + h - ovalH, x + w - ovalW, y + h, x + w),
+      makeRect(y + h - ovalH, x, y + h, x + ovalW),
     ];
     for (let i = 0; i < 4; i++) {
       PaintArc(
@@ -167,9 +167,9 @@ export function qdFillRoundRect(
         ROUND_RECT_CORNERS[i].arc
       );
     }
-    PaintRect(makeRect(x, y + halfOvH, x + w, y + h - halfOvH));
-    PaintRect(makeRect(x + halfOvW, y, x + w - halfOvW, y + halfOvH));
-    PaintRect(makeRect(x + halfOvW, y + h - halfOvH, x + w - halfOvW, y + h));
+    PaintRect(makeRect(y + halfOvH, x, y + h - halfOvH, x + w));
+    PaintRect(makeRect(y, x + halfOvW, y + halfOvH, x + w - halfOvW));
+    PaintRect(makeRect(y + h - halfOvH, x + halfOvW, y + h, x + w - halfOvW));
     PenNormal();
   });
 }
@@ -194,10 +194,10 @@ export function qdFrameRoundRect(
     const ph = Math.max(1, penWidth);
     const pw = ph;
     const cornerRects = [
-      makeRect(x, y, x + ovalW, y + ovalH),
-      makeRect(x + w - ovalW, y, x + w, y + ovalH),
-      makeRect(x + w - ovalW, y + h - ovalH, x + w, y + h),
-      makeRect(x, y + h - ovalH, x + ovalW, y + h),
+      makeRect(y, x, y + ovalH, x + ovalW),
+      makeRect(y, x + w - ovalW, y + ovalH, x + w),
+      makeRect(y + h - ovalH, x + w - ovalW, y + h, x + w),
+      makeRect(y + h - ovalH, x, y + h, x + ovalW),
     ];
     for (let i = 0; i < 4; i++) {
       FrameArc(
@@ -206,10 +206,10 @@ export function qdFrameRoundRect(
         ROUND_RECT_CORNERS[i].arc
       );
     }
-    PaintRect(makeRect(x + halfOvW, y, x + w - halfOvW, y + ph));
-    PaintRect(makeRect(x + halfOvW, y + h - ph, x + w - halfOvW, y + h));
-    PaintRect(makeRect(x, y + halfOvH, x + pw, y + h - halfOvH));
-    PaintRect(makeRect(x + w - pw, y + halfOvH, x + w, y + h - halfOvH));
+    PaintRect(makeRect(y, x + halfOvW, y + ph, x + w - halfOvW));
+    PaintRect(makeRect(y + h - ph, x + halfOvW, y + h, x + w - halfOvW));
+    PaintRect(makeRect(y + halfOvH, x, y + h - halfOvH, x + pw));
+    PaintRect(makeRect(y + halfOvH, x + w - pw, y + h - halfOvH, x + w));
     PenNormal();
   });
 }
