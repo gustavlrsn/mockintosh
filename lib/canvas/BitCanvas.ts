@@ -1,7 +1,7 @@
 /**
  * BitCanvas.ts — Minimal kernel
  *
- * Owns the 1-byte-per-pixel buffer and provides flush-to-canvas2d.
+ * Owns the 1-byte-per-pixel indexed buffer and provides flush-to-canvas2d.
  * All higher-level drawing has migrated to QuickDraw GrafPort via qdDraw.ts.
  *
  * Retained methods beyond the kernel (fillRect, drawRect, drawHLine,
@@ -9,6 +9,8 @@
  * shim path that wraps a GrafPort's baseAddr in a BitCanvas. These will be
  * removed once text rendering moves to native QuickDraw DrawString.
  */
+
+import { resolvePixelRGB } from "./ColorSystem";
 
 export const BLACK = 1;
 export const WHITE = 0;
@@ -70,7 +72,7 @@ export class BitCanvas {
   }
 
   // -----------------------------------------------------------------------
-  // Flush — convert 1bpp buffer to RGBA and put on real canvas
+  // Flush — convert indexed buffer to RGBA and put on real canvas
   // -----------------------------------------------------------------------
 
   flush(ctx: CanvasRenderingContext2D) {
@@ -84,11 +86,13 @@ export class BitCanvas {
     const rgba = this.imageData.data;
     const len = this.width * this.height;
     for (let i = 0; i < len; i++) {
-      const color = this.pixels[i] ? 0 : 255;
+      const x = i % this.width;
+      const y = (i / this.width) | 0;
+      const color = resolvePixelRGB(this.pixels[i], x, y);
       const j = i * 4;
-      rgba[j] = color;
-      rgba[j + 1] = color;
-      rgba[j + 2] = color;
+      rgba[j] = color.r;
+      rgba[j + 1] = color.g;
+      rgba[j + 2] = color.b;
       rgba[j + 3] = 255;
     }
     ctx.putImageData(this.imageData, 0, 0);
@@ -115,11 +119,11 @@ export class BitCanvas {
     for (let py = 0; py < h; py++) {
       for (let px = 0; px < w; px++) {
         const srcIdx = (y + py) * this.width + (x + px);
-        const color = this.pixels[srcIdx] ? 0 : 255;
+        const color = resolvePixelRGB(this.pixels[srcIdx], x + px, y + py);
         const dstIdx = (py * w + px) * 4;
-        rgba[dstIdx] = color;
-        rgba[dstIdx + 1] = color;
-        rgba[dstIdx + 2] = color;
+        rgba[dstIdx] = color.r;
+        rgba[dstIdx + 1] = color.g;
+        rgba[dstIdx + 2] = color.b;
         rgba[dstIdx + 3] = 255;
       }
     }

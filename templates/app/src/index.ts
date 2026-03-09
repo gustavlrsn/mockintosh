@@ -67,14 +67,14 @@ const MyApp: App = {
     ctx.clear(WHITE);
 
     ctx.drawText("My App", ctx.width / 2 - 18, 8, {
-      font: "ChiKareGo",
+      font: "menu",
       color: BLACK,
     });
 
     ctx.drawHLine(0, 24, ctx.width, BLACK);
 
     ctx.drawText(`Count: ${count}`, 10, 40, {
-      font: "Geneva9",
+      font: "body",
       color: BLACK,
     });
 

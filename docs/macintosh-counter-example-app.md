@@ -272,7 +272,7 @@ export const CounterApp = {
 
     ctx.clear(WHITE);
     ctx.drawText(`Current count: ${count}`, 16, 16, {
-      font: "Geneva9",
+      font: "body",
       color: BLACK,
     });
 

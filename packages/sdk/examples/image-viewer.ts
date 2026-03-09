@@ -93,7 +93,7 @@ const ImageViewerApp: App = {
       }
     } else {
       ctx.drawText("No image loaded", ctx.width / 2 - 40, ctx.height / 2, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
     }
@@ -106,7 +106,7 @@ const ImageViewerApp: App = {
     const infoY = ctx.height - 14;
     ctx.fillRect(0, infoY, ctx.width, 14, WHITE);
     ctx.drawHLine(0, infoY, ctx.width, BLACK);
-    ctx.drawText(infoText, 4, infoY + 2, { font: "Geneva9", color: BLACK });
+    ctx.drawText(infoText, 4, infoY + 2, { font: "body", color: BLACK });
   },
 
   getMenubar(app: AppBuilder, props: AppProps): MenubarDefinition[] {

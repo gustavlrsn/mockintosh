@@ -11,7 +11,7 @@
  *   GetFontName  → GetFontName(id)
  *   RealFont     → RealFont(fontNum, size)
  *
- * Internals: wraps fontAdapter.ts glyph cache and measurement functions.
+ * Internals: wraps the Decker-style font registry and measurement functions.
  * installQuickDrawFontBridge() wires QuickDraw's text path to this manager.
  */
 
@@ -20,8 +20,14 @@ import {
   measureText,
   getLineHeight,
   drawBitmapTextToPixels,
+  registerFontResource,
   type FontName,
 } from "../canvas/fontAdapter";
+import { resolveTextColor } from "../canvas/ColorSystem";
+import {
+  listDeckerFonts,
+  requireDeckerFont,
+} from "../fonts/DeckerFontRegistry";
 import { globals } from "@mockintosh/quickdraw";
 import type { GrafPort } from "@mockintosh/quickdraw";
 
@@ -51,7 +57,6 @@ export interface FMInput {
 interface FontEntry {
   id: number;
   name: FontName;
-  size: number;
   lineHeight: number;
 }
 
@@ -61,15 +66,27 @@ interface FontEntry {
 
 const fontRegistry: Map<number, FontEntry> = new Map();
 const fontNameToId: Map<string, number> = new Map();
+let nextDynamicFontId = 256;
 
 /**
  * Register a font in the Font Manager.
  */
-export function RegisterFont(name: FontName, id: number, size: number): void {
+export function RegisterFont(name: FontName, id: number): void {
   const lineHeight = getLineHeight(name);
-  const entry: FontEntry = { id, name, size, lineHeight };
+  const entry: FontEntry = { id, name, lineHeight };
   fontRegistry.set(id, entry);
   fontNameToId.set(name, id);
+}
+
+export function RegisterFontData(
+  name: string,
+  dataBlock: string,
+  id?: number
+): number {
+  registerFontResource(name, dataBlock);
+  const fontId = id ?? nextDynamicFontId++;
+  RegisterFont(name, fontId);
+  return fontId;
 }
 
 // -------------------------------------------------------------------------
@@ -85,9 +102,13 @@ export function RegisterFont(name: FontName, id: number, size: number): void {
 export async function InitFonts(): Promise<void> {
   await loadFonts();
 
-  // Register the two built-in fonts
-  RegisterFont("Geneva9", 3, 9);
-  RegisterFont("ChiKareGo", 200, 12);
+  for (const [name, id] of [
+    ["body", 3],
+    ["menu", 4],
+    ["mono", 5],
+  ] as const) {
+    RegisterFont(name, id);
+  }
 }
 
 /**
@@ -96,12 +117,11 @@ export async function InitFonts(): Promise<void> {
  * Equivalent to Mac GetFontInfo (fills a FontInfo record).
  */
 export function GetFMFontInfo(input: FMInput): FontInfo {
-  const lineH = getLineHeight(input.fontName);
-  // For bitmap fonts, ascent + descent + leading = lineHeight.
-  // Typical Mac bitmap fonts: ascent ≈ 75% lineHeight, descent ≈ 25%.
-  const ascent = Math.ceil(lineH * 0.75);
-  const descent = lineH - ascent;
-  const widMax = measureText("M", input.fontName);
+  const font = requireDeckerFont(input.fontName);
+  const lineH = font.glyphHeight;
+  const ascent = Math.max(1, lineH - 2);
+  const descent = Math.max(0, lineH - ascent);
+  const widMax = font.maxWidth + font.spacing;
 
   return {
     ascent,
@@ -138,14 +158,18 @@ export function GetFontName(id: number): FontName | null {
 export function RealFont(fontNum: number, size: number): boolean {
   const entry = fontRegistry.get(fontNum);
   if (!entry) return false;
-  return entry.size === size;
+  return size >= 0 && entry.lineHeight > 0;
 }
 
 /**
  * Measure text width using a font. Convenience wrapper over fontAdapter.
  */
-export function FMTextWidth(text: string, fontName: FontName): number {
-  return measureText(text, fontName);
+export function FMTextWidth(
+  text: string,
+  fontName: FontName,
+  spacing: number = 0
+): number {
+  return measureText(text, fontName, spacing);
 }
 
 /**
@@ -172,14 +196,12 @@ export function installQuickDrawFontBridge(
 ): void {
   const measure = (text: string): number => {
     const port = globals.thePort;
-    const fontName = port
-      ? GetFontName(port.txFont) ?? "ChiKareGo"
-      : "ChiKareGo";
+    const fontName = port ? GetFontName(port.txFont) ?? "body" : "body";
     return measureText(text, fontName);
   };
 
   const draw = (text: string, x: number, y: number, port: GrafPort): void => {
-    const fontName = GetFontName(port.txFont) ?? "ChiKareGo";
+    const fontName = GetFontName(port.txFont) ?? "body";
     const { baseAddr, rowBytes, bounds } = port.portBits;
     const cl = port.clipRgn?.rgn.rgnBBox;
     const vis = port.visRgn?.rgn.rgnBBox;
@@ -208,7 +230,9 @@ export function installQuickDrawFontBridge(
       pr.bottom,
       bounds.bottom
     );
-    const color = (port as GrafPort & { txColor?: number }).txColor ?? 1;
+    const color = resolveTextColor(
+      (port as GrafPort & { txColor?: number }).txColor ?? 1
+    );
     drawBitmapTextToPixels(
       baseAddr,
       rowBytes,
@@ -230,3 +254,7 @@ export function installQuickDrawFontBridge(
 }
 
 export type { FontName };
+
+export function GetRegisteredFontNames(): string[] {
+  return listDeckerFonts();
+}

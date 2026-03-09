@@ -8,7 +8,8 @@
  * Every function sets thePort, performs the operation, then restores the
  * previous port. Callers do not need to manage port state themselves.
  *
- * "color" follows the BitCanvas convention: 1 = black, 0 = white.
+ * "color" follows the indexed-buffer convention: `0` = white, `1` = black,
+ * `2..255` = palette indices managed by Mockintosh.
  */
 
 import {
@@ -35,21 +36,28 @@ import {
 } from "@mockintosh/quickdraw";
 import { namedPatternToQD, QD_PATTERNS } from "./patternBridge";
 import type { PatternName } from "./patterns";
-
-// -------------------------------------------------------------------------
-// Internal: convert color to pen/fill pattern
-// -------------------------------------------------------------------------
+import {
+  BLACK_INDEX,
+  WHITE_INDEX,
+  clampColorIndex,
+  colorIndexToMonochromeBit,
+  getColorMode,
+  resolveStrokeColor,
+} from "./ColorSystem";
 
 const PAT_BLACK = QD_PATTERNS.black;
 const PAT_WHITE = QD_PATTERNS.white;
 
-function colorToPat(color: number): Pattern {
-  return color !== 0 ? PAT_BLACK : PAT_WHITE;
+interface ClipBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }
 
-// -------------------------------------------------------------------------
-// Core drawing helpers — each sets thePort, draws, restores previous port
-// -------------------------------------------------------------------------
+function colorToPat(color: number): Pattern {
+  return color !== WHITE_INDEX ? PAT_BLACK : PAT_WHITE;
+}
 
 function withPort<T>(port: GrafPort, fn: () => T): T {
   const prev = GetPort();
@@ -59,9 +67,237 @@ function withPort<T>(port: GrafPort, fn: () => T): T {
   return result;
 }
 
-// -------------------------------------------------------------------------
-// Rectangle operations
-// -------------------------------------------------------------------------
+function getPortClip(port: GrafPort): ClipBounds {
+  const vis = port.visRgn?.rgn.rgnBBox;
+  const clip = port.clipRgn?.rgn.rgnBBox;
+  const pr = port.portRect;
+  const bnd = port.portBits.bounds;
+  return {
+    left: Math.max(
+      vis?.left ?? bnd.left,
+      clip?.left ?? bnd.left,
+      pr.left,
+      bnd.left
+    ),
+    top: Math.max(vis?.top ?? bnd.top, clip?.top ?? bnd.top, pr.top, bnd.top),
+    right: Math.min(
+      vis?.right ?? bnd.right,
+      clip?.right ?? bnd.right,
+      pr.right,
+      bnd.right
+    ),
+    bottom: Math.min(
+      vis?.bottom ?? bnd.bottom,
+      clip?.bottom ?? bnd.bottom,
+      pr.bottom,
+      bnd.bottom
+    ),
+  };
+}
+
+function setPixelRaw(
+  port: GrafPort,
+  x: number,
+  y: number,
+  color: number
+): void {
+  const clip = getPortClip(port);
+  if (x < clip.left || x >= clip.right || y < clip.top || y >= clip.bottom) {
+    return;
+  }
+  const { baseAddr, rowBytes, bounds } = port.portBits;
+  baseAddr[(y - bounds.top) * rowBytes + (x - bounds.left)] =
+    clampColorIndex(color);
+}
+
+function fillRectRaw(
+  port: GrafPort,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: number
+): void {
+  if (w <= 0 || h <= 0) return;
+  const clip = getPortClip(port);
+  const { baseAddr, rowBytes, bounds } = port.portBits;
+  const fillColor = clampColorIndex(color);
+  const x0 = Math.max(x, clip.left);
+  const y0 = Math.max(y, clip.top);
+  const x1 = Math.min(x + w, clip.right);
+  const y1 = Math.min(y + h, clip.bottom);
+  for (let py = y0; py < y1; py++) {
+    const row = (py - bounds.top) * rowBytes;
+    baseAddr.fill(
+      fillColor,
+      row + (x0 - bounds.left),
+      row + (x1 - bounds.left)
+    );
+  }
+}
+
+function fillRectMonochromeDithered(
+  port: GrafPort,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: number
+): void {
+  if (w <= 0 || h <= 0) return;
+  const clip = getPortClip(port);
+  const { baseAddr, rowBytes, bounds } = port.portBits;
+  const normalized = clampColorIndex(color);
+  const x0 = Math.max(x, clip.left);
+  const y0 = Math.max(y, clip.top);
+  const x1 = Math.min(x + w, clip.right);
+  const y1 = Math.min(y + h, clip.bottom);
+  for (let py = y0; py < y1; py++) {
+    const row = (py - bounds.top) * rowBytes;
+    for (let px = x0; px < x1; px++) {
+      baseAddr[row + (px - bounds.left)] = colorIndexToMonochromeBit(
+        normalized,
+        px,
+        py
+      );
+    }
+  }
+}
+
+function drawHLineRaw(
+  port: GrafPort,
+  x: number,
+  y: number,
+  w: number,
+  color: number
+): void {
+  fillRectRaw(port, x, y, w, 1, color);
+}
+
+function drawVLineRaw(
+  port: GrafPort,
+  x: number,
+  y: number,
+  h: number,
+  color: number
+): void {
+  if (h <= 0) return;
+  const clip = getPortClip(port);
+  if (x < clip.left || x >= clip.right) return;
+  const { baseAddr, rowBytes, bounds } = port.portBits;
+  const drawColor = clampColorIndex(color);
+  const y0 = Math.max(y, clip.top);
+  const y1 = Math.min(y + h, clip.bottom);
+  for (let py = y0; py < y1; py++) {
+    baseAddr[(py - bounds.top) * rowBytes + (x - bounds.left)] = drawColor;
+  }
+}
+
+function drawRectRaw(
+  port: GrafPort,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: number
+): void {
+  drawHLineRaw(port, x, y, w, color);
+  drawHLineRaw(port, x, y + h - 1, w, color);
+  drawVLineRaw(port, x, y, h, color);
+  drawVLineRaw(port, x + w - 1, y, h, color);
+}
+
+function drawDottedLineRaw(
+  port: GrafPort,
+  x: number,
+  y: number,
+  length: number,
+  color: number,
+  vertical: boolean
+): void {
+  const drawColor = clampColorIndex(color);
+  for (let i = 0; i < length; i += 2) {
+    if (vertical) {
+      setPixelRaw(port, x, y + i, drawColor);
+    } else {
+      setPixelRaw(port, x + i, y, drawColor);
+    }
+  }
+}
+
+function fillRoundRectRaw(
+  port: GrafPort,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  ovalW: number,
+  ovalH: number,
+  color: number,
+  dithered: boolean
+): void {
+  const rx = Math.max(1, Math.min(Math.floor(ovalW / 2), Math.floor(w / 2)));
+  const ry = Math.max(1, Math.min(Math.floor(ovalH / 2), Math.floor(h / 2)));
+  for (let py = 0; py < h; py++) {
+    let inset = 0;
+    if (py < ry) {
+      const dy = (ry - py - 0.5) / ry;
+      inset = Math.max(
+        0,
+        Math.ceil(rx - rx * Math.sqrt(Math.max(0, 1 - dy * dy)))
+      );
+    } else if (py >= h - ry) {
+      const dy = (py - (h - ry) + 0.5) / ry;
+      inset = Math.max(
+        0,
+        Math.ceil(rx - rx * Math.sqrt(Math.max(0, 1 - dy * dy)))
+      );
+    }
+    const spanX = x + inset;
+    const spanW = w - inset * 2;
+    if (spanW <= 0) continue;
+    if (dithered) {
+      fillRectMonochromeDithered(port, spanX, y + py, spanW, 1, color);
+    } else {
+      fillRectRaw(port, spanX, y + py, spanW, 1, color);
+    }
+  }
+}
+
+function frameRoundRectRaw(
+  port: GrafPort,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  ovalW: number,
+  ovalH: number,
+  penWidth: number,
+  color: number
+): void {
+  fillRoundRectRaw(port, x, y, w, h, ovalW, ovalH, color, false);
+  const innerW = w - penWidth * 2;
+  const innerH = h - penWidth * 2;
+  if (innerW <= 0 || innerH <= 0) return;
+  fillRoundRectRaw(
+    port,
+    x + penWidth,
+    y + penWidth,
+    innerW,
+    innerH,
+    Math.max(1, ovalW - penWidth * 2),
+    Math.max(1, ovalH - penWidth * 2),
+    WHITE_INDEX,
+    false
+  );
+}
+
+const ROUND_RECT_CORNERS = [
+  { start: 270, arc: 90 },
+  { start: 0, arc: 90 },
+  { start: 90, arc: 90 },
+  { start: 180, arc: 90 },
+];
 
 export function qdFillRect(
   port: GrafPort,
@@ -71,14 +307,21 @@ export function qdFillRect(
   h: number,
   color: number
 ): void {
+  const normalized = clampColorIndex(color);
+  if (normalized > BLACK_INDEX) {
+    if (getColorMode() === "colors") {
+      fillRectRaw(port, x, y, w, h, normalized);
+    } else {
+      fillRectMonochromeDithered(port, x, y, w, h, normalized);
+    }
+    return;
+  }
   withPort(port, () => {
     const r = makeRect(y, x, y + h, x + w);
-    if (color !== 0) {
-      // Set pnPat to black and pnMode to patCopy, then PaintRect
+    if (normalized !== WHITE_INDEX) {
       PenNormal();
       PaintRect(r);
     } else {
-      // EraseRect uses bkPat (white by default) — no need to change pen state
       EraseRect(r);
     }
   });
@@ -90,11 +333,16 @@ export function qdDrawRect(
   y: number,
   w: number,
   h: number,
-  color: number = 1
+  color: number = BLACK_INDEX
 ): void {
+  const drawColor = resolveStrokeColor(color);
+  if (getColorMode() === "colors" && drawColor > BLACK_INDEX) {
+    drawRectRaw(port, x, y, w, h, drawColor);
+    return;
+  }
   withPort(port, () => {
     PenNormal();
-    PenPat(colorToPat(color));
+    PenPat(colorToPat(drawColor));
     FrameRect(makeRect(y, x, y + h, x + w));
     PenNormal();
   });
@@ -130,15 +378,6 @@ export function qdFillPattern(
   });
 }
 
-// Round-rect corner arcs: 0°=top, 90°=right, 180°=bottom, 270°=left (QuickDraw clockwise).
-// Each corner draws the convex quarter so the outline/fill matches a proper round rect.
-const ROUND_RECT_CORNERS = [
-  { start: 270, arc: 90 }, // top-left: left to top
-  { start: 0, arc: 90 }, // top-right: top to right
-  { start: 90, arc: 90 }, // bottom-right: right to bottom
-  { start: 180, arc: 90 }, // bottom-left: bottom to left
-];
-
 export function qdFillRoundRect(
   port: GrafPort,
   x: number,
@@ -147,11 +386,26 @@ export function qdFillRoundRect(
   h: number,
   ovalW: number,
   ovalH: number,
-  color: number = 1
+  color: number = BLACK_INDEX
 ): void {
+  const normalized = clampColorIndex(color);
+  if (normalized > BLACK_INDEX) {
+    fillRoundRectRaw(
+      port,
+      x,
+      y,
+      w,
+      h,
+      ovalW,
+      ovalH,
+      normalized,
+      getColorMode() !== "colors"
+    );
+    return;
+  }
   withPort(port, () => {
     PenNormal();
-    PenPat(colorToPat(color));
+    PenPat(colorToPat(normalized));
     const halfOvW = Math.floor(ovalW / 2);
     const halfOvH = Math.floor(ovalH / 2);
     const cornerRects = [
@@ -183,12 +437,17 @@ export function qdFrameRoundRect(
   ovalW: number,
   ovalH: number,
   penWidth: number = 1,
-  color: number = 1
+  color: number = BLACK_INDEX
 ): void {
+  const drawColor = resolveStrokeColor(color);
+  if (getColorMode() === "colors" && drawColor > BLACK_INDEX) {
+    frameRoundRectRaw(port, x, y, w, h, ovalW, ovalH, penWidth, drawColor);
+    return;
+  }
   withPort(port, () => {
     PenNormal();
     PenSize(penWidth, penWidth);
-    PenPat(colorToPat(color));
+    PenPat(colorToPat(drawColor));
     const halfOvW = Math.floor(ovalW / 2);
     const halfOvH = Math.floor(ovalH / 2);
     const ph = Math.max(1, penWidth);
@@ -214,20 +473,21 @@ export function qdFrameRoundRect(
   });
 }
 
-// -------------------------------------------------------------------------
-// Line operations
-// -------------------------------------------------------------------------
-
 export function qdDrawHLine(
   port: GrafPort,
   x: number,
   y: number,
   w: number,
-  color: number = 1
+  color: number = BLACK_INDEX
 ): void {
+  const drawColor = resolveStrokeColor(color);
+  if (getColorMode() === "colors" && drawColor > BLACK_INDEX) {
+    drawHLineRaw(port, x, y, w, drawColor);
+    return;
+  }
   withPort(port, () => {
     PenNormal();
-    PenPat(colorToPat(color));
+    PenPat(colorToPat(drawColor));
     MoveTo(x, y);
     Line(w - 1, 0);
     PenNormal();
@@ -239,11 +499,16 @@ export function qdDrawVLine(
   x: number,
   y: number,
   h: number,
-  color: number = 1
+  color: number = BLACK_INDEX
 ): void {
+  const drawColor = resolveStrokeColor(color);
+  if (getColorMode() === "colors" && drawColor > BLACK_INDEX) {
+    drawVLineRaw(port, x, y, h, drawColor);
+    return;
+  }
   withPort(port, () => {
     PenNormal();
-    PenPat(colorToPat(color));
+    PenPat(colorToPat(drawColor));
     MoveTo(x, y);
     Line(0, h - 1);
     PenNormal();
@@ -254,11 +519,16 @@ export function qdSetPixel(
   port: GrafPort,
   x: number,
   y: number,
-  color: number = 1
+  color: number = BLACK_INDEX
 ): void {
+  const drawColor = resolveStrokeColor(color);
+  if (getColorMode() === "colors" && drawColor > BLACK_INDEX) {
+    setPixelRaw(port, x, y, drawColor);
+    return;
+  }
   withPort(port, () => {
     PenNormal();
-    PenPat(colorToPat(color));
+    PenPat(colorToPat(drawColor));
     PenSize(1, 1);
     MoveTo(x, y);
     Line(0, 0);
@@ -271,9 +541,13 @@ export function qdDrawDottedHLine(
   x: number,
   y: number,
   w: number,
-  color: number = 1
+  color: number = BLACK_INDEX
 ): void {
-  // Draw every other pixel — use a dotted pen pattern with even columns
+  const drawColor = resolveStrokeColor(color);
+  if (getColorMode() === "colors" && drawColor > BLACK_INDEX) {
+    drawDottedLineRaw(port, x, y, w, drawColor, false);
+    return;
+  }
   const dotPat = new Uint8Array([
     0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,
   ]);
@@ -291,8 +565,13 @@ export function qdDrawDottedVLine(
   x: number,
   y: number,
   h: number,
-  color: number = 1
+  color: number = BLACK_INDEX
 ): void {
+  const drawColor = resolveStrokeColor(color);
+  if (getColorMode() === "colors" && drawColor > BLACK_INDEX) {
+    drawDottedLineRaw(port, x, y, h, drawColor, true);
+    return;
+  }
   const dotPat = new Uint8Array([
     0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,
   ]);
@@ -304,11 +583,6 @@ export function qdDrawDottedVLine(
     PenNormal();
   });
 }
-
-// -------------------------------------------------------------------------
-// XOR pattern perimeter (replaces BitCanvas.xorPatternRect)
-// Used for drag outlines and zoom animations.
-// -------------------------------------------------------------------------
 
 export function qdXorPatternRect(
   port: GrafPort,
@@ -325,28 +599,17 @@ export function qdXorPatternRect(
     PenNormal();
     PenMode(patXor);
     PenPat(pat);
-
-    // Top edge
     MoveTo(x, y);
     Line(w - 1, 0);
-    // Bottom edge
     MoveTo(x, y + h - 1);
     Line(w - 1, 0);
-    // Left edge (interior rows to avoid double-drawing corners)
     MoveTo(x, y + 1);
     Line(0, h - 3);
-    // Right edge (interior rows)
     MoveTo(x + w - 1, y + 1);
     Line(0, h - 3);
-
     PenNormal();
   });
 }
-
-// -------------------------------------------------------------------------
-// Mask pattern (AND mask — same as BitCanvas.maskPattern)
-// Used for disabled menu items.
-// -------------------------------------------------------------------------
 
 export function qdMaskPattern(
   port: GrafPort,
@@ -359,43 +622,15 @@ export function qdMaskPattern(
   const pixels = port.portBits.baseAddr;
   const rowBytes = port.portBits.rowBytes;
   const bnd = port.portBits.bounds;
-  const vis = port.visRgn?.rgn.rgnBBox;
-  const clip = port.clipRgn?.rgn.rgnBBox;
-  const pr = port.portRect;
-  const x0 = Math.max(
-    x,
-    vis?.left ?? bnd.left,
-    clip?.left ?? bnd.left,
-    pr.left,
-    bnd.left
-  );
-  const y0 = Math.max(
-    y,
-    vis?.top ?? bnd.top,
-    clip?.top ?? bnd.top,
-    pr.top,
-    bnd.top
-  );
-  const x1 = Math.min(
-    x + w,
-    vis?.right ?? bnd.right,
-    clip?.right ?? bnd.right,
-    pr.right,
-    bnd.right
-  );
-  const y1 = Math.min(
-    y + h,
-    vis?.bottom ?? bnd.bottom,
-    clip?.bottom ?? bnd.bottom,
-    pr.bottom,
-    bnd.bottom
-  );
-
+  const clip = getPortClip(port);
+  const x0 = Math.max(x, clip.left);
+  const y0 = Math.max(y, clip.top);
+  const x1 = Math.min(x + w, clip.right);
+  const y1 = Math.min(y + h, clip.bottom);
   const pat =
     typeof pattern === "string"
       ? namedPatternToQD(pattern)
       : (pattern as Pattern);
-
   for (let py = y0; py < y1; py++) {
     const row = (py - bnd.top) * rowBytes;
     const patRow = pat[py & 7];
@@ -407,28 +642,19 @@ export function qdMaskPattern(
   }
 }
 
-// -------------------------------------------------------------------------
-// Text drawing
-// -------------------------------------------------------------------------
-
 export function qdDrawText(
   port: GrafPort,
   text: string,
   x: number,
   y: number,
-  color: number = 1
+  color: number = BLACK_INDEX
 ): void {
-  // Use QuickDraw's DrawString which routes through the injected font function
-  // (set up in main.tsx via __injectFontFunctions).
-  // The injected function reads port.portBits, clipRgn, visRgn.
+  const textPort = port as GrafPort & { txColor?: number };
+  const previousColor = textPort.txColor ?? BLACK_INDEX;
+  textPort.txColor = resolveStrokeColor(color);
   withPort(port, () => {
     MoveTo(x, y);
     DrawString(text);
   });
-  // If color is WHITE, post-process: invert the pixels we just drew.
-  // This is simpler than re-implementing color in the font bridge.
-  if (color === 0) {
-    // We don't have per-glyph bounds easily here, so this approach is not ideal;
-    // callers should use qdDrawBitmapText from fontAdapter for white text.
-  }
+  textPort.txColor = previousColor;
 }

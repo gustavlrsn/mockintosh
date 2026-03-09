@@ -1,10 +1,10 @@
 # Mockintosh Architecture
 
-Mockintosh is a mock operating system in the style of an early Macintosh, running in the browser. It emulates 1-bit (black and white) graphics at the original 512×342 resolution, scaled up to fit the browser window.
+Mockintosh is a mock operating system in the style of an early Macintosh, running in the browser. It renders at the original 512×342 resolution, scaled up to fit the browser window, using an indexed pixel buffer with a global palette and a device mode of either `monochrome` or `colors`.
 
 ## High-Level Overview
 
-The entire UI is rendered to a **single `<canvas>` element** backed by a 1-bit pixel buffer (`BitCanvas`). There is no HTML/CSS rendering within the simulated screen — every pixel is guaranteed to be either black or white, with no anti-aliasing, subpixel rendering, or color leaking from the browser's rendering engine.
+The entire UI is rendered to a **single `<canvas>` element** backed by an indexed pixel buffer (`BitCanvas`). There is no HTML/CSS rendering within the simulated screen. In `monochrome` mode, palette entries are resolved to black/white or dithered approximations at output time; in `colors` mode, those same entries resolve to RGB through the global palette. There is still no anti-aliasing, subpixel rendering, or browser-rendered color leaking into the simulated screen.
 
 The frontend is built with **Vite** (no framework — pure TypeScript). All rendering, state management, and event handling is handled by the canvas OS layer. The backend runs as **Vercel Edge Functions** in the same repo.
 
@@ -115,7 +115,7 @@ interface MultiWindowSystemApp {
 
 ```
 lib/canvas/                 Core OS engine
-  BitCanvas.ts              1-bit pixel buffer and drawing primitives
+  BitCanvas.ts              Indexed pixel buffer and drawing primitives
   HitRegion.ts              Hit region map — retained interactive areas for event dispatch
   AppContext.ts             Scoped drawing context (per-window clipping + hit regions)
   AppBuilder.ts            Hook-based state management (useState, useEffect, etc.)
@@ -125,7 +125,9 @@ lib/canvas/                 Core OS engine
   WindowManager.ts         Window list (WindowRecord: state + port/framePort), z-order, dragging, focus, chrome rendering; ports ensured on demand (render and control-tracking)
   SpriteRegistry.ts        Sprite cache, PNG loading, and 2bpp format decoder
   OSServices.ts            System services (camera, audio, storage, clipboard, file system)
-  fontAdapter.ts           Bridge between PixelFontCanvas and BitCanvas
+  ColorSystem.ts           Global palette + device color-mode policy
+  SystemPreferences.ts     Persisted OS preferences such as color mode
+  fontAdapter.ts           Decker-font measurement and glyph blitting bridge
   patterns.ts              8×8 fill patterns (checkers, stripes, grays)
 
   fs/                      Virtual file system
@@ -195,7 +197,7 @@ A standalone npm package at `packages/sdk/`. Third-party apps depend on this, no
 - `Sprite` type + `defineSprite()` + `fromGrid()` — sprite creation utilities
 - `OSEvent`, `WindowSize`, `MenubarDefinition` — event and layout types
 - `TextInputState` — text input state management
-- `BLACK`, `WHITE` constants, `PatternName`, `FontName` types
+- `BLACK`, `WHITE`, basic palette constants (`RED`, `GREEN`, etc.), `PatternName`, `FontName` types
 - `measureText()`, `getLineHeight()` — font measurement (injected at runtime)
 - `AppManifest` — manifest format for the registry
 
@@ -244,7 +246,7 @@ export const sprites: Record<string, Sprite> = {
 
 Every frame follows this exact order, painting from back to front:
 
-1. **Clear** — fill the pixel buffer with white
+1. **Clear** — fill the pixel buffer with white (`0`)
 2. **Desktop** — the Finder's desktop window: checkerboard background + volume icons + Desktop Folder icons
 3. **Windows** — iterate bottom-to-top through the remaining window stack:
    - Draw window chrome (border, title bar, close box, zoom box, scrollbar)
@@ -255,7 +257,7 @@ Every frame follows this exact order, painting from back to front:
 5. **Drag/resize outline** — if a window is being dragged or resized, draw a dotted rectangle at the prospective position/size (Mac DragGrayRgn behaviour)
 6. **Menubar** — white bar at top with menu labels and open dropdown
 7. **Cursor** — 16×16 sprite at current mouse position
-8. **Flush** — expand the 1-bit buffer to RGBA `ImageData` and `putImageData`
+8. **Flush** — resolve indexed pixels through the active palette and device mode, expand to RGBA `ImageData`, and `putImageData`
 
 ## Window Kinds
 
@@ -304,7 +306,16 @@ During a title-bar drag or a grow-box resize, the window **does not move or resi
 
 ## BitCanvas
 
-The core primitive. A `Uint8Array` where each byte is `0` (white) or `1` (black).
+The core primitive. A `Uint8Array` where each byte is a color index:
+
+- `0` = white
+- `1` = black
+- `2..255` = entries in the global OS palette
+
+The active device mode determines how those indices are displayed:
+
+- `colors` — palette indices resolve to RGB
+- `monochrome` — palette indices resolve to black/white, using dithering where useful
 
 Key capabilities:
 
@@ -314,7 +325,7 @@ Key capabilities:
 - Sprite blitting: `blit`, `blitInverted`, `blitShadowOutline`, `blitImageData`
 - Inversion: `invertRect` (XOR each pixel)
 - Clipping stack: `pushClip` / `popClip`
-- Output: `flush(ctx)` expands to RGBA
+- Output: `flush(ctx)` resolves indices to RGBA through the active palette and device mode
 
 ## AppContext
 

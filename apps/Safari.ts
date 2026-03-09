@@ -212,12 +212,12 @@ function renderGooglePage(
 
   if (!hasResults) {
     const title = "Google";
-    const tw = measureText(title, "ChiKareGo");
+    const tw = measureText(title, "menu");
     ctx.drawText(
       title,
       Math.floor((w - tw) / 2),
       contentY + Math.floor(contentH / 3),
-      { font: "ChiKareGo", color: BLACK }
+      { font: "menu", color: BLACK }
     );
   }
 
@@ -234,26 +234,26 @@ function renderGooglePage(
 
     if (results.length === 0) {
       ctx.drawText("No results found.", 8, y, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
     } else {
       for (const result of results) {
-        const nameW = measureText(result.name, "ChiKareGo");
-        ctx.drawText(result.name, 8, y, { font: "ChiKareGo", color: BLACK });
-        ctx.drawHLine(8, y + getLineHeight("ChiKareGo") - 2, nameW, BLACK);
+        const nameW = measureText(result.name, "menu");
+        ctx.drawText(result.name, 8, y, { font: "menu", color: BLACK });
+        ctx.drawHLine(8, y + getLineHeight("menu") - 2, nameW, BLACK);
         links.push({ x: 0, y, w, h: GOOGLE_RESULT_H, href: result.url });
-        y += getLineHeight("ChiKareGo");
+        y += getLineHeight("menu");
 
-        ctx.drawText(result.url, 8, y, { font: "Geneva9", color: BLACK });
-        y += getLineHeight("Geneva9");
+        ctx.drawText(result.url, 8, y, { font: "body", color: BLACK });
+        y += getLineHeight("body");
 
         if (result.snippet) {
           ctx.drawText(result.snippet, 8, y, {
-            font: "Geneva9",
+            font: "body",
             color: BLACK,
           });
-          y += getLineHeight("Geneva9");
+          y += getLineHeight("body");
         }
 
         y += 6;
@@ -434,11 +434,11 @@ export const SafariApp: SystemApp = {
           linksRef.current = result.links;
         } else {
           scrollCtx.drawText("Page not found", 16, 16, {
-            font: "ChiKareGo",
+            font: "menu",
             color: BLACK,
           });
           scrollCtx.drawText(currentUrl, 16, 34, {
-            font: "Geneva9",
+            font: "body",
             color: BLACK,
           });
           linksRef.current = [];

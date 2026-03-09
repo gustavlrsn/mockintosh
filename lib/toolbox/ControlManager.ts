@@ -390,8 +390,8 @@ export function drawButton(port: GrafPort, btn: ButtonDef): Rect {
     FrameRoundRect(buttonRect, ovalWidth, ovalHeight);
 
     const inset = 1;
-    const lineHeight = getLineHeight("ChiKareGo");
-    const textW = measureText(btn.label, "ChiKareGo");
+    const lineHeight = getLineHeight("menu");
+    const textW = measureText(btn.label, "menu");
     const innerWidth = right - left - 2;
     const innerHeight = bottom - top - 2;
     const tx = left + inset + Math.floor((innerWidth - textW) / 2);
@@ -439,7 +439,7 @@ export function drawButton(port: GrafPort, btn: ButtonDef): Rect {
 export function drawCheckbox(port: GrafPort, def: CheckboxDef): Rect {
   const { boundsRect, label, checked, disabled } = def;
   const { top, left, bottom, right } = boundsRect;
-  const lineH = getLineHeight("ChiKareGo");
+  const lineH = getLineHeight("body");
   const boxY = top + Math.max(0, Math.floor((lineH - CHECKBOX_SIZE) / 2));
 
   qdDrawRect(port, left, boxY, CHECKBOX_SIZE, CHECKBOX_SIZE, BLACK);
@@ -464,7 +464,7 @@ export function drawCheckbox(port: GrafPort, def: CheckboxDef): Rect {
 
   if (disabled) {
     const totalW =
-      CHECKBOX_SIZE + CONTROL_TEXT_GAP + measureText(label, "ChiKareGo");
+      CHECKBOX_SIZE + CONTROL_TEXT_GAP + measureText(label, "body");
     qdFillPattern(port, left, top, totalW, lineH, "gray50");
   }
 
@@ -478,7 +478,7 @@ export function drawCheckbox(port: GrafPort, def: CheckboxDef): Rect {
 export function drawRadioButton(port: GrafPort, def: RadioButtonDef): Rect {
   const { boundsRect, label, selected, disabled } = def;
   const { top, left } = boundsRect;
-  const lineH = getLineHeight("ChiKareGo");
+  const lineH = getLineHeight("body");
   const circY = top + Math.max(0, Math.floor((lineH - RADIO_SIZE) / 2));
   const cx = left + Math.floor(RADIO_SIZE / 2);
   const cy = circY + Math.floor(RADIO_SIZE / 2);
@@ -494,8 +494,7 @@ export function drawRadioButton(port: GrafPort, def: RadioButtonDef): Rect {
   qdDrawText(port, label, textX, top, BLACK);
 
   if (disabled) {
-    const totalW =
-      RADIO_SIZE + CONTROL_TEXT_GAP + measureText(label, "ChiKareGo");
+    const totalW = RADIO_SIZE + CONTROL_TEXT_GAP + measureText(label, "body");
     qdFillPattern(port, left, top, totalW, lineH, "gray50");
   }
 

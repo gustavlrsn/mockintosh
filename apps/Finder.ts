@@ -3,8 +3,7 @@ import { AppBuilder } from "../lib/canvas/AppBuilder";
 import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import type { GrafPort } from "@mockintosh/quickdraw";
-import { blitSpriteOutline } from "../lib/canvas/SpriteManager";
-import { qdDrawRect } from "../lib/canvas/qdDraw";
+import { drawMaskOutline } from "../lib/canvas/SpriteManager";
 import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { FMTextWidth } from "../lib/toolbox/FontManager";
 import { OSEvent } from "../lib/toolbox/EventManager";
@@ -829,8 +828,8 @@ export function finderHandleMouseUp(
 /**
  * Render the drag ghost on the GrafPort in screen coordinates.
  * Called from main.tsx after all windows are drawn, so the ghost appears on top.
- * Draws a solid outline of the icon silhouette and a rectangle outline around
- * the label, matching the classic Mac Finder drag appearance.
+ * Draws a single outline around a composite silhouette built from the icon mask
+ * plus the filled label box, so touching shapes merge into one contour.
  */
 export function finderRenderDragGhost(
   app: AppBuilder,
@@ -851,17 +850,54 @@ export function finderRenderDragGhost(
       ? DESKTOP_ICON_CELL_W
       : FOLDER_ICON_CELL_W;
   const ix = ghostX + Math.floor((cellW - ICON_SIZE) / 2);
-
-  blitSpriteOutline(port, sprite, ix, ghostY, BLACK);
-
-  const textW = FMTextWidth(drag.title, "Geneva9");
+  const textW = FMTextWidth(drag.title, "body");
   const labelW = textW + 4;
   const labelH = 12;
   const labelX = ghostX + Math.floor((cellW - labelW) / 2);
   const labelY = ghostY + ICON_SIZE;
-  if (labelW > 0 && labelH > 0) {
-    qdDrawRect(port, labelX, labelY, labelW, labelH, BLACK);
+
+  const compositeLeft = Math.min(ix, labelX);
+  const compositeTop = Math.min(ghostY, labelY);
+  const compositeRight = Math.max(ix + sprite.width, labelX + labelW);
+  const compositeBottom = Math.max(ghostY + sprite.height, labelY + labelH);
+  const compositeWidth = compositeRight - compositeLeft;
+  const compositeHeight = compositeBottom - compositeTop;
+  if (compositeWidth <= 0 || compositeHeight <= 0) return;
+
+  const compositeMask = new Uint8Array(compositeWidth * compositeHeight);
+
+  if (sprite.mask) {
+    const spriteOffsetX = ix - compositeLeft;
+    const spriteOffsetY = ghostY - compositeTop;
+    for (let sy = 0; sy < sprite.height; sy++) {
+      const srcRow = sy * sprite.width;
+      const dstRow = (spriteOffsetY + sy) * compositeWidth + spriteOffsetX;
+      for (let sx = 0; sx < sprite.width; sx++) {
+        if (sprite.mask[srcRow + sx]) {
+          compositeMask[dstRow + sx] = 1;
+        }
+      }
+    }
   }
+
+  if (labelW > 0 && labelH > 0) {
+    const labelOffsetX = labelX - compositeLeft;
+    const labelOffsetY = labelY - compositeTop;
+    for (let ly = 0; ly < labelH; ly++) {
+      const rowStart = (labelOffsetY + ly) * compositeWidth + labelOffsetX;
+      compositeMask.fill(1, rowStart, rowStart + labelW);
+    }
+  }
+
+  drawMaskOutline(
+    port,
+    compositeMask,
+    compositeWidth,
+    compositeHeight,
+    compositeLeft,
+    compositeTop,
+    BLACK
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1110,9 +1146,9 @@ function renderFolderWindow(
   if (infoItems.length > 0) {
     const colW = Math.floor((ctx.width - 2) / infoItems.length);
     for (let i = 0; i < infoItems.length; i++) {
-      const tw = FMTextWidth(infoItems[i], "Geneva9");
+      const tw = FMTextWidth(infoItems[i], "body");
       const tx = 1 + i * colW + Math.floor((colW - tw) / 2);
-      ctx.drawText(infoItems[i], tx, 4, { font: "Geneva9", color: BLACK });
+      ctx.drawText(infoItems[i], tx, 4, { font: "body", color: BLACK });
       if (i < infoItems.length - 1) {
         ctx.drawVLine(1 + (i + 1) * colW, 0, INFO_BAR_HEIGHT - 1, BLACK);
       }
@@ -1300,25 +1336,27 @@ function drawIcon(
     }
   }
 
-  const textW = FMTextWidth(icon.title, "Geneva9");
+  const textW = FMTextWidth(icon.title, "body");
   const labelX = cellX + Math.floor((cellW - textW) / 2);
   const labelY = cellY + ICON_SIZE;
 
   if (selected || isDropTarget) {
     ctx.drawText(icon.title, labelX, labelY, {
-      font: "Geneva9",
+      font: "body",
       color: WHITE,
       bg: BLACK,
       width: textW + 4,
       align: "center",
+      lineHeight: 12,
     });
   } else {
     ctx.drawText(icon.title, labelX, labelY, {
-      font: "Geneva9",
+      font: "body",
       color: BLACK,
       bg: WHITE,
       width: textW + 4,
       align: "center",
+      lineHeight: 12,
     });
   }
 }

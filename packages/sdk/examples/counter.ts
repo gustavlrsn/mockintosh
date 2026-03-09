@@ -71,14 +71,14 @@ const CounterApp: App = {
     ctx.clear(WHITE);
 
     ctx.drawText("Counter", ctx.width / 2 - 22, 8, {
-      font: "ChiKareGo",
+      font: "menu",
       color: BLACK,
     });
 
     ctx.drawHLine(0, 24, ctx.width, BLACK);
 
     ctx.drawText(String(count), ctx.width / 2 - 10, 42, {
-      font: "ChiKareGo",
+      font: "menu",
       color: BLACK,
     });
 

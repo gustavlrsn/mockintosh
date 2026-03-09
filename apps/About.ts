@@ -26,17 +26,17 @@ export const AboutApp: SystemApp = {
     }
 
     ctx.drawText("Mockintosh Classic", 56, 8, {
-      font: "Geneva9",
+      font: "body",
       color: BLACK,
     });
 
     ctx.drawText(`System Version ${version}`, 180, 8, {
-      font: "Geneva9",
+      font: "body",
       color: BLACK,
     });
 
     ctx.drawText("Contributors", 16, 36, {
-      font: "Geneva9",
+      font: "body",
       color: BLACK,
     });
 
@@ -50,14 +50,14 @@ export const AboutApp: SystemApp = {
       }
 
       ctx.drawText(`@${contributor.username}`, 36, y, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
 
       const commitsText = `${contributor.commits} commits`;
-      const commitsW = measureText(commitsText, "Geneva9");
+      const commitsW = measureText(commitsText, "body");
       ctx.drawText(commitsText, ctx.width - commitsW - 16, y, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
 

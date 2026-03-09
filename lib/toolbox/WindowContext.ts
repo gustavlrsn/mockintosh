@@ -10,7 +10,11 @@
 
 import { BitCanvas, Sprite, BLACK, WHITE } from "../canvas/BitCanvas";
 import { PatternName } from "../canvas/patterns";
-import { TextOptions, getLineHeight } from "../canvas/fontAdapter";
+import {
+  TextOptions,
+  resolveLineBox,
+  type FontName,
+} from "../canvas/fontAdapter";
 import { HitRegion, HitRegionMap } from "../canvas/HitRegion";
 import type { GrafPort, Rect } from "@mockintosh/quickdraw";
 import {
@@ -21,12 +25,8 @@ import {
   SectRgn,
   DisposeRgn,
   SetPort,
-  MoveTo,
-  TextFont,
-  TextFace,
-  DrawString,
 } from "@mockintosh/quickdraw";
-import { GetFNum, FMTextWidth, FMLineHeight } from "./FontManager";
+import { FMTextWidth } from "./FontManager";
 import type { WindowRecord } from "./WindowManager";
 import {
   qdFillRect,
@@ -61,6 +61,7 @@ import {
   getWrappedLines,
   measureTextBlock as _measureTextBlock,
 } from "../canvas/ui/TextBlock";
+import { drawTextToPort } from "./PortText";
 
 // -------------------------------------------------------------------------
 // Helper: wrap a GrafPort in a temporary BitCanvas shim (shares pixel buffer)
@@ -378,28 +379,27 @@ export class WindowContext {
   // -----------------------------------------------------------------------
 
   drawText(text: string, x: number, y: number, opts: TextOptions = {}) {
-    const fontName = opts.font ?? "Geneva9";
-    const lineH = FMLineHeight(fontName);
-    const textW = FMTextWidth(text, fontName);
+    const fontName = opts.font ?? "body";
+    const lineBox = resolveLineBox(fontName, { lineHeight: opts.lineHeight });
+    const lineH = lineBox.lineHeight;
+    const spacing = opts.spacing ?? 0;
+    const textW = FMTextWidth(text, fontName, spacing);
     const width = opts.width ?? textW;
+    const lineCount = text ? text.split("\n").length : 1;
     let penX = x;
     if (opts.align === "center") penX = x + Math.floor((width - textW) / 2);
     else if (opts.align === "right") penX = x + width - textW;
 
     SetPort(this.port);
     if (opts.bg !== null && opts.bg !== undefined && width > 0 && lineH > 0) {
-      this.fillRect(x, y, width, lineH, opts.bg);
+      this.fillRect(x, y, width, opts.height ?? lineH * lineCount, opts.bg);
     }
-    TextFont(GetFNum(fontName));
-    TextFace(0);
-    if (opts.color === WHITE) {
-      (this.port as GrafPort & { txColor?: number }).txColor = WHITE;
-    }
-    MoveTo(this.tx(penX), this.ty(y));
-    DrawString(text);
-    if (opts.color === WHITE) {
-      (this.port as GrafPort & { txColor?: number }).txColor = BLACK;
-    }
+    drawTextToPort(this.port, text, this.tx(penX), this.ty(y), {
+      font: fontName,
+      spacing,
+      lineHeight: lineBox.lineHeight,
+      color: opts.color ?? BLACK,
+    });
   }
 
   // -----------------------------------------------------------------------
@@ -464,30 +464,30 @@ export class WindowContext {
   drawTextBlock(
     opts: Omit<_TextBlockOptions, "x" | "y"> & { x: number; y: number }
   ): number {
-    const font = opts.font ?? "Geneva9";
+    const font = opts.font ?? "body";
+    const spacing = opts.spacing ?? 0;
     const color = opts.color ?? BLACK;
-    const lineH = getLineHeight(font) + (opts.lineSpacing ?? 0);
-    const lines = getWrappedLines(opts.text, opts.maxWidth, font);
+    const lineBox = resolveLineBox(font, {
+      lineHeight: opts.lineHeight,
+      lineSpacing: opts.lineSpacing,
+    });
+    const lineH = lineBox.lineHeight;
+    const lines = getWrappedLines(opts.text, opts.maxWidth, font, spacing);
     const totalHeight = lines.length * lineH;
 
     const visibleTop = this.scrollOffsetY;
     const visibleBottom = this.scrollOffsetY + this.h;
 
-    SetPort(this.port);
-    TextFont(GetFNum(font));
-    TextFace(0);
-    if (color === WHITE) {
-      (this.port as GrafPort & { txColor?: number }).txColor = WHITE;
-    }
     for (let i = 0; i < lines.length; i++) {
       const ly = opts.y + i * lineH;
       if (ly + lineH <= visibleTop || ly >= visibleBottom) continue;
       if (!lines[i]) continue;
-      MoveTo(this.tx(opts.x), this.ty(ly));
-      DrawString(lines[i]);
-    }
-    if (color === WHITE) {
-      (this.port as GrafPort & { txColor?: number }).txColor = BLACK;
+      drawTextToPort(this.port, lines[i], this.tx(opts.x), this.ty(ly), {
+        font,
+        spacing,
+        lineHeight: lineBox.lineHeight,
+        color,
+      });
     }
 
     return totalHeight;
@@ -496,10 +496,19 @@ export class WindowContext {
   measureTextBlock(
     text: string,
     maxWidth: number,
-    font?: "Geneva9" | "ChiKareGo",
-    lineSpacing?: number
+    font?: FontName,
+    lineSpacing?: number,
+    spacing?: number,
+    lineHeight?: number
   ): number {
-    return _measureTextBlock(text, maxWidth, font, lineSpacing);
+    return _measureTextBlock(
+      text,
+      maxWidth,
+      font,
+      lineSpacing,
+      spacing,
+      lineHeight
+    );
   }
 
   // -----------------------------------------------------------------------

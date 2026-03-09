@@ -1,4 +1,4 @@
-import { measureText } from "../fontAdapter";
+import { measureText, type FontName } from "../fontAdapter";
 
 const BLINK_INTERVAL_MS = 530;
 
@@ -65,7 +65,7 @@ function isCursorVisible(state: TextInputState): boolean {
 function charIndexAtX(
   text: string,
   localX: number,
-  font: "ChiKareGo" | "Geneva9" = "ChiKareGo"
+  font: FontName = "body"
 ): number {
   if (localX <= 0) return 0;
   for (let i = 1; i <= text.length; i++) {

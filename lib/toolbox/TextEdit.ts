@@ -24,9 +24,10 @@ import {
   DisposeRgn,
 } from "@mockintosh/quickdraw";
 import { GetFNum, FMTextWidth } from "./FontManager";
-import { getLineHeight, type FontName } from "../canvas/fontAdapter";
+import { resolveLineBox, type FontName } from "../canvas/fontAdapter";
 import { qdFillRect, qdDrawRect, qdDrawVLine } from "../canvas/qdDraw";
 import { BLACK, WHITE } from "../canvas/BitCanvas";
+import { resolveTextColor } from "../canvas/ColorSystem";
 
 // Re-export state management and event handling from TextInput.ts
 export {
@@ -49,7 +50,7 @@ export {
 
 import { getWrappedLines as _getWrappedLines } from "../canvas/ui/TextBlock";
 
-const CHIKAREGO = "ChiKareGo" as FontName;
+const BODY_FONT = "body" as FontName;
 
 // -------------------------------------------------------------------------
 // drawTextEditField — text input using QuickDraw GrafPort
@@ -85,14 +86,14 @@ export function drawTextEditField(
   const lo = hasSel ? Math.min(state.selectionStart, state.selectionEnd) : 0;
   const hi = hasSel ? Math.max(state.selectionStart, state.selectionEnd) : 0;
 
-  TextFont(GetFNum(CHIKAREGO));
+  TextFont(GetFNum(BODY_FONT));
   TextFace(0);
 
   if (state.focused && hasSel) {
     const selStartX =
-      textX + FMTextWidth(state.value.substring(0, lo), CHIKAREGO);
+      textX + FMTextWidth(state.value.substring(0, lo), BODY_FONT);
     const selEndX =
-      textX + FMTextWidth(state.value.substring(0, hi), CHIKAREGO);
+      textX + FMTextWidth(state.value.substring(0, hi), BODY_FONT);
     qdFillRect(port, selStartX, y + 2, selEndX - selStartX, height - 4, BLACK);
 
     if (lo > 0) {
@@ -114,7 +115,7 @@ export function drawTextEditField(
     const cursorPos = state.cursorPos;
     if (state.focused && isCursorVisible()) {
       const beforeCursor = state.value.substring(0, cursorPos);
-      const cx = textX + FMTextWidth(beforeCursor, CHIKAREGO);
+      const cx = textX + FMTextWidth(beforeCursor, BODY_FONT);
       qdDrawVLine(port, cx, y + 2, height - 4, BLACK);
     }
   }
@@ -134,6 +135,7 @@ export interface TextBlockOpts {
   maxWidth: number;
   font?: FontName;
   color?: number;
+  lineHeight?: number;
   lineSpacing?: number;
   /** Visible viewport scroll offset (used for culling off-screen lines) */
   scrollOffset?: number;
@@ -145,18 +147,22 @@ export function drawTextBlockToPort(
   port: GrafPort,
   opts: TextBlockOpts
 ): number {
-  const font = opts.font ?? "Geneva9";
-  const color = opts.color ?? BLACK;
-  const lineH = getLineHeight(font) + (opts.lineSpacing ?? 0);
+  const font = opts.font ?? "body";
+  const color = resolveTextColor(opts.color ?? BLACK);
+  const lineBox = resolveLineBox(font, {
+    lineHeight: opts.lineHeight,
+    lineSpacing: opts.lineSpacing,
+  });
+  const lineH = lineBox.lineHeight;
   const lines = _getWrappedLines(opts.text, opts.maxWidth, font);
   const totalHeight = lines.length * lineH;
 
   SetPort(port);
   TextFont(GetFNum(font));
   TextFace(0);
-  if (color === WHITE) {
-    (port as GrafPort & { txColor?: number }).txColor = WHITE;
-  }
+  const textPort = port as GrafPort & { txColor?: number };
+  const previousColor = textPort.txColor ?? BLACK;
+  textPort.txColor = color;
 
   const scrollOffset = opts.scrollOffset ?? 0;
   const viewBottom = scrollOffset + (opts.viewHeight ?? Infinity);
@@ -165,13 +171,11 @@ export function drawTextBlockToPort(
     const ly = opts.y + i * lineH;
     if (ly + lineH <= scrollOffset || ly >= viewBottom) continue;
     if (!lines[i]) continue;
-    const drawY = ly - scrollOffset;
+    const drawY = ly - scrollOffset + lineBox.glyphOffsetY;
     MoveTo(opts.x, drawY);
     DrawString(lines[i]);
   }
 
-  if (color === WHITE) {
-    (port as GrafPort & { txColor?: number }).txColor = BLACK;
-  }
+  textPort.txColor = previousColor;
   return totalHeight;
 }

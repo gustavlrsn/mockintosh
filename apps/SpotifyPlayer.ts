@@ -392,7 +392,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 function truncateText(
   text: string,
   maxW: number,
-  font: "ChiKareGo" | "Geneva9"
+  font: "menu" | "body"
 ): string {
   if (measureText(text, font) <= maxW) return text;
   let truncated = text;
@@ -684,11 +684,11 @@ export const SpotifyPlayerApp: SystemApp = {
 
     if (!CLIENT_ID) {
       ctx.drawText("VITE_SPOTIFY_CLIENT_ID not set.", 8, 20, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
       ctx.drawText("Add it to .env.local and restart.", 8, 34, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
       return;
@@ -707,7 +707,7 @@ export const SpotifyPlayerApp: SystemApp = {
       );
       if (error) {
         ctx.drawText(error, 8, ctx.height - 16, {
-          font: "Geneva9",
+          font: "body",
           color: BLACK,
         });
       }
@@ -739,7 +739,7 @@ export const SpotifyPlayerApp: SystemApp = {
 
     if (error) {
       ctx.drawText(error, SIDEBAR_W + 4, ctx.height - 4, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
     }
@@ -839,12 +839,12 @@ function renderLoginScreen(
   if (deviceFlow) {
     if (deviceFlow.status === "loading") {
       const msg = "Connecting to Spotify...";
-      const tw = measureText(msg, "Geneva9");
+      const tw = measureText(msg, "body");
       ctx.drawText(
         msg,
         Math.floor((ctx.width - tw) / 2),
         Math.floor(ctx.height / 2),
-        { font: "Geneva9", color: WHITE }
+        { font: "body", color: WHITE }
       );
       return;
     }
@@ -852,12 +852,12 @@ function renderLoginScreen(
     if (deviceFlow.status === "expired" || deviceFlow.status === "denied") {
       const msg =
         deviceFlow.status === "expired" ? "QR code expired." : "Access denied.";
-      const tw = measureText(msg, "Geneva9");
+      const tw = measureText(msg, "body");
       ctx.drawText(
         msg,
         Math.floor((ctx.width - tw) / 2),
         Math.floor(ctx.height / 2) - 20,
-        { font: "Geneva9", color: WHITE }
+        { font: "body", color: WHITE }
       );
       const btnW = 80;
       const btnH = 18;
@@ -866,9 +866,9 @@ function renderLoginScreen(
       ctx.fillRect(btnX, btnY, btnW, btnH, WHITE);
       ctx.drawRect(btnX, btnY, btnW, btnH, BLACK);
       const label = "Try Again";
-      const lw = measureText(label, "Geneva9");
+      const lw = measureText(label, "body");
       ctx.drawText(label, btnX + Math.floor((btnW - lw) / 2), btnY + 4, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
       ctx.hitRegion(
@@ -898,30 +898,30 @@ function renderLoginScreen(
 
       // User code below the QR
       const code = deviceFlow.userCode;
-      const cw = measureText(code, "ChiKareGo");
+      const cw = measureText(code, "menu");
       ctx.drawText(code, Math.floor((ctx.width - cw) / 2), qrY + totalPx + 4, {
-        font: "ChiKareGo",
+        font: "menu",
         color: WHITE,
       });
 
       // "Scan with your phone" hint
       const hint = "Scan with your phone";
-      const hw = measureText(hint, "Geneva9");
+      const hw = measureText(hint, "body");
       ctx.drawText(hint, Math.floor((ctx.width - hw) / 2), qrY - 12, {
-        font: "Geneva9",
+        font: "body",
         color: WHITE,
       });
     }
 
     // Cancel link at the bottom
     const cancelLabel = "Cancel";
-    const clw = measureText(cancelLabel, "Geneva9");
+    const clw = measureText(cancelLabel, "body");
     ctx.drawText(
       cancelLabel,
       Math.floor((ctx.width - clw) / 2),
       ctx.height - 14,
       {
-        font: "Geneva9",
+        font: "body",
         color: WHITE,
       }
     );
@@ -943,9 +943,9 @@ function renderLoginScreen(
   const centerY = Math.floor(ctx.height / 2) - 20;
 
   const label = "To continue, login to Spotify:";
-  const tw = measureText(label, "Geneva9");
+  const tw = measureText(label, "body");
   ctx.drawText(label, centerX - Math.floor(tw / 2), centerY - 36, {
-    font: "Geneva9",
+    font: "body",
     color: WHITE,
   });
 
@@ -962,9 +962,9 @@ function renderLoginScreen(
   ctx.fillRect(btnX, btnY, btnW, btnH, WHITE);
   ctx.drawRect(btnX, btnY, btnW, btnH, BLACK);
   const qrLabel = "Log in with QR";
-  const qrLabelW = measureText(qrLabel, "Geneva9");
+  const qrLabelW = measureText(qrLabel, "body");
   ctx.drawText(qrLabel, btnX + Math.floor((btnW - qrLabelW) / 2), btnY + 4, {
-    font: "Geneva9",
+    font: "body",
     color: BLACK,
   });
 
@@ -1020,10 +1020,10 @@ function renderLoginScreen(
 
   // Secondary: browser login link
   const browserLabel = "Log in via browser";
-  const blw = measureText(browserLabel, "Geneva9");
+  const blw = measureText(browserLabel, "body");
   const browserY = btnY + btnH + 8;
   ctx.drawText(browserLabel, centerX - Math.floor(blw / 2), browserY, {
-    font: "Geneva9",
+    font: "body",
     color: WHITE,
   });
   ctx.hitRegion(
@@ -1097,9 +1097,9 @@ function renderSidebar(
   ctx.fillRect(0, 0, SIDEBAR_W, ctx.height, WHITE);
   ctx.drawVLine(SIDEBAR_W - 1, 0, ctx.height, BLACK);
 
-  const lineH = getLineHeight("Geneva9");
+  const lineH = getLineHeight("body");
   const headerY = 2;
-  ctx.drawText("PLAYLISTS", 4, headerY, { font: "Geneva9", color: BLACK });
+  ctx.drawText("PLAYLISTS", 4, headerY, { font: "body", color: BLACK });
   ctx.drawHLine(0, headerY + lineH + 1, SIDEBAR_W - 1, BLACK);
 
   const listTop = headerY + lineH + 2;
@@ -1114,9 +1114,9 @@ function renderSidebar(
       ctx.fillRect(0, y, SIDEBAR_W - 1, lineH, BLACK);
     }
 
-    const name = truncateText(playlists[i].name, SIDEBAR_W - 8, "Geneva9");
+    const name = truncateText(playlists[i].name, SIDEBAR_W - 8, "body");
     ctx.drawText(name, 4, y, {
-      font: "Geneva9",
+      font: "body",
       color: isSelected ? WHITE : BLACK,
     });
 
@@ -1188,8 +1188,8 @@ function renderMainArea(
   const artistName =
     playerState?.track?.artists?.map((a) => a.name).join(", ") ?? "";
   const infoText = artistName ? `${trackName} - ${artistName}` : trackName;
-  const truncInfo = truncateText(infoText, mainW - 8, "Geneva9");
-  ctx.drawText(truncInfo, mainX + 4, infoY, { font: "Geneva9", color: BLACK });
+  const truncInfo = truncateText(infoText, mainW - 8, "body");
+  ctx.drawText(truncInfo, mainX + 4, infoY, { font: "body", color: BLACK });
 
   // Playback controls
   const controlsY = ctx.height - CONTROLS_H;

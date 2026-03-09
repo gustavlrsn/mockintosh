@@ -101,7 +101,7 @@ export const AppStoreApp: SystemApp = {
     ctx.clear(WHITE);
 
     ctx.drawText("App Store", ctx.width / 2 - 26, 4, {
-      font: "ChiKareGo",
+      font: "menu",
       color: BLACK,
     });
     ctx.drawHLine(0, 16, ctx.width, BLACK);
@@ -113,12 +113,12 @@ export const AppStoreApp: SystemApp = {
     if (browseSelected) {
       ctx.fillRect(0, 17, tabW, TAB_BAR_HEIGHT - 1, BLACK);
       ctx.drawText("Browse", tabW / 2 - 16, 20, {
-        font: "Geneva9",
+        font: "body",
         color: WHITE,
       });
     } else {
       ctx.drawText("Browse", tabW / 2 - 16, 20, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
     }
@@ -137,12 +137,12 @@ export const AppStoreApp: SystemApp = {
     if (installedSelected) {
       ctx.fillRect(tabW, 17, tabW, TAB_BAR_HEIGHT - 1, BLACK);
       ctx.drawText("Installed", tabW + tabW / 2 - 22, 20, {
-        font: "Geneva9",
+        font: "body",
         color: WHITE,
       });
     } else {
       ctx.drawText("Installed", tabW + tabW / 2 - 22, 20, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
     }
@@ -169,7 +169,7 @@ export const AppStoreApp: SystemApp = {
 
     if (loading) {
       ctx.drawText("Loading app catalog...", 16, contentY + 20, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
       return;
@@ -177,7 +177,7 @@ export const AppStoreApp: SystemApp = {
 
     if (error) {
       ctx.drawText(error, 16, contentY + 20, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
       return;
@@ -187,12 +187,12 @@ export const AppStoreApp: SystemApp = {
       const msg =
         tab === "browse" ? "No apps available yet." : "No apps installed.";
       ctx.drawText(msg, 16, contentY + 20, {
-        font: "Geneva9",
+        font: "body",
         color: BLACK,
       });
       if (tab === "browse") {
         ctx.drawText("Check back soon!", 16, contentY + 34, {
-          font: "Geneva9",
+          font: "body",
           color: BLACK,
         });
       }
@@ -212,19 +212,19 @@ export const AppStoreApp: SystemApp = {
       const textColor = isSelected ? WHITE : BLACK;
 
       ctx.drawText(entry.title, 8, y + 4, {
-        font: "ChiKareGo",
+        font: "menu",
         color: textColor,
       });
 
       const priceStr = formatPrice(entry.pricing);
       const statusStr = isInstalled ? "Installed" : priceStr;
       ctx.drawText(statusStr, ctx.width - 70, y + 4, {
-        font: "Geneva9",
+        font: "body",
         color: textColor,
       });
 
       ctx.drawText(`by ${entry.author} · v${entry.version}`, 8, y + 16, {
-        font: "Geneva9",
+        font: "body",
         color: textColor,
       });
 
@@ -233,7 +233,7 @@ export const AppStoreApp: SystemApp = {
         desc.length > 45 ? desc.slice(0, 42) + "..." : desc,
         8,
         y + 28,
-        { font: "Geneva9", color: textColor }
+        { font: "body", color: textColor }
       );
 
       ctx.drawDottedHLine(
@@ -279,8 +279,8 @@ export const AppStoreApp: SystemApp = {
 
         if (win.controlList.length === 0) {
           if (isInstalled) {
-            const openW = measureText("Open", "ChiKareGo") + 20;
-            const uninstallW = measureText("Uninstall", "ChiKareGo") + 20;
+            const openW = measureText("Open", "menu") + 20;
+            const uninstallW = measureText("Uninstall", "menu") + 20;
             const openHandle = NewControl(
               win,
               makeRect(barY + 4, 8, barY + 24, 8 + openW),
@@ -324,7 +324,7 @@ export const AppStoreApp: SystemApp = {
               : isFree
               ? "Install"
               : `Buy ${formatPrice(selected.pricing)}`;
-            const installW = measureText(label, "ChiKareGo") + 20;
+            const installW = measureText(label, "menu") + 20;
             const installHandle = NewControl(
               win,
               makeRect(barY + 4, 8, barY + 24, 8 + installW),

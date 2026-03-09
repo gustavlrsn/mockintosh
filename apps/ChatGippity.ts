@@ -44,8 +44,8 @@ interface ChatMessage {
 // Constants
 // ---------------------------------------------------------------------------
 
-const FONT = "Geneva9";
-const TITLE_FONT = "ChiKareGo";
+const FONT = "body";
+const TITLE_FONT = "menu";
 const LINE_HEIGHT = getLineHeight(FONT);
 const INPUT_HEIGHT = 18;
 const INPUT_PADDING = 4;

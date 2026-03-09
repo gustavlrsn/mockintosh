@@ -9,9 +9,26 @@
 // ---------------------------------------------------------------------------
 // Core value constants
 // ---------------------------------------------------------------------------
+// The screen buffer is indexed: 0 = white, 1 = black, 2..255 = palette entries.
+// These named exports cover the default system palette entries that apps can
+// rely on today.
 
 export const BLACK = 1;
 export const WHITE = 0;
+export const RED = 2;
+export const GREEN = 3;
+export const BLUE = 4;
+export const CYAN = 5;
+export const MAGENTA = 6;
+export const YELLOW = 7;
+export const ORANGE = 8;
+export const PURPLE = 9;
+export const BROWN = 10;
+export const TAN = 11;
+export const LIGHT_GRAY = 12;
+export const MEDIUM_GRAY = 13;
+export const DARK_GRAY = 14;
+export const PINK = 15;
 
 // ---------------------------------------------------------------------------
 // Sprite types and utilities
@@ -134,7 +151,8 @@ export type PatternName =
 // Font types
 // ---------------------------------------------------------------------------
 
-export type FontName = "Geneva9" | "ChiKareGo";
+export type BuiltInFontName = "body" | "menu" | "mono";
+export type FontName = BuiltInFontName | (string & {});
 
 // ---------------------------------------------------------------------------
 // Menubar types
@@ -216,6 +234,8 @@ export interface TextOptions {
   font?: FontName;
   color?: number;
   align?: "left" | "center" | "right";
+  spacing?: number;
+  lineHeight?: number;
 }
 
 /**
@@ -260,7 +280,9 @@ export interface TextBlockOptions {
   y: number;
   maxWidth: number;
   font?: FontName;
+  spacing?: number;
   color?: number;
+  lineHeight?: number;
   lineSpacing?: number;
 }
 
@@ -350,7 +372,9 @@ export interface WindowContext {
     text: string,
     maxWidth: number,
     font?: FontName,
-    lineSpacing?: number
+    lineSpacing?: number,
+    spacing?: number,
+    lineHeight?: number
   ): number;
   scrollArea(
     id: string,
@@ -392,11 +416,19 @@ export type AppContext = WindowContext;
  * fonts are guaranteed to be loaded.
  */
 
-let _measureText: (text: string, font?: FontName) => number = () => 0;
+let _measureText: (
+  text: string,
+  font?: FontName,
+  spacing?: number
+) => number = () => 0;
 let _getLineHeight: (font: FontName) => number = () => 10;
 
-export function measureText(text: string, font?: FontName): number {
-  return _measureText(text, font);
+export function measureText(
+  text: string,
+  font?: FontName,
+  spacing?: number
+): number {
+  return _measureText(text, font, spacing);
 }
 
 export function getLineHeight(font: FontName): number {
@@ -405,7 +437,7 @@ export function getLineHeight(font: FontName): number {
 
 /** @internal Called by the OS to inject the real font measurement functions. */
 export function __injectFontFunctions(
-  measure: (text: string, font?: FontName) => number,
+  measure: (text: string, font?: FontName, spacing?: number) => number,
   lineHeight: (font: FontName) => number
 ): void {
   _measureText = measure;

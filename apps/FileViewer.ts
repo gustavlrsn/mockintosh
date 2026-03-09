@@ -31,14 +31,14 @@ export const FileViewerApp: SystemApp = {
       x: 8,
       y: 8,
       maxWidth: ctx.width - 16,
-      font: "Geneva9",
+      font: "body",
     });
   },
 
   getContentHeight(app: AppBuilder, props: any, size: WindowSize): number {
     const [content] = app.useState<string>(props.content ?? "");
     const h: number = app.useMemo(
-      () => measureTextBlock(content, size.width - 16, "Geneva9"),
+      () => measureTextBlock(content, size.width - 16, "body"),
       [content, size.width]
     );
     return h + 16;

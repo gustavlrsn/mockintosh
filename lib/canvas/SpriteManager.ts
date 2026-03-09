@@ -11,6 +11,13 @@
 
 import type { GrafPort } from "@mockintosh/quickdraw";
 import type { Sprite } from "./BitCanvas";
+import {
+  clampColorIndex,
+  getColorMode,
+  resolveStrokeColor,
+  rgbToMonochromeBit,
+  rgbToPaletteIndex,
+} from "./ColorSystem";
 
 // -------------------------------------------------------------------------
 // Internal helpers
@@ -85,7 +92,7 @@ export function blitSprite(
       if (tx < cl.left || tx >= cl.right) continue;
       const si = srcRow + sx;
       if (mask && !mask[si]) continue;
-      pixels[dstRow + (tx - bnd.left)] = data[si];
+      pixels[dstRow + (tx - bnd.left)] = clampColorIndex(data[si]);
     }
   }
 }
@@ -163,6 +170,53 @@ export function blitSpriteShadowOutline(
 }
 
 // -------------------------------------------------------------------------
+// drawMaskOutline — contour pixels only (opaque pixels with transparent neighbour)
+// -------------------------------------------------------------------------
+
+export function drawMaskOutline(
+  port: GrafPort,
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  dx: number,
+  dy: number,
+  color: number = 1
+): void {
+  dx = dx | 0;
+  dy = dy | 0;
+  if (!mask.length || width <= 0 || height <= 0) return;
+  const pixels = port.portBits.baseAddr;
+  const rowBytes = port.portBits.rowBytes;
+  const bnd = port.portBits.bounds;
+  const cl = getPortClip(port);
+
+  const drawColor = resolveStrokeColor(color);
+  for (let sy = 0; sy < height; sy++) {
+    const ty = dy + sy;
+    if (ty < cl.top || ty >= cl.bottom) continue;
+    const srcRow = sy * width;
+    const dstRow = (ty - bnd.top) * rowBytes;
+    for (let sx = 0; sx < width; sx++) {
+      const si = srcRow + sx;
+      if (!mask[si]) continue;
+      const hasTransparentNeighbor =
+        sx === 0 ||
+        !mask[si - 1] ||
+        sx === width - 1 ||
+        !mask[si + 1] ||
+        sy === 0 ||
+        !mask[(sy - 1) * width + sx] ||
+        sy === height - 1 ||
+        !mask[(sy + 1) * width + sx];
+      if (!hasTransparentNeighbor) continue;
+      const tx = dx + sx;
+      if (tx < cl.left || tx >= cl.right) continue;
+      pixels[dstRow + (tx - bnd.left)] = drawColor;
+    }
+  }
+}
+
+// -------------------------------------------------------------------------
 // blitSpriteOutline — contour pixels only (opaque pixels with transparent neighbour)
 // -------------------------------------------------------------------------
 
@@ -173,38 +227,9 @@ export function blitSpriteOutline(
   dy: number,
   color: number = 1
 ): void {
-  dx = dx | 0;
-  dy = dy | 0;
-  const { width: sw, height: sh, mask } = sprite;
+  const { width, height, mask } = sprite;
   if (!mask) return;
-  const pixels = port.portBits.baseAddr;
-  const rowBytes = port.portBits.rowBytes;
-  const bnd = port.portBits.bounds;
-  const cl = getPortClip(port);
-
-  for (let sy = 0; sy < sh; sy++) {
-    const ty = dy + sy;
-    if (ty < cl.top || ty >= cl.bottom) continue;
-    const srcRow = sy * sw;
-    const dstRow = (ty - bnd.top) * rowBytes;
-    for (let sx = 0; sx < sw; sx++) {
-      const si = srcRow + sx;
-      if (!mask[si]) continue;
-      const hasTransparentNeighbor =
-        sx === 0 ||
-        !mask[si - 1] ||
-        sx === sw - 1 ||
-        !mask[si + 1] ||
-        sy === 0 ||
-        !mask[(sy - 1) * sw + sx] ||
-        sy === sh - 1 ||
-        !mask[(sy + 1) * sw + sx];
-      if (!hasTransparentNeighbor) continue;
-      const tx = dx + sx;
-      if (tx < cl.left || tx >= cl.right) continue;
-      pixels[dstRow + (tx - bnd.left)] = color;
-    }
-  }
+  drawMaskOutline(port, mask, width, height, dx, dy, color);
 }
 
 // -------------------------------------------------------------------------
@@ -235,7 +260,13 @@ export function blitImageData(
       const si = (sy * sw + sx) * 4;
       const alpha = data[si + 3];
       if (alpha < 128) continue;
-      pixels[dstRow + (tx - bnd.left)] = data[si] < 128 ? 1 : 0;
+      const r = data[si];
+      const g = data[si + 1];
+      const b = data[si + 2];
+      pixels[dstRow + (tx - bnd.left)] =
+        getColorMode() === "colors"
+          ? rgbToPaletteIndex(r, g, b)
+          : rgbToMonochromeBit(r, g, b, tx, ty);
     }
   }
 }
@@ -305,7 +336,7 @@ export function fillSpriteTile(
     const sy = (((py - y) % sh) + sh) % sh;
     for (let px = x0; px < x1; px++) {
       const sx = (((px - x) % sw) + sw) % sw;
-      pixels[row + (px - bnd.left)] = data[sy * sw + sx];
+      pixels[row + (px - bnd.left)] = clampColorIndex(data[sy * sw + sx]);
     }
   }
 }

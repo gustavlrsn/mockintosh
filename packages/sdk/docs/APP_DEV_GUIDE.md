@@ -2,7 +2,7 @@
 
 ## Overview
 
-Mockintosh is a 1-bit Macintosh simulator running in the browser. The entire UI is rendered on a single `<canvas>` element at **512×342 pixels** — every pixel is either **black** (`1`) or **white** (`0`). There are no colors, no gradients, no anti-aliasing.
+Mockintosh is a Macintosh-style simulator running in the browser. The entire UI is rendered on a single `<canvas>` element at **512×342 pixels** using an indexed pixel buffer. The OS can run in either **`monochrome`** or **`colors`** mode. There are still no gradients, no anti-aliasing, and no browser text rendering inside the simulated screen.
 
 Third-party apps are ES modules that export an `App` object and an optional `sprites` record. They are loaded at runtime by the Mockintosh OS via dynamic `import()`.
 
@@ -16,6 +16,7 @@ import {
   AppProps,
   BLACK,
   WHITE,
+  RED,
 } from "@mockintosh/sdk";
 
 const MyApp: App = {
@@ -29,9 +30,10 @@ const MyApp: App = {
 
     ctx.clear(WHITE);
     ctx.drawText(`Count: ${count}`, 10, 10, {
-      font: "ChiKareGo",
+      font: "menu",
       color: BLACK,
     });
+    ctx.fillRect(10, 24, 24, 12, RED);
     const win = ctx.getWindow();
     if (win) {
       // Create controls once with useRef, then DrawControls(win, ctx.port).
@@ -54,7 +56,7 @@ Apps render imperatively — there is no virtual DOM, no reconciliation. Every f
 **Pixel operations:**
 
 - `setPixel(x, y, color?)` — set a single pixel
-- `getPixel(x, y)` — read a pixel value
+- `getPixel(x, y)` — read a pixel value (white = `0`, black = `1`, other values are palette indices)
 - `clear(color?)` — fill entire area
 
 **Lines:**
@@ -82,7 +84,24 @@ Apps render imperatively — there is no virtual DOM, no reconciliation. Every f
 
 - `drawText(text, x, y, opts?)` — draw bitmap text
 - `drawTextBlock(opts)` — word-wrapped text with viewport culling
-- `measureTextBlock(text, maxWidth, font?, lineSpacing?)` — measure without drawing
+- `measureTextBlock(text, maxWidth, font?, lineSpacing?, spacing?, lineHeight?)` — measure without drawing
+
+`drawText()` and `drawTextBlock()` accept `spacing` for extra character spacing. They also accept `lineHeight` to override the native font line box for that call. When `lineHeight` is larger than the font's built-in height, glyphs stay bottom-aligned in the line box, so the extra space appears above the text. `drawTextBlock()` still supports `lineSpacing` for compatibility, but `lineHeight` takes precedence when both are provided.
+
+### Color Indices and Device Mode
+
+Mockintosh exposes an indexed color buffer:
+
+- `WHITE` = `0`
+- `BLACK` = `1`
+- `RED`, `GREEN`, `BLUE`, `CYAN`, `MAGENTA`, `YELLOW`, `ORANGE`, `PURPLE`, `BROWN`, `TAN`, `LIGHT_GRAY`, `MEDIUM_GRAY`, `DARK_GRAY`, and `PINK` map to the default system palette
+
+The OS resolves those same indices differently depending on the current device mode:
+
+- `colors` — palette indices render as RGB through the active system palette
+- `monochrome` — palette indices fall back to black/white or dithered approximations
+
+Apps that only use `BLACK` and `WHITE` remain fully compatible in either mode. Apps that opt into color should prefer the exported named constants or explicitly chosen palette indices instead of assuming a browser RGB pipeline.
 
 **UI Components:**
 
@@ -103,8 +122,9 @@ Apps render imperatively — there is no virtual DOM, no reconciliation. Every f
 
 ### Available Fonts
 
-- `"Geneva9"` — 9px proportional font (default, good for body text)
-- `"ChiKareGo"` — larger bitmap font (good for titles/headings)
+- `"body"` — Decker body font for general UI text
+- `"menu"` — Decker menu font for titles, headings, and control labels
+- `"mono"` — Decker monospaced font for fixed-width content
 
 ## AppBuilder (State Management)
 
@@ -352,7 +372,7 @@ const MyApp: App = {
         // scrollCtx is clipped and offset — draw content starting at (0,0).
         // Available width is ctx.width - 15 (scrollbar takes 15px on the right).
         for (let i = 0; i < items.length; i++) {
-          scrollCtx.drawText(items[i], 4, i * ITEM_HEIGHT, { font: "Geneva9" });
+          scrollCtx.drawText(items[i], 4, i * ITEM_HEIGHT, { font: "body" });
         }
       }
     );
@@ -483,7 +503,7 @@ render(app, ctx, props) {
 ## Constraints
 
 - **512×342 pixels** — the entire screen. Your window will be smaller.
-- **1-bit only** — every pixel is black or white.
+- **Indexed pixels** — every pixel stores a palette index. `BLACK`/`WHITE` are safest, and other palette entries may render as dithered monochrome when the OS is in `monochrome` mode.
 - **No DOM access** — don't use `document.*` or `window.*` directly.
 - **No direct fetch** — use `props.fetch` (requires `"network"` permission).
 - **No localStorage** — use `props.storage`.

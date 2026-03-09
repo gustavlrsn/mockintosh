@@ -33,7 +33,7 @@ export const TestingApp: SystemApp = {
     // "Current count: {count}"
     const countText = `Current count: ${count}`;
     ctx.drawText(countText, PADDING, PADDING, {
-      font: "Geneva9",
+      font: "body",
       color: BLACK,
     });
 
@@ -45,7 +45,7 @@ export const TestingApp: SystemApp = {
     if (!controlsCreatedRef.current) {
       // Clear any stale controls from a previous window instance (e.g. after close/reopen)
       win.controlList.length = 0;
-      const buttonW = measureText(BUTTON_LABEL, "ChiKareGo") + 24;
+      const buttonW = measureText(BUTTON_LABEL, "menu") + 24;
       const buttonX = Math.floor((w - buttonW) / 2);
       const buttonY = h - PADDING - BUTTON_H;
       const boundsRect = makeRect(

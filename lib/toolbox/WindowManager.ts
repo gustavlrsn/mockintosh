@@ -1053,7 +1053,7 @@ export class WindowManager {
       blitSprite(port, sprite, x, y);
     const drawTxt = (text: string, x: number, y: number, opts: any) => {
       SetPort(port);
-      TextFont(GetFNum(opts?.font ?? "Geneva9"));
+      TextFont(GetFNum(opts?.font ?? "body"));
       TextFace(0);
       if (opts?.color === WHITE) {
         (port as GrafPort & { txColor?: number }).txColor = WHITE;
@@ -1215,7 +1215,7 @@ export class WindowManager {
     hLine(x, y + TITLE_BAR_HEIGHT - 1, width, BLACK);
 
     // Title text
-    const titleW = FMTextWidth(title, "ChiKareGo");
+    const titleW = FMTextWidth(title, "menu");
     const titleX = x + Math.floor((width - titleW) / 2);
     const titleY = y + 3;
 
@@ -1315,7 +1315,7 @@ export class WindowManager {
     }
 
     drawTxt(title, titleX, titleY, {
-      font: "ChiKareGo",
+      font: "menu",
       color: BLACK,
     });
 
@@ -1405,11 +1405,11 @@ export class WindowManager {
 
     if (items.length > 0) {
       SetPort(port);
-      TextFont(GetFNum("Geneva9"));
+      TextFont(GetFNum("body"));
       TextFace(0);
       const colW = Math.floor((width - 2) / items.length);
       for (let i = 0; i < items.length; i++) {
-        const tw = FMTextWidth(items[i], "Geneva9");
+        const tw = FMTextWidth(items[i], "body");
         const tx = x + 1 + i * colW + Math.floor((colW - tw) / 2);
         MoveTo(tx, infoY + 4);
         DrawString(items[i]);

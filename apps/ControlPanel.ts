@@ -4,8 +4,28 @@ import { WindowContext } from "../lib/toolbox/WindowContext";
 import { BLACK, WHITE } from "../lib/canvas/BitCanvas";
 import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { OSEvent } from "../lib/toolbox/EventManager";
+import type { ColorMode } from "../lib/canvas/ColorSystem";
 
 const SIDEBAR_WIDTH = 64;
+const MODE_BUTTON_W = 90;
+const MODE_BUTTON_H = 20;
+
+function drawModeButton(
+  ctx: WindowContext,
+  x: number,
+  y: number,
+  label: string,
+  selected: boolean
+): void {
+  ctx.drawRect(x, y, MODE_BUTTON_W, MODE_BUTTON_H, BLACK);
+  if (selected) {
+    ctx.fillRect(x + 1, y + 1, MODE_BUTTON_W - 2, MODE_BUTTON_H - 2, BLACK);
+  }
+  ctx.drawText(label, x + 8, y + 5, {
+    font: "body",
+    color: selected ? WHITE : BLACK,
+  });
+}
 
 export const ControlPanelApp: SystemApp = {
   id: "control_panel",
@@ -17,6 +37,8 @@ export const ControlPanelApp: SystemApp = {
   render(app: AppBuilder, ctx: WindowContext, props: any) {
     const sprites: ResourceManager = props._sprites;
     const [selectedPane] = app.useState("General");
+    const colorMode: ColorMode =
+      props._systemPreferences?.colorMode ?? "monochrome";
 
     ctx.clear(WHITE);
 
@@ -36,7 +58,7 @@ export const ControlPanelApp: SystemApp = {
     const labelColor = selectedPane === "General" ? WHITE : BLACK;
     const labelBg = selectedPane === "General" ? BLACK : null;
     ctx.drawText("General", 4, 44, {
-      font: "Geneva9",
+      font: "body",
       color: labelColor,
       bg: labelBg as any,
       width: SIDEBAR_WIDTH - 8,
@@ -46,7 +68,7 @@ export const ControlPanelApp: SystemApp = {
     const contentX = SIDEBAR_WIDTH + 8;
 
     ctx.drawText("Desktop pattern", contentX, 8, {
-      font: "Geneva9",
+      font: "body",
       color: BLACK,
     });
 
@@ -65,6 +87,61 @@ export const ControlPanelApp: SystemApp = {
         const ry = patternY + 1 + py * (scale + gutter);
         ctx.fillRect(rx, ry, scale, scale, isBlack ? BLACK : WHITE);
       }
+    }
+
+    const modeLabelY = patternY + patternSize + 18;
+    ctx.drawText("Color mode", contentX, modeLabelY, {
+      font: "body",
+      color: BLACK,
+    });
+
+    const modeButtonY = modeLabelY + 16;
+    drawModeButton(
+      ctx,
+      contentX,
+      modeButtonY,
+      "monochrome",
+      colorMode === "monochrome"
+    );
+    drawModeButton(
+      ctx,
+      contentX + MODE_BUTTON_W + 8,
+      modeButtonY,
+      "colors",
+      colorMode === "colors"
+    );
+
+    ctx.hitRegion(
+      "control-panel-mode-monochrome",
+      { x: contentX, y: modeButtonY, w: MODE_BUTTON_W, h: MODE_BUTTON_H },
+      {
+        onClick: () => props._setColorMode?.("monochrome"),
+      }
+    );
+    ctx.hitRegion(
+      "control-panel-mode-colors",
+      {
+        x: contentX + MODE_BUTTON_W + 8,
+        y: modeButtonY,
+        w: MODE_BUTTON_W,
+        h: MODE_BUTTON_H,
+      },
+      {
+        onClick: () => props._setColorMode?.("colors"),
+      }
+    );
+
+    const previewY = modeButtonY + MODE_BUTTON_H + 14;
+    ctx.drawText("Preview", contentX, previewY, {
+      font: "body",
+      color: BLACK,
+    });
+    const swatchY = previewY + 16;
+    const swatchColors = [2, 3, 4, 7, 8, 9];
+    for (let i = 0; i < swatchColors.length; i++) {
+      const sx = contentX + i * 18;
+      ctx.fillRect(sx, swatchY, 14, 14, swatchColors[i]);
+      ctx.drawRect(sx, swatchY, 14, 14, BLACK);
     }
   },
 

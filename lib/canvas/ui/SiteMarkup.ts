@@ -215,7 +215,7 @@ function segmentsToWords(
 ): StyledWord[] {
   const words: StyledWord[] = [];
   for (const seg of segments) {
-    const font: FontName = seg.kind === "bold" ? "ChiKareGo" : baseFont;
+    const font: FontName = seg.kind === "bold" ? "menu" : baseFont;
     const underline = seg.kind === "link";
     const href = seg.kind === "link" ? seg.href : undefined;
     const text = seg.text;
@@ -248,7 +248,7 @@ function wrapWords(words: StyledWord[], maxWidth: number): StyledWord[][] {
 
     if (lineWidth + w > maxWidth && line.length > 0) {
       while (line.length > 0 && /^\s+$/.test(line[line.length - 1].text)) {
-        lineWidth -= measureText(line.pop()!.text, line[0]?.font ?? "Geneva9");
+        lineWidth -= measureText(line.pop()!.text, line[0]?.font ?? "body");
       }
       lines.push(line);
       line = [];
@@ -309,7 +309,7 @@ export function renderSiteNodes(
     switch (node.type) {
       case "heading": {
         const isH1 = node.level === 1;
-        const font: FontName = "ChiKareGo";
+        const font: FontName = "menu";
         const lineH = getLineHeight(font);
         y += isH1 ? H1_MARGIN_TOP : H2_MARGIN_TOP;
         const tw = measureText(node.text, font);
@@ -320,7 +320,7 @@ export function renderSiteNodes(
       }
 
       case "paragraph": {
-        const baseFont: FontName = "Geneva9";
+        const baseFont: FontName = "body";
         const lineH = getLineHeight(baseFont);
         const words = segmentsToWords(node.segments, baseFont);
         const lines = wrapWords(words, contentWidth);
@@ -347,7 +347,7 @@ export function renderSiteNodes(
       }
 
       case "listItem": {
-        const baseFont: FontName = "Geneva9";
+        const baseFont: FontName = "body";
         const lineH = getLineHeight(baseFont);
         const bulletW = measureText("- ", baseFont);
         ctx.drawText("-", margin + LI_INDENT - bulletW, y, {
@@ -430,12 +430,12 @@ export function measureSiteNodes(
       case "heading": {
         const isH1 = node.level === 1;
         y += isH1 ? H1_MARGIN_TOP : H2_MARGIN_TOP;
-        y += getLineHeight("ChiKareGo");
+        y += getLineHeight("menu");
         y += isH1 ? H1_MARGIN_BOTTOM : H2_MARGIN_BOTTOM;
         break;
       }
       case "paragraph": {
-        const baseFont: FontName = "Geneva9";
+        const baseFont: FontName = "body";
         const lineH = getLineHeight(baseFont);
         const words = segmentsToWords(node.segments, baseFont);
         const lines = wrapWords(words, contentWidth);
@@ -443,7 +443,7 @@ export function measureSiteNodes(
         break;
       }
       case "listItem": {
-        const baseFont: FontName = "Geneva9";
+        const baseFont: FontName = "body";
         const lineH = getLineHeight(baseFont);
         const words = segmentsToWords(node.segments, baseFont);
         const lines = wrapWords(words, contentWidth - LI_INDENT);

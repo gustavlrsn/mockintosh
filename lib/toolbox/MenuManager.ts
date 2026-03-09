@@ -1,14 +1,7 @@
 import { BLACK, WHITE, Sprite } from "../canvas/BitCanvas";
 import { HitRegionMap } from "../canvas/HitRegion";
 import type { GrafPort } from "@mockintosh/quickdraw";
-import {
-  SetPort,
-  MoveTo,
-  TextFont,
-  TextFace,
-  DrawString,
-} from "@mockintosh/quickdraw";
-import { GetFNum, FMTextWidth } from "./FontManager";
+import { FMTextWidth } from "./FontManager";
 import type { FontName } from "../canvas/fontAdapter";
 import {
   qdFillRect,
@@ -19,8 +12,15 @@ import {
   qdSetPixel,
 } from "../canvas/qdDraw";
 import { blitSprite, blitSpriteInverted } from "../canvas/SpriteManager";
+import { drawTextToPort } from "./PortText";
 
-const CHIKAREGO = "ChiKareGo" as FontName;
+const MENU_FONT = "menu" as FontName;
+const MENU_LABEL_SPACING = 1;
+const MENU_LABEL_LINE_HEIGHT = 15;
+const MENU_ITEM_SPACING = 1;
+const MENU_ITEM_LINE_HEIGHT = 15;
+const MENU_SHORTCUT_SPACING = 0;
+const MENU_SHORTCUT_LINE_HEIGHT = 15;
 
 export interface MenubarDefinition {
   label: string;
@@ -60,6 +60,63 @@ const SEPARATOR_HEIGHT = 8;
 
 const APPLE_MENU_WIDTH = 24;
 
+function measureMenuLabel(text: string): number {
+  return FMTextWidth(text, MENU_FONT, MENU_LABEL_SPACING);
+}
+
+function measureMenuItemLabel(text: string): number {
+  return FMTextWidth(text, MENU_FONT, MENU_ITEM_SPACING);
+}
+
+function measureMenuShortcut(text: string): number {
+  return FMTextWidth(text, MENU_FONT, MENU_SHORTCUT_SPACING);
+}
+
+function drawMenuLabel(
+  port: GrafPort,
+  text: string,
+  x: number,
+  y: number,
+  color: number
+): void {
+  drawTextToPort(port, text, x, y, {
+    font: MENU_FONT,
+    spacing: MENU_LABEL_SPACING,
+    lineHeight: MENU_LABEL_LINE_HEIGHT,
+    color,
+  });
+}
+
+function drawMenuItemLabel(
+  port: GrafPort,
+  text: string,
+  x: number,
+  y: number,
+  color: number
+): void {
+  drawTextToPort(port, text, x, y, {
+    font: MENU_FONT,
+    spacing: MENU_ITEM_SPACING,
+    lineHeight: MENU_ITEM_LINE_HEIGHT,
+    color,
+  });
+}
+
+function drawMenuShortcut(
+  port: GrafPort,
+  text: string,
+  x: number,
+  y: number,
+  color: number
+): void {
+  drawTextToPort(port, text, x, y, {
+    font: MENU_FONT,
+    spacing: MENU_SHORTCUT_SPACING,
+    lineHeight: MENU_SHORTCUT_LINE_HEIGHT,
+    color,
+  });
+}
+
 export function createMenubarState(menus: MenubarDefinition[]): MenubarState {
   return { menus, openMenuIndex: null, highlightedItem: null };
 }
@@ -74,12 +131,14 @@ function getMenuWidth(menu: MenubarDefinition): number {
     if ("type" in item && item.type === "separator") continue;
     if ("type" in item && item.type === "radiogroup") {
       for (const ri of item.items) {
-        maxW = Math.max(maxW, FMTextWidth(ri.label, CHIKAREGO) + 24);
+        maxW = Math.max(maxW, measureMenuItemLabel(ri.label) + 24);
       }
     } else {
       const ai = item as MenubarActionItem;
-      let w = FMTextWidth(ai.label, CHIKAREGO) + 12;
-      if (ai.shortcut) w += FMTextWidth(ai.shortcut, CHIKAREGO) + 20;
+      let w = measureMenuItemLabel(ai.label) + 12;
+      if (ai.shortcut) {
+        w += measureMenuShortcut(ai.shortcut) + 20;
+      }
       maxW = Math.max(maxW, w);
     }
   }
@@ -211,22 +270,14 @@ export function drawMenubar(
       continue;
     }
 
-    const textW = FMTextWidth(menu.label, CHIKAREGO);
+    const textW = measureMenuLabel(menu.label);
     const labelX = x - 5;
     const labelW = textW + 14;
-
-    SetPort(port);
-    TextFont(GetFNum(CHIKAREGO));
-    TextFace(0);
     if (isOpen) {
       qdFillRect(port, labelX, 0, labelW, MENUBAR_HEIGHT - 1, BLACK);
-      (port as GrafPort & { txColor?: number }).txColor = WHITE;
-      MoveTo(x, 2);
-      DrawString(menu.label);
-      (port as GrafPort & { txColor?: number }).txColor = BLACK;
+      drawMenuLabel(port, menu.label, x, 2, WHITE);
     } else {
-      MoveTo(x, 2);
-      DrawString(menu.label);
+      drawMenuLabel(port, menu.label, x, 2, BLACK);
     }
 
     hitRegions.add({
@@ -310,29 +361,12 @@ export function drawMenubar(
 
       const textColor = highlighted ? WHITE : BLACK;
       const textX = mx + MENU_PADDING + (it.isRadio ? 16 : 0);
-      SetPort(port);
-      TextFont(GetFNum(CHIKAREGO));
-      TextFace(0);
-      if (textColor === WHITE) {
-        (port as GrafPort & { txColor?: number }).txColor = WHITE;
-      }
-      MoveTo(textX, iy);
-      DrawString(it.label);
-      if (textColor === WHITE) {
-        (port as GrafPort & { txColor?: number }).txColor = BLACK;
-      }
+      drawMenuItemLabel(port, it.label, textX, iy, textColor);
 
       if (it.shortcut) {
-        const sw = FMTextWidth(it.shortcut, CHIKAREGO);
+        const sw = measureMenuShortcut(it.shortcut);
         const sx = mx + mw - MENU_PADDING - sw - 2;
-        if (textColor === WHITE) {
-          (port as GrafPort & { txColor?: number }).txColor = WHITE;
-        }
-        MoveTo(sx, iy);
-        DrawString(it.shortcut);
-        if (textColor === WHITE) {
-          (port as GrafPort & { txColor?: number }).txColor = BLACK;
-        }
+        drawMenuShortcut(port, it.shortcut, sx, iy, textColor);
       }
 
       if (it.isRadio && it.radioChecked) {
@@ -382,7 +416,7 @@ function _getMenuX(
   let x = APPLE_MENU_WIDTH + 8;
   for (let i = 0; i < index; i++) {
     if (i === 0 && hasAppleMenu) continue;
-    x += FMTextWidth(state.menus[i].label, CHIKAREGO) + 14;
+    x += measureMenuLabel(state.menus[i].label) + 14;
   }
   if (index === 0 && hasAppleMenu) {
     return 6;

@@ -1,11 +1,23 @@
-import { BitCanvas, BLACK, WHITE } from "./BitCanvas";
-import PixelFontCanvas from "@/lib/PixelFontCanvas";
-
-export type FontName = "ChiKareGo" | "Geneva9";
+import { BitCanvas, BLACK } from "./BitCanvas";
+import {
+  getGlyphIndexForChar,
+  getGlyphPixel,
+  measureDeckerText,
+  type FontName,
+} from "../fonts/DeckerFont";
+import {
+  initDeckerFonts,
+  registerDeckerFont,
+  requireDeckerFont,
+} from "../fonts/DeckerFontRegistry";
+import { alignTextX, type TextAlign } from "../fonts/DeckerTextLayout";
+import { resolveTextColor } from "./ColorSystem";
 
 export interface TextOptions {
   font?: FontName;
-  align?: "left" | "center" | "right";
+  align?: TextAlign;
+  spacing?: number;
+  lineHeight?: number;
   color?: number; // BLACK or WHITE
   bg?: number | null; // background color, or null for transparent
   width?: number;
@@ -13,120 +25,82 @@ export interface TextOptions {
   padding?: number;
 }
 
-// --- Glyph Cache ---
-
-interface GlyphBitmap {
-  width: number;
-  height: number;
-  data: Uint8Array; // 1=black, 0=white per pixel
-}
-
-const glyphCache: Map<string, Map<number, GlyphBitmap>> = new Map();
-
-/**
- * Rasterize all glyphs in a loaded font into 1-bit bitmaps.
- * Called once per font at load time.
- */
-function buildGlyphCache(fontName: string): void {
-  const fontData = PixelFontCanvas.fonts[fontName];
-  if (!fontData) return;
-
-  const cache = new Map<number, GlyphBitmap>();
-  const texture: HTMLImageElement = fontData.texture;
-
-  const tmpCanvas = document.createElement("canvas");
-  const tmpCtx = tmpCanvas.getContext("2d")!;
-  tmpCtx.imageSmoothingEnabled = false;
-
-  for (const charCodeStr of Object.keys(fontData.chars)) {
-    const charCode = Number(charCodeStr);
-    const charData = fontData.chars[charCode];
-    const rect = charData.textureRect;
-    if (rect.width <= 0 || rect.height <= 0) continue;
-
-    tmpCanvas.width = rect.width;
-    tmpCanvas.height = rect.height;
-    tmpCtx.clearRect(0, 0, rect.width, rect.height);
-    tmpCtx.drawImage(
-      texture,
-      rect.x,
-      rect.y,
-      rect.width,
-      rect.height,
-      0,
-      0,
-      rect.width,
-      rect.height
-    );
-
-    const imageData = tmpCtx.getImageData(0, 0, rect.width, rect.height);
-    const rgba = imageData.data;
-    const bitmap = new Uint8Array(rect.width * rect.height);
-
-    for (let i = 0; i < bitmap.length; i++) {
-      const alpha = rgba[i * 4 + 3];
-      // Opaque and dark = black glyph pixel
-      bitmap[i] = alpha >= 128 ? 1 : 0;
-    }
-
-    cache.set(charCode, {
-      width: rect.width,
-      height: rect.height,
-      data: bitmap,
-    });
-  }
-
-  glyphCache.set(fontName, cache);
+export interface LineBoxMetrics {
+  glyphHeight: number;
+  lineHeight: number;
+  glyphOffsetY: number;
 }
 
 // --- Measurement ---
 
 export function getLineHeight(font: FontName): number {
-  switch (font) {
-    case "Geneva9":
-      return 12;
-    case "ChiKareGo":
-      return 16;
-    default:
-      return 12;
-  }
+  return requireDeckerFont(font).glyphHeight;
 }
 
-export function measureText(text: string, font: FontName = "Geneva9"): number {
-  const fontData = PixelFontCanvas.fonts[font];
-  if (!fontData) return 0;
-  let width = 0;
-  let prevCharCode: number | null = null;
+export function resolveLineBox(
+  font: FontName,
+  opts: {
+    lineHeight?: number;
+    lineSpacing?: number;
+  } = {}
+): LineBoxMetrics {
+  const glyphHeight = getLineHeight(font);
+  const requestedLineHeight =
+    opts.lineHeight ?? glyphHeight + (opts.lineSpacing ?? 0);
+  const lineHeight = Math.max(1, Math.floor(requestedLineHeight));
+
+  return {
+    glyphHeight,
+    lineHeight,
+    glyphOffsetY: Math.max(0, lineHeight - glyphHeight),
+  };
+}
+
+function countTextLines(text: string): number {
+  if (!text) return 1;
+
+  let lines = 1;
   for (let i = 0; i < text.length; i++) {
-    const charCode = text.charCodeAt(i);
-    const charData = fontData.chars[charCode];
-    if (!charData) continue;
-    if (prevCharCode && charData.kerning[prevCharCode]) {
-      width += charData.kerning[prevCharCode];
-    }
-    width += charData.xAdvance;
-    prevCharCode = charCode;
+    if (text[i] === "\n") lines += 1;
   }
-  return width;
+  return lines;
+}
+
+export function measureText(
+  text: string,
+  font: FontName = "body",
+  spacing: number = 0
+): number {
+  const size = measureDeckerText(requireDeckerFont(font), text).width;
+  if (!text || spacing === 0) return size;
+
+  let trackedChars = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "\n") trackedChars += 1;
+  }
+  return size + trackedChars * spacing;
 }
 
 // --- Drawing ---
 
 /**
- * Blit a single pre-rasterized glyph into BitCanvas, respecting the clip rect.
- * Only writes pixels where the glyph data is 1 (black).
- * For WHITE color glyphs, writes 0 where glyph data is 1.
+ * Blit a single glyph into BitCanvas, respecting the clip rect.
  */
 function blitGlyph(
   canvas: BitCanvas,
-  glyph: GlyphBitmap,
+  fontName: FontName,
+  ch: string,
   dx: number,
   dy: number,
   color: number
 ): void {
   dx = dx | 0;
   dy = dy | 0;
-  const { width: gw, height: gh, data } = glyph;
+  const font = requireDeckerFont(fontName);
+  const glyphIndex = getGlyphIndexForChar(font, ch);
+  if (glyphIndex < 0) return;
+  const gw = measureText(ch, fontName, 0) - font.spacing;
+  const gh = font.glyphHeight;
   const clip = canvas.getClip();
   const pixels = canvas.pixels;
   const cw = canvas.width;
@@ -139,10 +113,9 @@ function blitGlyph(
   for (let gy = y0; gy < y1; gy++) {
     const ty = dy + gy;
     if (ty < 0) continue;
-    const srcRow = gy * gw;
     const dstRow = ty * cw;
     for (let gx = x0; gx < x1; gx++) {
-      if (data[srcRow + gx]) {
+      if (getGlyphPixel(font, glyphIndex, gx, gy)) {
         const tx = dx + gx;
         if (tx >= 0) {
           pixels[dstRow + tx] = color;
@@ -169,19 +142,20 @@ export function drawBitmapText(
 ) {
   if (!text) return;
 
-  const font = opts.font ?? "Geneva9";
-  const fontData = PixelFontCanvas.fonts[font];
-  const cache = glyphCache.get(font);
-  if (!fontData || !cache) return;
+  const font = opts.font ?? "body";
 
   const align = opts.align ?? "left";
-  const color = opts.color ?? BLACK;
+  const spacing = opts.spacing ?? 0;
+  const color = resolveTextColor(opts.color ?? BLACK);
   const bg = opts.bg ?? null;
-  const lineHeight = getLineHeight(font);
+  const lineBox = resolveLineBox(font, { lineHeight: opts.lineHeight });
+  const lineHeight = lineBox.lineHeight;
   const padding = opts.padding ?? 0;
+  const lineCount = countTextLines(text);
 
-  const textWidth = opts.width ?? measureText(text, font) + padding * 2 + 4;
-  const textHeight = opts.height ?? lineHeight;
+  const textWidth =
+    opts.width ?? measureText(text, font, spacing) + padding * 2 + 4;
+  const textHeight = opts.height ?? lineHeight * lineCount;
 
   // Background fill
   if (bg !== null) {
@@ -189,36 +163,24 @@ export function drawBitmapText(
   }
 
   // Compute starting x based on alignment
-  let cx: number;
-  const measuredWidth = measureText(text, font);
-  if (align === "center") {
-    cx = x + Math.floor((textWidth - measuredWidth) / 2);
-  } else if (align === "right") {
-    cx = x + textWidth - padding - measuredWidth;
-  } else {
-    cx = x + padding;
-  }
+  const measuredWidth = measureText(text, font, spacing);
+  let cx = alignTextX(
+    align,
+    x + padding,
+    textWidth - padding * 2,
+    measuredWidth
+  );
 
-  let prevCharCode: number | null = null;
-
+  let cy = y;
   for (let i = 0; i < text.length; i++) {
-    const charCode = text.charCodeAt(i);
-    const charData = fontData.chars[charCode];
-    if (!charData) continue;
-
-    if (prevCharCode && charData.kerning[prevCharCode]) {
-      cx += charData.kerning[prevCharCode];
+    const ch = text[i];
+    if (ch === "\n") {
+      cx = x + padding;
+      cy += lineHeight;
+      continue;
     }
-
-    const glyph = cache.get(charCode);
-    if (glyph) {
-      const gx = (cx + charData.xOffset) | 0;
-      const gy = (y + charData.yOffset) | 0;
-      blitGlyph(canvas, glyph, gx, gy, color);
-    }
-
-    cx += charData.xAdvance;
-    prevCharCode = charCode;
+    blitGlyph(canvas, font, ch, cx, cy + lineBox.glyphOffsetY, color);
+    cx += measureText(ch, font, spacing);
   }
 }
 
@@ -244,27 +206,26 @@ export function drawBitmapTextToPixels(
   color: number
 ): void {
   if (!text) return;
-  const fontData = PixelFontCanvas.fonts[font];
-  const cache = glyphCache.get(font);
-  if (!fontData || !cache) return;
+  const fontDef = requireDeckerFont(font);
+  const drawColor = resolveTextColor(color);
+  const spacing = 0;
 
   let cx = x;
-  let prevCharCode: number | null = null;
 
   for (let i = 0; i < text.length; i++) {
-    const charCode = text.charCodeAt(i);
-    const charData = fontData.chars[charCode];
-    if (!charData) continue;
-
-    if (prevCharCode && charData.kerning[prevCharCode]) {
-      cx += charData.kerning[prevCharCode];
+    const ch = text[i];
+    if (ch === "\n") {
+      cx = x;
+      y += fontDef.glyphHeight;
+      continue;
     }
 
-    const glyph = cache.get(charCode);
-    if (glyph) {
-      const gx = (cx + charData.xOffset) | 0;
-      const gy = (y + charData.yOffset) | 0;
-      const { width: gw, height: gh, data } = glyph;
+    const glyphIndex = getGlyphIndexForChar(fontDef, ch);
+    const gw = measureText(ch, font, spacing) - fontDef.spacing;
+    const gh = fontDef.glyphHeight;
+    if (glyphIndex >= 0 && gw > 0) {
+      const gx = cx | 0;
+      const gy = y | 0;
 
       const x0 = Math.max(0, clipLeft - gx);
       const y0 = Math.max(0, clipTop - gy);
@@ -274,37 +235,63 @@ export function drawBitmapTextToPixels(
       for (let gy2 = y0; gy2 < y1; gy2++) {
         const ty = gy + gy2;
         if (ty < 0) continue;
-        const srcRow = gy2 * gw;
         const dstRow = (ty - boundsTop) * rowBytes;
         for (let gx2 = x0; gx2 < x1; gx2++) {
-          if (data[srcRow + gx2]) {
+          if (getGlyphPixel(fontDef, glyphIndex, gx2, gy2)) {
             const tx = gx + gx2;
-            if (tx >= 0) pixels[dstRow + (tx - boundsLeft)] = color;
+            if (tx >= 0) pixels[dstRow + (tx - boundsLeft)] = drawColor;
           }
         }
       }
     }
 
-    cx += charData.xAdvance;
-    prevCharCode = charCode;
+    cx += measureText(ch, font, spacing);
   }
 }
 
 // --- Font Loading ---
 
 export function loadFonts(): Promise<void> {
-  return new Promise((resolve) => {
-    let loaded = 0;
-    const total = 2;
-    const check = () => {
-      loaded++;
-      if (loaded >= total) {
-        buildGlyphCache("Geneva9");
-        buildGlyphCache("ChiKareGo");
-        resolve();
-      }
-    };
-    PixelFontCanvas.loadFont("/fonts/", "Geneva9.fnt", check);
-    PixelFontCanvas.loadFont("/fonts/", "ChiKareGo.fnt", check);
-  });
+  initDeckerFonts();
+  return Promise.resolve();
 }
+
+export function registerFontResource(name: string, dataBlock: string): void {
+  registerDeckerFont(name, dataBlock);
+}
+
+export function getWrappedLines(
+  text: string,
+  maxWidth: number,
+  font: FontName = "body",
+  spacing: number = 0
+): string[] {
+  if (!text) return [""];
+
+  const lines: string[] = [];
+  const paragraphs = text.split("\n");
+
+  for (const paragraph of paragraphs) {
+    if (!paragraph.trim()) {
+      lines.push("");
+      continue;
+    }
+
+    const words = paragraph.split(" ");
+    let current = "";
+    for (const word of words) {
+      const test = current ? `${current} ${word}` : word;
+      if (measureText(test, font, spacing) > maxWidth && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = test;
+      }
+    }
+    if (current) lines.push(current);
+  }
+
+  return lines;
+}
+
+export type { FontName };

@@ -40,11 +40,11 @@ The `Sprite` interface (`data` + `mask` as 1-byte-per-pixel arrays) is a Mockint
 
 ---
 
-## fontAdapter.ts → FONT resources + native DrawString (text path done)
+## fontAdapter.ts → Decker FONT resources + native DrawString (text path done)
 
-**Done:** All in-repo text drawing goes through QuickDraw. WindowContext.drawText and drawTextBlock, WindowManager (window titles, info bar), Finder (measurement via FMTextWidth), TextEdit, and MenuManager use SetPort + MoveTo + DrawString; the bridge delegates to `drawBitmapTextToPixels` for glyph blitting. FontManager owns the injection and uses port.txFont (and optional txColor). There are no remaining `drawBitmapText` callers in the repo; it is deprecated and kept only for external/legacy BitCanvas paths.
+**Done:** All in-repo text drawing goes through QuickDraw. WindowContext.drawText and drawTextBlock, WindowManager (window titles, info bar), Finder (measurement via FMTextWidth), TextEdit, and MenuManager use SetPort + MoveTo + DrawString; the bridge delegates to `drawBitmapTextToPixels` for glyph blitting. FontManager owns the injection and uses port.txFont (and optional txColor). Font data now comes from Decker-style `FNT0` / `FNT1` records seeded from the Decker reference built-ins (`body`, `menu`, `mono`). There are no remaining `drawBitmapText` callers in the repo; it is deprecated and kept only for external/legacy BitCanvas paths.
 
-**Remaining:** Font data is still from PixelFontCanvas; NFNT/FONT resources are optional later. BitCanvas pushClip/popClip and getBitCanvas() remain for scroll area and SDK until a separate clip migration.
+**Remaining:** BitCanvas pushClip/popClip and getBitCanvas() remain for scroll area and SDK until a separate clip migration.
 
 **Files:** `lib/canvas/fontAdapter.ts`, `src/main.tsx` (font injection), `lib/toolbox/FontManager.ts`
 

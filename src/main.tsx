@@ -50,6 +50,13 @@ import { InitDialogs } from "../lib/toolbox/DialogManager";
 import { FileManager, ROOT_ID, FSFile } from "../lib/toolbox/FileManager";
 import { OPFSBackend } from "../lib/canvas/fs/OPFSBackend";
 import { AppLoader, AppManifest } from "../lib/canvas/AppLoader";
+import { ColorMode, setColorMode } from "../lib/canvas/ColorSystem";
+import {
+  DEFAULT_SYSTEM_PREFERENCES,
+  loadSystemPreferences,
+  saveSystemPreferences,
+  type SystemPreferences,
+} from "../lib/canvas/SystemPreferences";
 
 import { SplashscreenApp, setSplashResources } from "../apps/Splashscreen";
 import {
@@ -284,6 +291,9 @@ async function main() {
 
   const ctx2d = canvas.getContext("2d", { alpha: false })!;
   const bitCanvas = new BitCanvas(resolution.width, resolution.height);
+  const systemPreferences: SystemPreferences = {
+    ...DEFAULT_SYSTEM_PREFERENCES,
+  };
   // Initialize QuickDraw with a shared view of the pixel buffer.
   // QuickDraw and BitCanvas write to the same Uint8Array, so BitCanvas.flush()
   // correctly outputs any pixels written through QuickDraw GrafPorts.
@@ -362,6 +372,14 @@ async function main() {
   let finderAppBuilder!: AppBuilder;
   let finderServices!: FinderServices;
 
+  async function setSystemColorMode(mode: ColorMode): Promise<void> {
+    if (systemPreferences.colorMode === mode) return;
+    systemPreferences.colorMode = mode;
+    setColorMode(mode);
+    scheduleRender();
+    await saveSystemPreferences(systemPreferences);
+  }
+
   function updateZoom() {
     const ww = window.innerWidth;
     const wh = window.innerHeight;
@@ -410,6 +428,8 @@ async function main() {
           ...dialogProps,
           _sprites: sprites,
           _os: osServices,
+          _systemPreferences: systemPreferences,
+          _setColorMode: setSystemColorMode,
         });
         if (instance) {
           instance.builder.setRenderFunction(scheduleRender);
@@ -543,6 +563,8 @@ async function main() {
       ...props,
       _sprites: sprites,
       _os: osServices,
+      _systemPreferences: systemPreferences,
+      _setColorMode: setSystemColorMode,
       _fs: mockFS,
       _appLoader: appLoader,
       _openFSNode: (nodeId: string) => openFSNode(nodeId),
@@ -1510,6 +1532,9 @@ async function main() {
   mockFS = new FileManager(fsBackend, sprites);
   await mockFS.init();
   await populateDefaultFS(mockFS);
+
+  Object.assign(systemPreferences, await loadSystemPreferences());
+  setColorMode(systemPreferences.colorMode);
 
   osServices.fs = mockFS;
 

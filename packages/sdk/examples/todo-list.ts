@@ -112,9 +112,9 @@ const TodoApp: App = {
 
     ctx.clear(WHITE);
 
-    ctx.drawText("Todo List", 8, 6, { font: "ChiKareGo", color: BLACK });
+    ctx.drawText("Todo List", 8, 6, { font: "menu", color: BLACK });
     ctx.drawText(`${todos.filter((t) => !t.done).length} remaining`, 8, 18, {
-      font: "Geneva9",
+      font: "body",
       color: BLACK,
     });
     ctx.drawHLine(0, HEADER_HEIGHT, ctx.width, BLACK);
@@ -127,18 +127,18 @@ const TodoApp: App = {
 
       ctx.drawRect(checkX, y + 3, 10, 10, BLACK);
       if (todo.done) {
-        ctx.drawText("✓", checkX + 1, y + 3, { font: "Geneva9", color: BLACK });
+        ctx.drawText("✓", checkX + 1, y + 3, { font: "body", color: BLACK });
       }
 
       if (todo.done) {
         ctx.drawText(todo.text, textX, y + 4, {
-          font: "Geneva9",
+          font: "body",
           color: BLACK,
         });
         ctx.drawHLine(textX, y + 9, ctx.width - textX - 8, BLACK);
       } else {
         ctx.drawText(todo.text, textX, y + 4, {
-          font: "Geneva9",
+          font: "body",
           color: BLACK,
         });
       }

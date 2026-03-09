@@ -29,7 +29,7 @@ export const PictureApp: SystemApp = {
     const win = ctx.getWindow();
     if (win !== null) {
       if (!controlsCreatedRef.current) {
-        const printW = measureText("Print", "ChiKareGo") + 20;
+        const printW = measureText("Print", "menu") + 20;
         const boundsRect = makeRect(4, 4, 24, 4 + printW);
         const handle = NewControl(
           win,

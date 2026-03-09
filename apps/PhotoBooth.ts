@@ -245,7 +245,7 @@ export const PhotoBoothApp: SystemApp = {
 
     if (loading) {
       ctx.drawText("Initializing camera...", WIDTH / 2 - 60, HEIGHT / 2 - 6, {
-        font: "ChiKareGo",
+        font: "menu",
         color: BLACK,
         bg: WHITE,
       });
@@ -253,7 +253,7 @@ export const PhotoBoothApp: SystemApp = {
 
     if (errorText) {
       ctx.drawText(errorText, 8, HEIGHT / 2, {
-        font: "ChiKareGo",
+        font: "menu",
         color: BLACK,
         bg: WHITE,
       });
@@ -263,7 +263,7 @@ export const PhotoBoothApp: SystemApp = {
       const label = String(countdown);
       ctx.fillRect(WIDTH / 2 - 14, HEIGHT / 2 - 12, 28, 24, WHITE);
       ctx.drawText(label, WIDTH / 2 - 4, HEIGHT / 2 - 8, {
-        font: "ChiKareGo",
+        font: "menu",
         color: BLACK,
       });
     }
@@ -438,7 +438,7 @@ export const PhotoBoothApp: SystemApp = {
         `${viewingPhoto + 1}/${photos.length}`,
         WIDTH / 2 - 12,
         barY + 12,
-        { font: "Geneva9", color: BLACK }
+        { font: "body", color: BLACK }
       );
     }
 

@@ -40,7 +40,7 @@ export function computeDialogSize(
 ): { width: number; height: number } {
   const width = 260;
   const innerW = width - DIALOG_PADDING * 2 - 8;
-  const lines = getWrappedLines(message, innerW, "ChiKareGo");
+  const lines = getWrappedLines(message, innerW, "body");
   const textH = lines.length * LINE_HEIGHT;
   const inputH = showInput ? INPUT_H + 8 : 0;
   const height =
@@ -84,12 +84,12 @@ export const DialogApp: SystemApp = {
     ctx.drawRect(2, 2, w - 4, h - 4, BLACK);
 
     const innerW = w - DIALOG_PADDING * 2 - 8;
-    const messageLines = getWrappedLines(message, innerW, "ChiKareGo");
+    const messageLines = getWrappedLines(message, innerW, "body");
 
     let ty = DIALOG_PADDING;
     for (const line of messageLines) {
       ctx.drawText(line, DIALOG_PADDING, ty, {
-        font: "ChiKareGo",
+        font: "body",
         color: BLACK,
       });
       ty += LINE_HEIGHT;
@@ -117,7 +117,7 @@ export const DialogApp: SystemApp = {
       let buttonX = w - DIALOG_PADDING;
       for (let i = buttons.length - 1; i >= 0; i--) {
         const label = buttons[i];
-        const bw = measureText(label, "ChiKareGo") + 24;
+        const bw = measureText(label, "menu") + 24;
         buttonX -= bw + (i < buttons.length - 1 ? 12 : 0);
         const boundsRect = makeRect(ty, buttonX, ty + BUTTON_H, buttonX + bw);
         const handle = NewControl(win, boundsRect, label, true, 0, 0, 1, 0, i);
