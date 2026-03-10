@@ -39,7 +39,7 @@ const SCREEN_HEIGHT_MM = 152;
 const RASTER_ASPECT = 512 / 342;
 const SCREEN_ASPECT = SCREEN_WIDTH_MM / SCREEN_HEIGHT_MM;
 
-const H_INSET = 0.12;
+const H_INSET = 0.105;
 const rasterUWidth = 1.0 - 2 * H_INSET;
 const rasterPhysicalW = rasterUWidth * SCREEN_WIDTH_MM;
 const rasterPhysicalH = rasterPhysicalW / RASTER_ASPECT;
@@ -96,7 +96,7 @@ export async function loadMacPlusModel(
         metalness: 0.0,
         transmission: 1.0,
         /** Glass thickness in scene units; affects transmission/refraction. Tune to match model scale (e.g. ~3–5 mm real glass → scale-appropriate value). */
-        thickness: 0.1, // 2mm thick,
+        thickness: 0.02, // 2mm thick,
         ior: 1.52,
         /** Lower = sharper reflections at grazing angles (can show opposite side). Higher = softer sheen. */
         clearcoat: 1.0,

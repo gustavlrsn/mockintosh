@@ -7,6 +7,8 @@ export interface OSEvent {
     | "scroll"
     | "keyDown"
     | "keyUp"
+    /** Clipboard paste (Cmd+V / Ctrl+V or Edit > Paste). pasteText holds the plain-text content. */
+    | "paste"
     /** Sent to the app whose window just became the active (frontmost) window. */
     | "activate"
     /** Sent to the app whose window just lost active status. */
@@ -28,6 +30,8 @@ export interface OSEvent {
   metaKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
+  /** Plain-text content for "paste" events. */
+  pasteText?: string;
 }
 
 export type EventHandler = (event: OSEvent) => void;
@@ -76,7 +80,13 @@ export class EventManager {
   }
 
   private _bind() {
+    // Make the canvas focusable so it receives paste (and other clipboard) events.
+    // outline: none prevents the browser drawing a focus ring around the canvas.
+    this.canvasEl.tabIndex = 0;
+    this.canvasEl.style.outline = "none";
+
     this.canvasEl.addEventListener("mousedown", (e) => {
+      this.canvasEl.focus({ preventScroll: true });
       const { x, y } = this.toLocal(e);
       const now = Date.now();
       const dx = Math.abs(x - this.lastClickX);
@@ -122,6 +132,19 @@ export class EventManager {
     );
 
     window.addEventListener("keydown", (e) => {
+      const cmdKey = e.metaKey || e.ctrlKey;
+      if (cmdKey && e.key === "v") {
+        // canvas is not an editable element so the browser never fires a paste
+        // event for it; read the clipboard directly on this user-gesture keydown.
+        navigator.clipboard?.readText().then((text) => {
+          if (text) this.emit({ type: "paste", pasteText: text });
+        }).catch(() => {
+          // clipboard-read denied or API not available — fall back to the
+          // window paste listener below (fires in some browsers/contexts)
+        });
+        // Don't also emit keyDown for Cmd+V — the async paste event handles it.
+        return;
+      }
       this.emit({
         type: "keyDown",
         key: e.key,
@@ -144,6 +167,8 @@ export class EventManager {
         altKey: e.altKey,
       });
     });
+
+    // Fallback: some browsers/contexts do fire paste on window even for canvas.
   }
 
   destroy() {

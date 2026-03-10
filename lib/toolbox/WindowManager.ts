@@ -48,6 +48,7 @@ export type WindowKind =
   | "dialog" // modeless or movable-modal dialog (title bar, no zoom)
   | "alert" // strictly modal: no title bar, double-outline, on top of all
   | "utility" // floating palette: always above document windows
+  | "presentation" // fullscreen/chromeless app surface below the menubar
   | "desktop"; // Finder desktop (chromeless, below everything)
 
 // ---------------------------------------------------------------------------
@@ -217,7 +218,7 @@ export class WindowManager {
   // ---------------------------------------------------------------------------
 
   static isChromeless(kind: WindowKind): boolean {
-    return kind === "alert" || kind === "desktop";
+    return kind === "alert" || kind === "desktop" || kind === "presentation";
   }
 
   static isModal(kind: WindowKind): boolean {
@@ -280,7 +281,7 @@ export class WindowManager {
   }
 
   /** Insert window respecting kind-based layering:
-   *  desktop → document / dialog → utility → alert */
+   *  desktop → document / dialog / presentation → utility → alert */
   private _insertInLayerOrder(win: WindowRecord) {
     if (win.windowKind === "desktop") {
       this.windows.unshift(win);
@@ -302,7 +303,7 @@ export class WindowManager {
       }
       return;
     }
-    // document / dialog: place above desktop but below utilities and alerts
+    // document / dialog / presentation: place above desktop but below utilities and alerts
     const firstUtilityOrAlert = this.windows.findIndex(
       (w) => w.windowKind === "utility" || w.windowKind === "alert"
     );
@@ -356,6 +357,7 @@ export class WindowManager {
         return 0;
       case "document":
       case "dialog":
+      case "presentation":
         return 1;
       case "utility":
         return 2;
@@ -639,10 +641,12 @@ export class WindowManager {
   // ---------------------------------------------------------------------------
 
   private _headerHeight(win: WindowRecord): number {
+    if (win.windowKind === "presentation") return 0;
     return TITLE_BAR_HEIGHT + (win.infoBar ? INFO_BAR_HEIGHT : 0);
   }
 
   private _bottomBarHeight(win: WindowRecord): number {
+    if (win.windowKind === "presentation") return 0;
     return win.scrollable || win.resizable ? SCROLLBAR_WIDTH : 0;
   }
 
@@ -1088,6 +1092,8 @@ export class WindowManager {
           w: contentRect.w,
           h: contentRect.h,
           onMouseDown: (lx: number, ly: number) => {
+            // Match titled windows: focus this window so it stays frontmost in its layer.
+            callbacks.onBringToFront(win.id);
             callbacks.onContentEvent(win.id, {
               type: "mouseDown",
               x: lx + win.scrollX,

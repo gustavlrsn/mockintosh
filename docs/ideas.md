@@ -39,6 +39,17 @@ The app code is too messy. I need to define a format that is easier to understan
   - Publish Decks as applications in the app store?
     - Decker packager => locked decks into the App store?
 
+# links
+
+- https://breadboards.io/
+  - modern hypercard?
+- https://archives.somnolescent.net/web/mari_v2/junk/hypercard/?utm_source=hackernewsletter&utm_medium=email&utm_term=design
+- https://news.ycombinator.com/item?id=47281485&utm_term=comment
+- https://arcade.pirillo.com/fontcrafter.html
+- https://ankursethi.com/blog/programming-language-claude-code/
+- https://news.ycombinator.com/item?id=47353957&utm_term=comment
+- https://madalitso.me/notes/why-everyone-is-talking-about-filesystems/?utm_source=hackernewsletter&utm_medium=email&utm_term=fav
+
   ## Game. Myst-inspired? Based on the 1984 commercial from Apple. Like, rage against the machine. AI-themed.
 
   ### Story

@@ -33,6 +33,7 @@ import { resolveTextColor } from "../canvas/ColorSystem";
 export {
   createTextInputState,
   handleTextInputKey,
+  handleTextInputPaste,
   handleTextInputClick,
   handleTextInputDoubleClick,
   handleTextInputDrag,

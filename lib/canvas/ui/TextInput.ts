@@ -86,6 +86,26 @@ function findWordAt(text: string, pos: number): [number, number] {
 }
 
 /**
+ * Insert pasted text at the current cursor position, replacing any selection.
+ * Returns true if the state changed.
+ */
+export function handleTextInputPaste(
+  state: TextInputState,
+  text: string
+): boolean {
+  if (!text) return false;
+  touchEditTime(state);
+  deleteSelection(state);
+  state.value =
+    state.value.slice(0, state.cursorPos) +
+    text +
+    state.value.slice(state.cursorPos);
+  state.cursorPos += text.length;
+  clearSelection(state);
+  return true;
+}
+
+/**
  * Handle key events for a text input. Returns whether the state changed.
  */
 export function handleTextInputKey(

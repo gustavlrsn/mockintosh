@@ -1,6 +1,9 @@
+import { deckerOrdinalForCharCode } from "./DeckerDrom";
+
 export type BuiltInFontName = "body" | "menu" | "mono";
 export type FontName = BuiltInFontName | (string & {});
 
+/** Horizontal ellipsis — first entry in Decker `drom_chars`, ordinal 127. */
 export const DECKER_ELLIPSIS = "\u2026";
 export const DECKER_ELLIPSIS_INDEX = 127;
 const FALLBACK_GLYPH_INDEX = "?".charCodeAt(0);
@@ -23,12 +26,16 @@ export interface DeckerTextSize {
 
 export function getGlyphIndexForChar(font: DeckerFont, ch: string): number {
   if (!ch) return -1;
-  if (ch === DECKER_ELLIPSIS) return DECKER_ELLIPSIS_INDEX;
-  const codePoint = ch.codePointAt(0);
-  if (codePoint === undefined) return -1;
-  if (codePoint >= 0 && codePoint <= 255) return codePoint;
-  if (font.glyphWidths[FALLBACK_GLYPH_INDEX] > 0) return FALLBACK_GLYPH_INDEX;
-  return -1;
+  const ord = deckerOrdinalForCharCode(ch.charCodeAt(0));
+  if (ord === 255) {
+    if (font.glyphWidths[FALLBACK_GLYPH_INDEX] > 0) return FALLBACK_GLYPH_INDEX;
+    return -1;
+  }
+  if (!hasGlyph(font, ord)) {
+    if (font.glyphWidths[FALLBACK_GLYPH_INDEX] > 0) return FALLBACK_GLYPH_INDEX;
+    return -1;
+  }
+  return ord;
 }
 
 export function getGlyphWidth(font: DeckerFont, glyphIndex: number): number {

@@ -24,6 +24,13 @@ export interface SystemApp {
   title: string;
   icon: string;
   defaultSize: { width: number; height: number };
+  windowKind?:
+    | "document"
+    | "dialog"
+    | "alert"
+    | "utility"
+    | "desktop"
+    | "presentation";
   scrollable?: boolean;
   resizable?: boolean;
   minSize?: { width: number; height: number };

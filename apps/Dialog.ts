@@ -15,6 +15,7 @@ import {
   TextInputState,
   createTextInputState,
   handleTextInputKey,
+  handleTextInputPaste,
 } from "../lib/toolbox/TextEdit";
 
 const DIALOG_PADDING = 16;
@@ -167,6 +168,12 @@ export const DialogApp: SystemApp = {
           event.metaKey ?? false,
           event.ctrlKey ?? false
         );
+      }
+    }
+
+    if (event.type === "paste" && event.pasteText && showInput) {
+      if (handleTextInputPaste(inputState, event.pasteText)) {
+        app.scheduleRender();
       }
     }
   },

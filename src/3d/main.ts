@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { RectAreaLightUniformsLib } from "three/examples/jsm/lights/RectAreaLightUniformsLib.js";
+import { RectAreaLightHelper } from "three/examples/jsm/helpers/RectAreaLightHelper.js";
 import {
   loadMacPlusModel,
   RASTER_UV_MIN_X,
@@ -12,6 +14,8 @@ import type { CRTPhysicalMaterial } from "./screenShader";
 import { bootOS, mapCRTUVToCanvas, dispatchToOSCanvas } from "./osBridge";
 
 async function init() {
+  RectAreaLightUniformsLib.init();
+
   const container = document.getElementById("three-root")!;
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -44,10 +48,30 @@ async function init() {
   // The model's lighting (softbox, reflections) is already baked in. Adding similar
   // lights here would apply lighting twice. We only add minimal neutral light so
   // the baked result is visible and materials don't render in total darkness.
-  const ambientLight = new THREE.AmbientLight(0xffffff, 2);
+  const ambientLight = new THREE.AmbientLight(0xffe8e8, 2);
   scene.add(ambientLight);
-  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x888888, 0.15);
-  scene.add(hemiLight);
+  // const hemiLight = new THREE.HemisphereLight(0xffe8e8, 0x997777, 0.15);
+  // scene.add(hemiLight);
+
+  const areaLight = new THREE.RectAreaLight(0xffffff, 0.3, 18, 12);
+  areaLight.position.set(-7, 9, 5); // X, Y, Z
+
+  // Point light toward the screen (Mac model is at 3.5, 0, 0)
+  areaLight.lookAt(-3.5, 2, 0);
+  // Roll around the axis the light shines along (local Z). 0 = default; e.g. (45 * Math.PI) / 180 for 45°
+  areaLight.rotation.z = (0 * Math.PI) / 180;
+  scene.add(areaLight);
+  //const areaLightHelper = new RectAreaLightHelper(areaLight);
+  //  areaLight.add(areaLightHelper);
+
+  // const spotLightTarget = new THREE.Object3D();
+  // spotLightTarget.position.set(-3.5, 2, 0);
+  // scene.add(spotLightTarget);
+
+  // const spotLight = new THREE.SpotLight(0xffffff, 2, 0, Math.PI / 2, 0.2, 2);
+  // spotLight.position.set(-7, 9, 5);
+  // spotLight.target = spotLightTarget;
+  // scene.add(spotLight);
 
   // --- Boot OS ---
   const os = await bootOS();
@@ -82,7 +106,7 @@ async function init() {
   }
 
   // --- CRT material ---
-  const CRT_PHOSPHOR_TINT = "#bfe6ff";
+  const CRT_PHOSPHOR_TINT = "#7bcbe2"; //7bcbe2   // bfe6ff
   const CRT_TINT_STRENGTH = 1;
 
   // "#aeeccf" for greener phosphor
@@ -107,9 +131,9 @@ async function init() {
     brightnessKnob,
     screenOffMaterial,
   } = await loadMacPlusModel(crtMaterial);
-  macModel.position.y = -1.5;
-  macModel.position.x = 3.5;
-  macModel.position.z = 0;
+  // macModel.position.y = 0;
+  // macModel.position.x = 3.5;
+  // macModel.position.z = 0;
   macModel.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       child.castShadow = false;
@@ -117,6 +141,14 @@ async function init() {
     }
   });
   scene.add(macModel);
+
+  // --- Debug: scene origin and Mac bounding box ---
+  const axesHelper = new THREE.AxesHelper(1.5);
+  scene.add(axesHelper);
+  macModel.updateWorldMatrix(true, true);
+  // const macBox = new THREE.Box3().setFromObject(macModel);
+  // const boxHelper = new THREE.Box3Helper(macBox, 0xff8800);
+  // scene.add(boxHelper);
 
   let screenOn = true;
   function setScreenPower(on: boolean) {

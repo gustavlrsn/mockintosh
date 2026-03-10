@@ -76,6 +76,8 @@ import { ControlPanelApp } from "../apps/ControlPanel";
 import { PhotoBoothApp } from "../apps/PhotoBooth";
 import { VideoPlayerApp } from "../apps/VideoPlayer";
 import { SafariApp } from "../apps/Safari";
+import { SafariStreamApp } from "../apps/SafariStream";
+import { SafariTextwebApp } from "../apps/SafariTextweb";
 import { PictureApp } from "../apps/Picture";
 import { AppStoreApp } from "../apps/AppStore";
 import { ChatGippityApp } from "../apps/ChatGippity";
@@ -83,6 +85,10 @@ import { SpotifyPlayerApp } from "../apps/SpotifyPlayer";
 import { spotifySprites } from "../apps/sprites/spotify";
 import { DialogApp, computeDialogSize } from "../apps/Dialog";
 import { TestingApp } from "../apps/Testing";
+import { DeckerApp } from "../apps/Decker";
+import dialogDeckSource from "../reference/Decker/examples/decks/dialog.deck?raw";
+import colorDeckSource from "../reference/Decker/examples/decks/color.deck?raw";
+import tourDeckSource from "../reference/Decker/examples/decks/tour.deck?raw";
 
 import { resolution } from "../lib/config";
 import getDefaultPosition from "../utils/getDefaultPosition";
@@ -99,8 +105,11 @@ const appTypeMap: Record<string, string> = {
   ABOUT_THIS_MOCKINTOSH: "about",
   VIDEO: "video",
   SAFARI: "safari",
+  SAFARI_STREAM: "safari-stream",
+  SAFARI_TEXTWEB: "safari-textweb",
   CONTROL_PANEL: "control_panel",
   PICTURE: "picture",
+  DECKER: "decker",
 };
 
 async function loadMarkdownFile(name: string): Promise<string> {
@@ -111,6 +120,13 @@ async function loadMarkdownFile(name: string): Promise<string> {
   } catch {
     return `Could not load ${name}`;
   }
+}
+
+function isDeckerDocument(name: string, raw: string): boolean {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".deck")) return true;
+  if (lower.endsWith(".html") && raw.includes('language="decker"')) return true;
+  return raw.includes("{deck}") && raw.includes("{card:");
 }
 
 /**
@@ -128,6 +144,9 @@ async function bootstrapFreshFS(fs: FileManager): Promise<void> {
   const dev = fs.mkdir(hd.id, "Development");
   await fs.writeFile(dev.id, "README.md", readme, "text");
   await fs.writeFile(dev.id, "CONTRIBUTING.md", contributing, "text");
+  const deckerDir = fs.mkdir(dev.id, "Decker");
+  await fs.writeFile(deckerDir.id, "Dialog.deck", dialogDeckSource, "text");
+  await fs.writeFile(deckerDir.id, "Color.deck", colorDeckSource, "text");
 
   fs.mkdir(hd.id, "Applications");
   fs.mkdir(hd.id, "Trash");
@@ -179,6 +198,9 @@ const DESKTOP_SHORTCUTS: Array<{ name: string; appId: string; icon: string }> =
     },
     { name: "1984.mp4", appId: "video", icon: "icon/MacFlim" },
     { name: "Safari", appId: "safari", icon: "icon/safari" },
+    { name: "Safari Stream", appId: "safari-stream", icon: "icon/safari" },
+    { name: "Safari Textweb", appId: "safari-textweb", icon: "icon/safari" },
+    { name: "Decker", appId: "decker", icon: "icon/computer" },
     { name: "App Store", appId: "appstore", icon: "icon/appstore-smr-32x32" },
     { name: "ChatGippity", appId: "chatgippity", icon: "icon/computer" },
     { name: "Spotify Player", appId: "spotify", icon: "icon/spotify" },
@@ -340,6 +362,9 @@ async function main() {
     PhotoBoothApp,
     VideoPlayerApp,
     SafariApp,
+    SafariStreamApp,
+    SafariTextwebApp,
+    DeckerApp,
     PictureApp,
     AppStoreApp,
     ChatGippityApp,
@@ -580,11 +605,20 @@ async function main() {
       instance.builder.setRenderFunction(scheduleRender);
     }
 
-    // Clamp size to desktop (gray region minus 3px), per original Mac Window Manager
+    const windowKind = appDef.windowKind ?? "document";
+
+    // Clamp size to desktop (gray region minus 3px), per original Mac Window Manager.
+    // Presentation windows are a dedicated fullscreen surface below the menubar.
     const maxW = resolution.width - 6;
     const maxH = resolution.height - MENUBAR_HEIGHT - 6;
-    const winW = Math.min(appDef.defaultSize.width, maxW);
-    const winH = Math.min(appDef.defaultSize.height, maxH);
+    const winW =
+      windowKind === "presentation"
+        ? resolution.width
+        : Math.min(appDef.defaultSize.width, maxW);
+    const winH =
+      windowKind === "presentation"
+        ? resolution.height
+        : Math.min(appDef.defaultSize.height, maxH);
     const sbW = appDef.scrollable ? SCROLLBAR_WIDTH : 0;
     const contentWAtOpen = winW - 1 - sbW;
     const initialContentWidth =
@@ -597,14 +631,20 @@ async function main() {
     const topMin = MENUBAR_HEIGHT + 3;
     const rightMax = resolution.width - 3;
     const bottomMax = resolution.height - 3;
-    const winX = Math.max(leftMin, Math.min(pos.x ?? 20, rightMax - winW));
-    const winY = Math.max(
-      topMin,
-      Math.min(
-        (pos.y ?? 30) + MENUBAR_HEIGHT,
-        bottomMax - TITLE_BAR_HEIGHT - winH
-      )
-    );
+    const winX =
+      windowKind === "presentation"
+        ? 0
+        : Math.max(leftMin, Math.min(pos.x ?? 20, rightMax - winW));
+    const winY =
+      windowKind === "presentation"
+        ? 0
+        : Math.max(
+            topMin,
+            Math.min(
+              (pos.y ?? 30) + MENUBAR_HEIGHT,
+              bottomMax - TITLE_BAR_HEIGHT - winH
+            )
+          );
 
     // Zoom-open animation plays before the window appears (Mac ShowWindow order)
     if (fromRect) {
@@ -632,7 +672,7 @@ async function main() {
       resizable: appDef.resizable ?? false,
       minWidth: appDef.minSize?.width ?? 100,
       minHeight: appDef.minSize?.height ?? 60,
-      windowKind: "document",
+      windowKind,
       openedFromRect: fromRect,
     });
 
@@ -656,7 +696,17 @@ async function main() {
       if (raw) {
         try {
           const { appId } = JSON.parse(raw);
-          openWindow(appId, undefined, undefined, undefined, iconRect);
+          if (appId === "decker") {
+            openWindow(
+              "decker",
+              "The Decker Tour",
+              { initialSource: tourDeckSource },
+              undefined,
+              iconRect
+            );
+          } else {
+            openWindow(appId, undefined, undefined, undefined, iconRect);
+          }
         } catch {}
       }
       return;
@@ -677,6 +727,17 @@ async function main() {
     }
 
     if (file.fileType === "text") {
+      const raw = await mockFS.readFile(file.id);
+      if (raw && isDeckerDocument(file.name, raw)) {
+        openWindow(
+          "decker",
+          file.name,
+          { fileId: file.id, title: file.name },
+          undefined,
+          iconRect
+        );
+        return;
+      }
       openWindow(
         "file",
         file.name,
@@ -1199,7 +1260,7 @@ async function main() {
       return;
     }
 
-    if (event.type === "keyDown" || event.type === "keyUp") {
+    if (event.type === "keyDown" || event.type === "keyUp" || event.type === "paste") {
       const active = windowManager.getActiveWindow();
       if (active && active.id !== DESKTOP_WINDOW_ID) {
         dispatchToApp(active.id, event);

@@ -7,6 +7,7 @@ import {
   TextInputState,
   createTextInputState,
   handleTextInputKey,
+  handleTextInputPaste,
 } from "../lib/toolbox/TextEdit";
 import { measureText, getLineHeight } from "../lib/canvas/fontAdapter";
 import { makeRect } from "@mockintosh/quickdraw";
@@ -497,6 +498,12 @@ export const ChatGippityApp: SystemApp = {
           event.ctrlKey
         )
       ) {
+        app.scheduleRender();
+      }
+    }
+
+    if (event.type === "paste" && event.pasteText) {
+      if (handleTextInputPaste(inputState, event.pasteText)) {
         app.scheduleRender();
       }
     }

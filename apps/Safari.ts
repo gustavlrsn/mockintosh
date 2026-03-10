@@ -6,6 +6,7 @@ import { measureText, getLineHeight } from "../lib/canvas/fontAdapter";
 import {
   createTextInputState,
   handleTextInputKey,
+  handleTextInputPaste,
   handleTextInputClick,
   handleTextInputDoubleClick,
   handleTextInputDrag,
@@ -20,282 +21,132 @@ import {
   inButton,
 } from "../lib/toolbox/ControlManager";
 import {
-  parseSiteMarkup,
-  renderSiteNodes,
-  measureSiteNodes,
-  stripTags,
-  LinkRect,
-  LayoutNode,
-} from "../lib/canvas/ui/SiteMarkup";
+  measureMarkdownContent,
+  renderMarkdownContent,
+  hitTestLink,
+  preloadImages,
+  MarkdownLoadState,
+} from "../lib/canvas/ui/MarkdownView";
+import type { LinkRect, LayoutNode } from "@mockintosh/markdown";
+import { parseMarkdown } from "@mockintosh/markdown";
 
 // ---------------------------------------------------------------------------
-// Site registry
+// Page fetching
+//
+// TWO BACKENDS — swap by changing USE_JINA:
+//
+//   true  → Jina Reader API (client-side, no server needed, handles
+//            Cloudflare / bot-protected sites, CORS-enabled)
+//   false → /api/browse proxy (server-side defuddle; faster for open sites
+//            but blocked by Cloudflare/IP filtering on some domains)
 // ---------------------------------------------------------------------------
 
-interface SiteEntry {
-  name: string;
-  url: string;
-  body: string;
-  keywords?: string[];
-}
+const USE_JINA = false;
+const JINA_BASE = "https://r.jina.ai/";
 
-const siteRegistry: SiteEntry[] = [
-  {
-    name: "Mockintosh",
-    url: "mockintosh.com",
-    keywords: ["mac", "macintosh", "retro", "1-bit", "operating system"],
-    body: `
-<card id="home">
-<h1 align="center">Mockintosh</h1>
-<img src="microdesktop-disk" align="center">
-<spacer height="8">
-<p align="center">A mock operating system in the style of an early Macintosh.</p>
-<hr>
-<h2>Features</h2>
-<ul>
-<li>1-bit black and white graphics at 512x342</li>
-<li>Window management with dragging and layering</li>
-<li>Built-in apps: Finder, Safari, Photo Booth, and more</li>
-<li>Create your own apps with the App Builder</li>
-</ul>
-<p><a href="#about">About this project</a></p>
-</card>
-
-<card id="about">
-<h1>About</h1>
-<p>Mockintosh is an open source project. The design language and icons are inspired by the original Macintosh, designed by Susan Kare.</p>
-<spacer height="8">
-<p><a href="#home">Back to home</a></p>
-</card>
-`,
-  },
-  {
-    name: "Facebook",
-    url: "www.facebook.com",
-    keywords: ["social", "network", "friends"],
-    body: `
-<h1 align="center">Facebook</h1>
-<hr>
-<p align="center">Under Construction</p>
-<spacer height="12">
-<p align="center">This site is not yet available on the Mockintosh web.</p>
-<p align="center">Check back later!</p>
-<spacer height="8">
-<p align="center"><a href="google.com">Back to Google</a></p>
-`,
-  },
-  {
-    name: "Twitter",
-    url: "www.twitter.com",
-    keywords: ["social", "tweets", "microblog"],
-    body: `
-<h1 align="center">Twitter</h1>
-<hr>
-<p align="center">Under Construction</p>
-<spacer height="12">
-<p align="center">140 characters will have to wait.</p>
-<spacer height="8">
-<p align="center"><a href="google.com">Back to Google</a></p>
-`,
-  },
-  {
-    name: "GitHub",
-    url: "www.github.com",
-    keywords: ["code", "git", "repository", "open source", "developer"],
-    body: `
-<h1 align="center">GitHub</h1>
-<hr>
-<p align="center">Under Construction</p>
-<spacer height="12">
-<p align="center">Where the world builds software. Coming soon to Mockintosh.</p>
-<spacer height="8">
-<p align="center"><a href="google.com">Back to Google</a></p>
-`,
-  },
-  {
-    name: "Wikipedia",
-    url: "www.wikipedia.org",
-    keywords: ["encyclopedia", "wiki", "knowledge", "articles"],
-    body: `
-<card id="home">
-<h1 align="center">Wikipedia</h1>
-<p align="center">The Free Encyclopedia</p>
-<hr>
-<h2>Featured Article</h2>
-<p>The Macintosh, later renamed the Macintosh 128K, was the first commercially successful personal computer to feature a mouse and a graphical user interface rather than a command line.</p>
-<p>It was introduced on January 24, 1984. It came bundled with MacWrite and MacPaint.</p>
-<spacer height="4">
-<p><a href="#mac">Read more about the Macintosh</a></p>
-<spacer height="8">
-<p><a href="google.com">Back to Google</a></p>
-</card>
-
-<card id="mac">
-<h1>Macintosh</h1>
-<p>The original Macintosh had a 9-inch monochrome display with a resolution of 512x342 pixels. It shipped with 128KB of RAM and used 3.5-inch floppy disks.</p>
-<spacer height="4">
-<p>The graphical user interface was designed by a team that included Susan Kare, who created the iconic icons, fonts, and interface elements.</p>
-<spacer height="4">
-<h2>Specifications</h2>
-<ul>
-<li>CPU: Motorola 68000 at 7.83 MHz</li>
-<li>RAM: 128KB (later 512KB)</li>
-<li>Display: 512x342 monochrome</li>
-<li>Storage: 400KB 3.5-inch floppy</li>
-</ul>
-<spacer height="8">
-<p><a href="#home">Back to Wikipedia home</a></p>
-</card>
-`,
-  },
-];
-
-// ---------------------------------------------------------------------------
-// Google search
-// ---------------------------------------------------------------------------
-
-interface SearchResult {
-  name: string;
-  url: string;
-  snippet: string;
-}
-
-function searchSites(query: string): SearchResult[] {
-  if (!query.trim()) return [];
-  const q = query.toLowerCase();
-  return siteRegistry
-    .filter((s) => {
-      const haystack = `${s.name} ${s.url} ${(s.keywords || []).join(
-        " "
-      )} ${stripTags(s.body)}`.toLowerCase();
-      return haystack.includes(q);
-    })
-    .map((s) => ({
-      name: s.name,
-      url: s.url,
-      snippet: stripTags(s.body).slice(0, 80),
-    }));
-}
-
-const GOOGLE_SEARCH_BAR_W = 200;
-const GOOGLE_SEARCH_BAR_H = 16;
-const GOOGLE_RESULT_H = 42;
-
-function googleSearchBarLayout(
-  w: number,
-  contentH: number,
-  hasResults: boolean
+async function fetchPage(
+  url: string,
+  sprites: ResourceManager,
+  contentWidth: number,
+  onResult: (nodes: LayoutNode[], title: string) => void,
+  onError: (msg: string) => void
 ) {
-  const barW = Math.min(GOOGLE_SEARCH_BAR_W, w - 40);
-  if (hasResults) {
-    return { barX: 8, barY: 4, barW: w - 16 };
-  }
-  return {
-    barX: Math.floor((w - barW) / 2),
-    barY: Math.floor(contentH / 3) + 24,
-    barW,
-  };
-}
+  try {
+    let markdown: string;
+    let title = "";
 
-function renderGooglePage(
-  ctx: WindowContext,
-  contentY: number,
-  w: number,
-  contentH: number,
-  searchInput: TextInputState,
-  results: SearchResult[],
-  linksRef: { current: LinkRect[] }
-) {
-  const links: LinkRect[] = [];
-  const hasResults = results.length > 0 || searchInput.value.trim() !== "";
-  const layout = googleSearchBarLayout(w, contentH, hasResults);
-
-  if (!hasResults) {
-    const title = "Google";
-    const tw = measureText(title, "menu");
-    ctx.drawText(
-      title,
-      Math.floor((w - tw) / 2),
-      contentY + Math.floor(contentH / 3),
-      { font: "menu", color: BLACK }
-    );
-  }
-
-  ctx.drawTextInput(
-    searchInput,
-    layout.barX,
-    contentY + layout.barY,
-    layout.barW,
-    GOOGLE_SEARCH_BAR_H
-  );
-
-  if (hasResults) {
-    let y = contentY + layout.barY + GOOGLE_SEARCH_BAR_H + 8;
-
-    if (results.length === 0) {
-      ctx.drawText("No results found.", 8, y, {
-        font: "body",
-        color: BLACK,
+    if (USE_JINA) {
+      // --- Jina Reader API ---
+      // GET https://r.jina.ai/<target-url>
+      // Returns clean markdown, CORS-enabled, runs a headless browser server-side.
+      const resp = await fetch(JINA_BASE + url, {
+        headers: {
+          Accept: "text/plain",
+          "X-Return-Format": "markdown",
+        },
       });
-    } else {
-      for (const result of results) {
-        const nameW = measureText(result.name, "menu");
-        ctx.drawText(result.name, 8, y, { font: "menu", color: BLACK });
-        ctx.drawHLine(8, y + getLineHeight("menu") - 2, nameW, BLACK);
-        links.push({ x: 0, y, w, h: GOOGLE_RESULT_H, href: result.url });
-        y += getLineHeight("menu");
-
-        ctx.drawText(result.url, 8, y, { font: "body", color: BLACK });
-        y += getLineHeight("body");
-
-        if (result.snippet) {
-          ctx.drawText(result.snippet, 8, y, {
-            font: "body",
-            color: BLACK,
-          });
-          y += getLineHeight("body");
-        }
-
-        y += 6;
+      if (!resp.ok) {
+        onError(`${resp.status} ${resp.statusText}`);
+        return;
       }
+      const raw = await resp.text();
+      // Jina prepends a metadata block:
+      //   Title: …
+      //   URL Source: …
+      //   Markdown Content:
+      //   <actual markdown>
+      const mdSep = raw.indexOf("Markdown Content:");
+      if (mdSep !== -1) {
+        const header = raw.slice(0, mdSep);
+        const titleMatch = header.match(/^Title:\s*(.+)$/m);
+        if (titleMatch) title = titleMatch[1].trim();
+        markdown = raw.slice(mdSep + "Markdown Content:".length).trim();
+      } else {
+        markdown = raw;
+      }
+    } else {
+      // --- /api/browse proxy (defuddle, server-side) ---
+      const resp = await fetch("/api/browse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: resp.statusText }));
+        onError(err.error || `HTTP ${resp.status}`);
+        return;
+      }
+      const data = await resp.json();
+      markdown = data.markdown;
+      title = data.title;
+    }
+
+    const nodes = parseMarkdown(markdown);
+
+    // Kick off image pre-loads; re-render fires after each resolves
+    preloadImages(nodes, sprites, contentWidth);
+
+    onResult(nodes, title);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    onError(`Network error: ${msg}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// URL helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalise a user-typed string into a full URL.
+ * Returns null if the string looks like a search query rather than a URL.
+ */
+function normalizeUrl(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  // Looks like a domain: contains a dot and no spaces
+  if (/^[^\s]+\.[^\s]+$/.test(s) && !s.includes(" ")) {
+    return `https://${s}`;
+  }
+  return null;
+}
+
+/**
+ * Resolve a link href against the current page URL.
+ * Handles relative paths (../foo), root-relative (/foo), protocol-relative (//foo),
+ * and absolute URLs. Falls back to normalizeUrl for bare domains typed by the user.
+ */
+function resolveLink(href: string, currentUrl: string): string | null {
+  // Try resolving as a URL relative to the current page
+  if (currentUrl) {
+    try {
+      return new URL(href, currentUrl).toString();
+    } catch {
+      // fall through
     }
   }
-
-  linksRef.current = links;
-}
-
-// ---------------------------------------------------------------------------
-// Navigation helper
-// ---------------------------------------------------------------------------
-
-function navigateTo(
-  url: string,
-  history: string[],
-  historyIdx: number,
-  setCurrentUrl: (v: string) => void,
-  setHistory: (v: string[]) => void,
-  setHistoryIdx: (v: number) => void,
-  setCurrentCard: (v: string) => void,
-  setSearchInput: (v: TextInputState) => void,
-  setSearchResults: (v: SearchResult[]) => void,
-  setUrlInput: (v: TextInputState) => void
-) {
-  const isGoogle = url === "google.com";
-  const site = siteRegistry.find((s) => s.url === url);
-  if (!site && !isGoogle) return;
-
-  const newHistory = history.slice(0, historyIdx + 1);
-  newHistory.push(url);
-  setHistory(newHistory);
-  setHistoryIdx(newHistory.length - 1);
-  setCurrentUrl(url);
-  setCurrentCard("home");
-  setSearchInput(createTextInputState(""));
-  setSearchResults([]);
-
-  const newUrlInput = createTextInputState(url);
-  newUrlInput.focused = false;
-  setUrlInput(newUrlInput);
+  return normalizeUrl(href);
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +155,10 @@ function navigateTo(
 
 const HEADER_HEIGHT = 28;
 const CONTENT_MARGIN = 8;
+
+type LoadingState = MarkdownLoadState;
+
+const START_PAGE = "";
 
 export const SafariApp: SystemApp = {
   id: "safari",
@@ -319,19 +174,16 @@ export const SafariApp: SystemApp = {
 
     // --- Hooks (must match order in onEvent and getContentHeight) ---
     const [urlInput, setUrlInput] = app.useState<TextInputState>(
-      createTextInputState("google.com")
+      createTextInputState(START_PAGE)
     );
-    const [currentUrl, setCurrentUrl] = app.useState("google.com");
-    const [history, setHistory] = app.useState<string[]>(["google.com"]);
+    const [currentUrl, setCurrentUrl] = app.useState(START_PAGE);
+    const [history, setHistory] = app.useState<string[]>([START_PAGE]);
     const [historyIdx, setHistoryIdx] = app.useState(0);
-    const [searchInput, setSearchInput] = app.useState<TextInputState>(
-      createTextInputState("")
-    );
-    app.useState<"url" | "search" | null>(null); // dragging — not used in render
-    const [searchResults, setSearchResults] = app.useState<SearchResult[]>([]);
-    const [currentCard, setCurrentCard] = app.useState("home");
     const linksRef = app.useRef<LinkRect[]>([]);
     const controlsCreatedRef = app.useRef(false);
+    const [pageNodes, setPageNodes] = app.useState<LayoutNode[]>([]);
+    const [loadingState, setLoadingState] = app.useState<LoadingState>("idle");
+    const [errorMessage, setErrorMessage] = app.useState<string | null>(null);
 
     // --- Header bar ---
     ctx.clear(WHITE);
@@ -341,59 +193,63 @@ export const SafariApp: SystemApp = {
     const win = ctx.getWindow();
     if (win !== null) {
       if (!controlsCreatedRef.current) {
-        const backHandle = NewControl(
-          win,
-          makeRect(4, 4, 24, 24),
-          "<",
-          true,
-          0,
-          0,
-          1,
-          0,
-          0
+        NewControl(win, makeRect(4, 4, 24, 24), "<", true, 0, 0, 1, 0, 0);
+        NewControl(win, makeRect(4, 24, 24, 44), ">", true, 0, 0, 1, 0, 0);
+        controlsCreatedRef.current = true;
+      }
+
+      const contentWidth = ctx.width - CONTENT_MARGIN * 2;
+
+      const goTo = (url: string) => {
+        setCurrentUrl(url);
+        setUrlInput(createTextInputState(url));
+        setLoadingState("loading");
+        setPageNodes([]);
+        setErrorMessage(null);
+        app.scheduleRender();
+        fetchPage(
+          url,
+          sprites,
+          contentWidth,
+          (nodes) => {
+            setPageNodes(nodes);
+            setLoadingState("idle");
+            app.scheduleRender();
+          },
+          (msg) => {
+            setLoadingState("error");
+            setErrorMessage(msg);
+            app.scheduleRender();
+          }
         );
-        backHandle.ref.contrlAction = (_c, partCode) => {
+      };
+
+      const backControl = win.controlList[0];
+      const fwdControl = win.controlList[1];
+
+      // Refresh action callbacks every render so they close over current state.
+      if (backControl) {
+        backControl.ref.contrlAction = (_c, partCode) => {
           if (partCode === inButton && historyIdx > 0) {
             const newIdx = historyIdx - 1;
             setHistoryIdx(newIdx);
-            setCurrentUrl(history[newIdx]);
-            setCurrentCard("home");
-            setSearchInput(createTextInputState(""));
-            setSearchResults([]);
-            setUrlInput(createTextInputState(history[newIdx]));
+            goTo(history[newIdx]);
           }
         };
-        const fwdHandle = NewControl(
-          win,
-          makeRect(4, 24, 24, 44),
-          ">",
-          true,
-          0,
-          0,
-          1,
-          0,
-          0
-        );
-        fwdHandle.ref.contrlAction = (_c, partCode) => {
+        backControl.ref.contrlHilite = historyIdx <= 0 ? 255 : 0;
+      }
+      if (fwdControl) {
+        fwdControl.ref.contrlAction = (_c, partCode) => {
           if (partCode === inButton && historyIdx < history.length - 1) {
             const newIdx = historyIdx + 1;
             setHistoryIdx(newIdx);
-            setCurrentUrl(history[newIdx]);
-            setCurrentCard("home");
-            setSearchInput(createTextInputState(""));
-            setSearchResults([]);
-            setUrlInput(createTextInputState(history[newIdx]));
+            goTo(history[newIdx]);
           }
         };
-        controlsCreatedRef.current = true;
-      }
-      // Update disabled state (contrlHilite 255 = inactive)
-      const backControl = win.controlList[0];
-      const fwdControl = win.controlList[1];
-      if (backControl) backControl.ref.contrlHilite = historyIdx <= 0 ? 255 : 0;
-      if (fwdControl)
         fwdControl.ref.contrlHilite =
           historyIdx >= history.length - 1 ? 255 : 0;
+      }
+
       DrawControls(win, ctx.port);
     }
 
@@ -401,49 +257,34 @@ export const SafariApp: SystemApp = {
       id: "url-input",
       onChange: () => {
         setUrlInput((prev) => ({ ...prev, focused: true }));
-        setSearchInput((prev) => ({ ...prev, focused: false }));
         app.scheduleRender();
       },
     });
 
-    // --- Scrollable content (page) below the fixed URL bar ---
+    // --- Scrollable content ---
     ctx.drawScrollableContent((scrollCtx) => {
-      const contentH = scrollCtx.height;
-      if (currentUrl === "google.com") {
-        renderGooglePage(
-          scrollCtx,
-          0,
-          scrollCtx.width,
-          contentH,
-          searchInput,
-          searchResults,
-          linksRef
+      if (!currentUrl) {
+        // Start page
+        const line1 = "Enter a URL above to browse the web.";
+        const tw = measureText(line1, "body");
+        scrollCtx.drawText(
+          line1,
+          Math.max(CONTENT_MARGIN, Math.floor((scrollCtx.width - tw) / 2)),
+          Math.floor(scrollCtx.height / 2) - getLineHeight("body"),
+          { font: "body", color: BLACK }
         );
-      } else {
-        const site = siteRegistry.find((s) => s.url === currentUrl);
-        if (site) {
-          const cards = parseSiteMarkup(site.body);
-          const cardNodes =
-            cards.get(currentCard) || cards.values().next().value || [];
-          const result = renderSiteNodes(scrollCtx, cardNodes as LayoutNode[], {
-            startY: CONTENT_MARGIN,
-            width: scrollCtx.width,
-            margin: CONTENT_MARGIN,
-            sprites,
-          });
-          linksRef.current = result.links;
-        } else {
-          scrollCtx.drawText("Page not found", 16, 16, {
-            font: "menu",
-            color: BLACK,
-          });
-          scrollCtx.drawText(currentUrl, 16, 34, {
-            font: "body",
-            color: BLACK,
-          });
-          linksRef.current = [];
-        }
+        linksRef.current = [];
+        return;
       }
+
+      linksRef.current = renderMarkdownContent(
+        scrollCtx,
+        pageNodes,
+        loadingState,
+        errorMessage,
+        sprites,
+        { width: scrollCtx.width, margin: CONTENT_MARGIN }
+      );
     });
   },
 
@@ -452,42 +293,74 @@ export const SafariApp: SystemApp = {
   },
 
   onEvent(app: AppBuilder, event: OSEvent, props: any, size: WindowSize) {
+    const sprites: ResourceManager = props._sprites;
+
     // --- Hooks (same order as render) ---
     const [urlInput, setUrlInput] = app.useState<TextInputState>(
-      createTextInputState("google.com")
+      createTextInputState(START_PAGE)
     );
-    const [currentUrl, setCurrentUrl] = app.useState("google.com");
-    const [history, setHistory] = app.useState<string[]>(["google.com"]);
+    const [currentUrl, setCurrentUrl] = app.useState(START_PAGE);
+    const [history, setHistory] = app.useState<string[]>([START_PAGE]);
     const [historyIdx, setHistoryIdx] = app.useState(0);
-    const [searchInput, setSearchInput] = app.useState<TextInputState>(
-      createTextInputState("")
-    );
-    const [dragging, setDragging] = app.useState<"url" | "search" | null>(null);
-    const [searchResults, setSearchResults] = app.useState<SearchResult[]>([]);
-    const [, setCurrentCard] = app.useState("home");
-    const linksRef = app.useRef<LinkRect[]>([]);
+    const linksRef = app.useRef<LinkRect[]>([]); // linksRef
     app.useRef(false); // controlsCreatedRef
+    const [, setPageNodes] = app.useState<LayoutNode[]>([]);
+    const [, setLoadingState] = app.useState<LoadingState>("idle");
+    const [, setErrorMessage] = app.useState<string | null>(null);
+
+    const navigateToUrl = (typed: string) => {
+      const fullUrl = normalizeUrl(typed);
+      if (!fullUrl) return;
+
+      const newHistory = history.slice(0, historyIdx + 1);
+      newHistory.push(typed);
+      setHistory(newHistory);
+      setHistoryIdx(newHistory.length - 1);
+      setCurrentUrl(typed);
+      const newUrlInput = createTextInputState(typed);
+      newUrlInput.focused = false;
+      setUrlInput(newUrlInput);
+
+      setLoadingState("loading");
+      setPageNodes([]);
+      setErrorMessage(null);
+      app.scheduleRender();
+
+      const contentWidth = size.width - CONTENT_MARGIN * 2;
+      fetchPage(
+        fullUrl,
+        sprites,
+        contentWidth,
+        (nodes, _title) => {
+          setPageNodes(nodes);
+          setLoadingState("idle");
+          app.scheduleRender();
+        },
+        (msg) => {
+          setLoadingState("error");
+          setErrorMessage(msg);
+          app.scheduleRender();
+        }
+      );
+    };
+
+    // --- Paste ---
+    if (event.type === "paste" && event.pasteText) {
+      if (urlInput.focused) {
+        if (handleTextInputPaste(urlInput, event.pasteText)) {
+          setUrlInput({ ...urlInput });
+        }
+      }
+      return;
+    }
 
     // --- Keyboard ---
     if (event.type === "keyDown") {
-      if (event.key === "Enter") {
-        if (urlInput.focused) {
-          navigateTo(
-            urlInput.value,
-            history,
-            historyIdx,
-            setCurrentUrl,
-            setHistory,
-            setHistoryIdx,
-            setCurrentCard,
-            setSearchInput,
-            setSearchResults,
-            setUrlInput
-          );
-        } else if (currentUrl === "google.com") {
-          setSearchResults(searchSites(searchInput.value));
-        }
-      } else if (urlInput.focused) {
+      if (event.key === "Enter" && urlInput.focused) {
+        navigateToUrl(urlInput.value.trim());
+        return;
+      }
+      if (urlInput.focused) {
         if (
           handleTextInputKey(
             urlInput,
@@ -500,123 +373,30 @@ export const SafariApp: SystemApp = {
         ) {
           setUrlInput({ ...urlInput });
         }
-      } else if (currentUrl === "google.com") {
-        searchInput.focused = true;
-        if (
-          handleTextInputKey(
-            searchInput,
-            event.key!,
-            event.code!,
-            event.shiftKey,
-            event.metaKey,
-            event.ctrlKey
-          )
-        ) {
-          setSearchInput({ ...searchInput });
-        }
       }
     }
 
     // --- Mouse down / double-click ---
     if (event.type === "mouseDown" || event.type === "doubleClick") {
-      let focusedUrl = false;
-      let focusedSearch = false;
-      let newDragging: "url" | "search" | null = null;
-
-      const inFixedStrip =
-        event.contentRegion === "fixed" ||
-        (event.contentRegion === undefined && event.y! < HEADER_HEIGHT);
       const inScrollable =
         event.contentRegion === "scrollable" ||
         (event.contentRegion === undefined && event.y! >= HEADER_HEIGHT);
 
-      if (inFixedStrip) {
-        // URL bar: hit region from drawTextInput (id: url-input) handles clicks/drag
-        // Nav buttons handled by Control Manager
-      } else if (inScrollable) {
-        // Content area click — check links first (event.y is in scrollable-content space)
-        const links = linksRef.current;
-        for (const link of links) {
-          if (
-            event.x! >= link.x &&
-            event.x! < link.x + link.w &&
-            event.y! >= link.y &&
-            event.y! < link.y + link.h
-          ) {
-            if (link.href.startsWith("#")) {
-              setCurrentCard(link.href.slice(1));
-            } else {
-              navigateTo(
-                link.href,
-                history,
-                historyIdx,
-                setCurrentUrl,
-                setHistory,
-                setHistoryIdx,
-                setCurrentCard,
-                setSearchInput,
-                setSearchResults,
-                setUrlInput
-              );
-            }
-            return;
-          }
-        }
-
-        // Google search input click (event.y in scrollable-content space)
-        if (currentUrl === "google.com") {
-          const contentH = size.height - HEADER_HEIGHT;
-          const hasResults =
-            searchResults.length > 0 || searchInput.value.trim() !== "";
-          const layout = googleSearchBarLayout(
-            size.width,
-            contentH,
-            hasResults
-          );
-          const sx = layout.barX;
-          const sy = layout.barY;
-
-          if (
-            event.x! >= sx &&
-            event.x! < sx + layout.barW &&
-            event.y! >= sy &&
-            event.y! < sy + GOOGLE_SEARCH_BAR_H
-          ) {
-            focusedSearch = true;
-            const localX = event.x! - sx;
-            if (event.type === "doubleClick") {
-              handleTextInputDoubleClick(searchInput, localX);
-            } else {
-              handleTextInputClick(searchInput, localX, event.shiftKey);
-              newDragging = "search";
-            }
-            setSearchInput({ ...searchInput, focused: true });
-          }
+      if (inScrollable) {
+        const hit = hitTestLink(linksRef.current, event.x!, event.y!);
+        if (hit) {
+          const resolved = resolveLink(hit.href, currentUrl);
+          if (resolved) navigateToUrl(resolved);
+          return;
         }
       }
 
-      if (!focusedUrl) setUrlInput({ ...urlInput, focused: false });
-      if (!focusedSearch) setSearchInput({ ...searchInput, focused: false });
-      setDragging(newDragging);
-    }
-
-    // --- Mouse drag ---
-    if (event.type === "mouseMove" && dragging) {
-      if (dragging === "search") {
-        const contentH = size.height - HEADER_HEIGHT;
-        const hasResults =
-          searchResults.length > 0 || searchInput.value.trim() !== "";
-        const layout = googleSearchBarLayout(size.width, contentH, hasResults);
-        const localX = event.x! - layout.barX;
-        if (handleTextInputDrag(searchInput, localX)) {
-          setSearchInput({ ...searchInput });
-        }
-      }
+      setUrlInput({ ...urlInput, focused: false });
     }
 
     // --- Mouse up ---
     if (event.type === "mouseUp") {
-      if (dragging) setDragging(null);
+      // nothing extra needed
     }
   },
 
@@ -624,38 +404,19 @@ export const SafariApp: SystemApp = {
     const sprites: ResourceManager = props._sprites;
 
     // --- Hooks (same order as render) ---
-    app.useState<TextInputState>(createTextInputState("google.com"));
-    const [currentUrl] = app.useState("google.com");
-    app.useState<string[]>(["google.com"]);
+    app.useState<TextInputState>(createTextInputState(START_PAGE));
+    app.useState(START_PAGE);
+    app.useState<string[]>([START_PAGE]);
     app.useState(0);
-    app.useState<TextInputState>(createTextInputState(""));
-    app.useState<"url" | "search" | null>(null);
-    const [searchResults] = app.useState<SearchResult[]>([]);
-    const [currentCard] = app.useState("home");
-    app.useRef<LinkRect[]>([]); // linksRef — keep hook alignment
-    app.useRef(false); // controlsCreatedRef
+    app.useRef<LinkRect[]>([]);
+    app.useRef(false);
+    const [pageNodes] = app.useState<LayoutNode[]>([]);
+    const [loadingState] = app.useState<LoadingState>("idle");
+    app.useState<string | null>(null);
 
-    if (currentUrl === "google.com") {
-      const baseH =
-        searchResults.length > 0
-          ? 28 + searchResults.length * (GOOGLE_RESULT_H + 6) + 16
-          : 200;
-      return Math.max(baseH, 200);
-    }
-
-    const site = siteRegistry.find((s) => s.url === currentUrl);
-    if (!site) return 200;
-
-    const cards = parseSiteMarkup(site.body);
-    const cardNodes =
-      cards.get(currentCard) || cards.values().next().value || [];
+    if (loadingState !== "idle" || pageNodes.length === 0) return 200;
     return (
-      measureSiteNodes(
-        cardNodes as LayoutNode[],
-        size.width,
-        CONTENT_MARGIN,
-        sprites
-      ) +
+      measureMarkdownContent(pageNodes, size.width, CONTENT_MARGIN, sprites) +
       CONTENT_MARGIN * 2
     );
   },

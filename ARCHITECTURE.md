@@ -130,6 +130,9 @@ lib/canvas/                 Core OS engine
   fontAdapter.ts           Decker-font measurement and glyph blitting bridge
   patterns.ts              8×8 fill patterns (checkers, stripes, grays)
 
+  decker/
+    core.ts                Decker/Lil runtime host — deck_read, tick, fire_event_async, host stubs (see docs/decker-port.md)
+
   fs/                      Virtual file system
     MockFS.ts              Hierarchical FS with types, metadata, change subscriptions
     OPFSBackend.ts         OPFS persistence layer (metadata sidecar + content blobs)
@@ -161,6 +164,7 @@ apps/                      System app implementations
   ChatGippity.ts           Simple LLM chat interface
   SpotifyPlayer.ts         Spotify Web Playback SDK integration
   Dialog.ts                Modal dialog system app
+  Decker.ts                Decker document player (Lil + 1-bit rasterization of cards/widgets)
 
   sprites/                 App-owned sprite data (for system apps that own their sprites)
     spotify.ts             Spotify Player sprite definitions

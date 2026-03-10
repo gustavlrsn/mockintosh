@@ -11,6 +11,8 @@
     "preview": "vite preview",
     "dev:api": "tsx scripts/dev-api.ts",
     "build:content": "tsx scripts/build-content.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "knip": "knip"
   },
   "dependencies": {
@@ -19,22 +21,30 @@
     "canvas-flatten": "^1.0.1",
     "codepage-encoder": "^1.0.0",
     "dayjs": "^1.11.11",
+    "defuddle": "^0.14.0",
     "esc-pos-encoder": "^2.0.1",
     "gray-matter": "^4.0.2",
     "linewrap": "^0.2.1",
+    "linkedom": "^0.18.12",
     "lodash": "^4.17.21",
+    "mdast-util-from-markdown": "^2.0.3",
     "remark": "^12.0.0",
     "remark-html": "^13.0.2",
+    "textweb": "^0.2.5",
     "three": "^0.183.2"
   },
   "devDependencies": {
     "@types/lodash": "^4.17.0",
     "@types/node": "20.12.8",
     "@types/sharp": "^0.31.1",
+    "@types/ws": "^8.18.1",
     "knip": "^5.86.0",
+    "playwright": "^1.58.2",
     "sharp": "^0.34.5",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vitest": "^4.1.0",
+    "ws": "^8.20.0"
   }
 }
