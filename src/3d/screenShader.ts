@@ -8,8 +8,18 @@ import * as THREE from "three";
  * responds to scene lighting while bright pixels glow through.
  *
  * The CRT mesh covers the full glass opening. The OS texture occupies a
- * sub-rectangle defined by rasterMin / rasterMax in UV space.
- * Outside that region, the surface is dark CRT glass.
+ * sub-rectangle defined by rasterMin / rasterMax in UV space. The entire
+ * mesh uses this material (same base color, clearcoat, roughness); only
+ * the raster region gets emissive (OS content). Outside the raster we just
+ * zero out emissive — the surface is still dark reflective glass, so
+ * clearcoat can reflect the bezel at sharp angles. If that reflection is
+ * too prominent, extend the raster (reduce insets) or lower clearcoat.
+ *
+ * This shader does not discard or skip any fragments; it runs for every pixel
+ * of the screen mesh. If the glass refracts to a dark void at sharp angles,
+ * either (1) the screen mesh does not extend that far (extend it in Blender),
+ * or (2) the bezel wins the depth test there, so the refracted sample sees
+ * the bezel instead of the screen. Fix (1) is the usual solution.
  */
 
 export interface CRTShaderOptions {

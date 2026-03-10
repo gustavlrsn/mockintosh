@@ -18,11 +18,11 @@ async function init() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 1.22;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1a1a1a);
+  scene.background = new THREE.Color(0xdcdcdc);
 
   const camera = new THREE.PerspectiveCamera(
     40,
@@ -40,16 +40,14 @@ async function init() {
   controls.maxDistance = 12;
   controls.update();
 
-  // --- Lighting ---
-  scene.add(new THREE.AmbientLight(0xffffff, 0.3));
-
-  const keyLight = new THREE.PointLight(0xffe8c0, 25, 30);
-  keyLight.position.set(3, 4, 4);
-  scene.add(keyLight);
-
-  const backLight = new THREE.PointLight(0xffffff, 8, 20);
-  backLight.position.set(0, 2, -4);
-  scene.add(backLight);
+  // --- Lighting: display-only for baked textures ---
+  // The model's lighting (softbox, reflections) is already baked in. Adding similar
+  // lights here would apply lighting twice. We only add minimal neutral light so
+  // the baked result is visible and materials don't render in total darkness.
+  const ambientLight = new THREE.AmbientLight(0xffffff, 2);
+  scene.add(ambientLight);
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x888888, 0.15);
+  scene.add(hemiLight);
 
   // --- Boot OS ---
   const os = await bootOS();
@@ -112,6 +110,12 @@ async function init() {
   macModel.position.y = -1.5;
   macModel.position.x = 3.5;
   macModel.position.z = 0;
+  macModel.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.castShadow = false;
+      child.receiveShadow = false;
+    }
+  });
   scene.add(macModel);
 
   let screenOn = true;
@@ -199,16 +203,7 @@ async function init() {
     );
   }
 
-  // --- Floor ---
-  const floorGeo = new THREE.PlaneGeometry(20, 20);
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x222222,
-    roughness: 0.9,
-  });
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -1.95;
-  scene.add(floor);
+  document.body.style.background = "red"; // dcdcdc
 
   // --- Mouse interaction ---
   const raycaster = new THREE.Raycaster();
@@ -346,6 +341,7 @@ async function init() {
       updateUpscaledTexture();
     }
     controls.update();
+
     renderer.render(scene, camera);
 
     fpsFrames++;

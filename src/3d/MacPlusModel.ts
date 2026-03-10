@@ -15,25 +15,24 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
  * sub-rectangle of that UV space defined by the RASTER_UV_* constants.
  */
 
-const MODEL_PATH = "/mac-simple.glb";
+const TEXTURED_MODEL_PATH = "/mockintosh-simple.glb";
+const TEXTURED_MODEL_SCALE = 1;
 
-/**
- * The GLB was authored in mm. We scale it so the overall model is
- * roughly the same size as the previous procedural one (~3.4 Three.js
- * units tall = 13.6 inches * 0.25). The model's case height is ~345 mm,
- * so the scale factor is 3.4 / 345 ≈ 0.00986. We'll use 0.01 and
- * fine-tune if needed.
- */
-const GLB_SCALE = 0.01;
+/** Real-world Mac Plus height (mm), for inferring model units from bounding box. */
+const MAC_PLUS_HEIGHT_MM = 354;
 
 /**
  * UV-space bounds of the OS raster within the screen mesh.
  *
- * The screen mesh is ~193mm wide x ~152mm tall.
+ * The screen mesh is ~193mm wide x ~152mm tall (real-world Mac Plus dimensions).
  * The OS raster is 512x342 pixels.
  *
  * We define a horizontal inset and derive the vertical inset
  * to preserve the OS aspect ratio on the physical screen surface.
+ *
+ * These mm values are used only to form the screen's aspect ratio (width/height).
+ * They do not depend on the GLB's unit scale or TEXTURED_MODEL_SCALE—UVs are
+ * normalized on the mesh regardless of world-space size.
  */
 const SCREEN_WIDTH_MM = 193;
 const SCREEN_HEIGHT_MM = 152;
@@ -65,10 +64,11 @@ export async function loadMacPlusModel(
   crtMaterial: THREE.Material
 ): Promise<MacPlusModelResult> {
   const loader = new GLTFLoader();
-  const gltf = await loader.loadAsync(MODEL_PATH);
+  const gltf = await loader.loadAsync(TEXTURED_MODEL_PATH);
 
   const group = gltf.scene;
-  group.scale.setScalar(GLB_SCALE);
+  logNonUnitScales(group, "GLB (before TEXTURED_MODEL_SCALE)");
+  group.scale.setScalar(TEXTURED_MODEL_SCALE);
 
   let crtMesh: THREE.Mesh | null = null;
   let screenOffMaterial: THREE.Material | null = null;
@@ -78,6 +78,7 @@ export async function loadMacPlusModel(
     if (!(child instanceof THREE.Mesh)) return;
 
     if (child.name === "screen") {
+      console.log("found screen");
       screenOffMaterial = new THREE.MeshPhysicalMaterial({
         color: 0x020203,
         roughness: 0.15,
@@ -88,21 +89,28 @@ export async function loadMacPlusModel(
       child.material = crtMaterial;
       crtMesh = child;
     } else if (child.name === "screen_glass") {
+      console.log("found screen_glass");
       child.material = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
         roughness: 0.0,
         metalness: 0.0,
         transmission: 1.0,
-        thickness: 0.1,
+        /** Glass thickness in scene units; affects transmission/refraction. Tune to match model scale (e.g. ~3–5 mm real glass → scale-appropriate value). */
+        thickness: 0.1, // 2mm thick,
         ior: 1.52,
+        /** Lower = sharper reflections at grazing angles (can show opposite side). Higher = softer sheen. */
         clearcoat: 1.0,
-        clearcoatRoughness: 0.05,
+        // clearcoatRoughness: 1,
       });
+      child.frustumCulling = false;
       child.renderOrder = 1;
     } else if (child.name === "twist") {
       brightnessKnob = child;
     }
   });
+
+  // Uncomment to test refraction without the case (confirms bezel was occluding refracted samples):
+  // group.traverse((child) => { if (child.name === "pc_case") child.visible = false; });
 
   if (!crtMesh) {
     throw new Error(
@@ -111,12 +119,120 @@ export async function loadMacPlusModel(
     );
   }
 
+  logScreenRasterCoverage(crtMesh);
+  logModelScale(group);
+
   return {
     group,
     crtMesh,
     brightnessKnob,
     screenOffMaterial: screenOffMaterial!,
   };
+}
+
+const SCALE_EPS = 1e-5;
+
+function isUnitScale(s: THREE.Vector3): boolean {
+  return (
+    Math.abs(s.x - 1) < SCALE_EPS &&
+    Math.abs(s.y - 1) < SCALE_EPS &&
+    Math.abs(s.z - 1) < SCALE_EPS
+  );
+}
+
+/**
+ * Logs the screen mesh's UV range and the raster UV bounds so we can see if the
+ * CRT content (raster) extends far enough. If the mesh UVs don't span [0,1],
+ * or the raster insets are large, the reflective "border" (outside raster) may
+ * be visible and reflect the bezel at sharp angles.
+ */
+function logScreenRasterCoverage(screenMesh: THREE.Mesh): void {
+  const geo = screenMesh.geometry;
+  const uvAttr = geo.getAttribute("uv") ?? geo.getAttribute("uv2");
+  const box = new THREE.Box3().setFromObject(screenMesh);
+
+  const rasterU = (1 - 2 * H_INSET) * 100;
+  const rasterV = (1 - 2 * V_INSET) * 100;
+  console.log("[MacPlusModel] CRT raster coverage (UV space):", {
+    rasterMin: [RASTER_UV_MIN_X, RASTER_UV_MIN_Y],
+    rasterMax: [RASTER_UV_MAX_X, RASTER_UV_MAX_Y],
+    rasterWidthPercent: rasterU.toFixed(1) + "%",
+    rasterHeightPercent: rasterV.toFixed(1) + "%",
+    borderH: H_INSET,
+    borderV: V_INSET,
+  });
+
+  if (uvAttr) {
+    const count = uvAttr.count;
+    let minU = Infinity,
+      maxU = -Infinity,
+      minV = Infinity,
+      maxV = -Infinity;
+    for (let i = 0; i < count; i++) {
+      const u = uvAttr.getX(i);
+      const v = uvAttr.getY(i);
+      minU = Math.min(minU, u);
+      maxU = Math.max(maxU, u);
+      minV = Math.min(minV, v);
+      maxV = Math.max(maxV, v);
+    }
+    console.log("[MacPlusModel] Screen mesh UV range:", {
+      u: [minU, maxU],
+      v: [minV, maxV],
+      spansZeroOne:
+        minU <= 0 && maxU >= 1 && minV <= 0 && maxV >= 1
+          ? "yes"
+          : "no — raster bounds may not align with visible area",
+    });
+  } else {
+    console.warn("[MacPlusModel] Screen mesh has no uv/uv2 attribute.");
+  }
+
+  console.log("[MacPlusModel] Screen mesh world bounds:", {
+    min: box.min.toArray(),
+    max: box.max.toArray(),
+    size: box.getSize(new THREE.Vector3()).toArray(),
+  });
+}
+
+/**
+ * Logs the full model's world-space size and infers scale from known Mac Plus height.
+ * Run after group.scale is applied so the box is in final units.
+ */
+function logModelScale(group: THREE.Group): void {
+  group.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(group);
+  const size = box.getSize(new THREE.Vector3());
+  const heightUnits = size.y;
+  const unitsPerMm = heightUnits / MAC_PLUS_HEIGHT_MM;
+  console.log("[MacPlusModel] Model bounds (after scale):", {
+    size: { x: size.x, y: size.y, z: size.z },
+    heightUnits,
+    realHeightMm: MAC_PLUS_HEIGHT_MM,
+    inferredUnitsPerMm: unitsPerMm,
+    note: "If heightUnits ≈ 0.345 then model is in meters; if ≈ 345 then in mm.",
+  });
+}
+
+/** Logs any object in the hierarchy whose scale is not (1,1,1). */
+function logNonUnitScales(root: THREE.Object3D, label: string): void {
+  const odd: { name: string; scale: [number, number, number] }[] = [];
+  root.traverse((child) => {
+    if (!isUnitScale(child.scale)) {
+      odd.push({
+        name: child.name || "(unnamed)",
+        scale: [child.scale.x, child.scale.y, child.scale.z],
+      });
+    }
+  });
+  if (odd.length > 0) {
+    console.warn(
+      `[MacPlusModel] ${label}: non-unit scale on ${odd.length} object(s):`,
+      odd
+    );
+  } else {
+    console.log(`[MacPlusModel] ${label}: all scales are (1,1,1).`);
+  }
 }
 
 function getMeshNames(root: THREE.Object3D): string[] {
