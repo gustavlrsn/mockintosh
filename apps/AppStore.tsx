@@ -1,9 +1,7 @@
 import { For, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { Button } from "@mockintosh/ui";
-import { useApp, type AppManifest } from "@mockintosh/sdk";
-import { registerApp } from "../src/os/apps";
+import { useApp, type AppManifest, defineApp } from "@mockintosh/sdk";
 import { useOS } from "../src/os/context";
-import { useWindow } from "../src/os/windowContext";
 import { installedAppIds } from "../src/os/installedApps";
 
 interface RegistryEntry {
@@ -26,10 +24,12 @@ function sdkMajor(sdk: string): number {
   return m ? parseInt(m[1], 10) : 0;
 }
 
-export function AppStore(_props: Record<string, unknown>): JSX.Element {
+function AppStore(_props: Record<string, unknown>): JSX.Element {
+  const app = useApp();
+  const win = app.window;
+  const fetch = app.fetch!; // present: the app requires "network"
+  // Installing apps is a shell privilege, not an SDK power: reach the OS directly.
   const os = useOS();
-  const win = useWindow();
-  const fetch = useApp().fetch!; // present: the app requires "network"
   const [entries, setEntries] = createSignal<RegistryEntry[]>([]);
   // Reactive: installing (or trashing a .app in the Finder) updates the list.
   const installed = createMemo(() => new Set(installedAppIds(os.fs)));
@@ -104,7 +104,7 @@ export function AppStore(_props: Record<string, unknown>): JSX.Element {
                   />
                 }
               >
-                <Button label="Open" onClick={() => os.openApp(e.id)} />
+                <Button label="Open" onClick={() => app.os.openWindow(e.id)} />
               </Show>
             </box>
           )}
@@ -114,7 +114,7 @@ export function AppStore(_props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "appstore",
   requires: ["network"],
   title: "App Store",

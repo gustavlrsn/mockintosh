@@ -110,12 +110,3 @@ export function ditherVideoFrame(
   }
 }
 
-/** Pack 1-bit pixels into the 2bpp sprite-file encoding (see `saveSpriteFile`). */
-export function pack1bitTo2bpp(pixels: Uint8Array): string {
-  const packed = new Uint8Array(Math.ceil(pixels.length / 4));
-  for (let i = 0; i < pixels.length; i++) {
-    const bits = pixels[i] ? 0b10 : 0b01;
-    packed[Math.floor(i / 4)] |= bits << (6 - (i % 4) * 2);
-  }
-  return btoa(String.fromCharCode(...packed));
-}

@@ -6,7 +6,7 @@
  * from `useApp()`.
  */
 
-import { createContext, useContext } from "solid-js";
+import { createContext, useContext, type Accessor, type JSX } from "solid-js";
 import type { FileSystem } from "@mockintosh/fs";
 import type { GrafPort } from "@mockintosh/quickdraw";
 import type { Sprite } from "@mockintosh/ui";
@@ -37,13 +37,20 @@ export {
   type FSDirectory,
   type FileContent,
   type WriteFileOptions,
+  type NodeAttributes,
   type FSErrorCode,
 } from "@mockintosh/fs";
 
 // The screen is 1-bit: every pixel is one of two inks. Sprites are the
 // 1-bit image asset format; `defineSprite` / `fromGrid` build them.
-export { BLACK, WHITE, defineSprite, fromGrid } from "@mockintosh/ui";
+export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid } from "@mockintosh/ui";
 export type { Sprite } from "@mockintosh/ui";
+export {
+  readSpriteFile,
+  writeSpriteFile,
+  type SpriteFileContent,
+  type WriteSpriteFileOptions,
+} from "./spriteFile";
 
 export interface DialogOptions {
   message: string;
@@ -226,7 +233,7 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
    * prefixed with the app id to avoid clashing with built-ins.
    */
   sprites?: Record<string, Sprite>;
-  Component: (props: P) => unknown;
+  Component: (props: P) => JSX.Element;
 }
 
 /** Props the OS passes when an app is launched to open a file. */
@@ -241,10 +248,31 @@ export function defineApp<P extends Record<string, unknown>>(app: SolidApp<P>): 
   return app;
 }
 
+/**
+ * The window a component is mounted in. Sizes are reactive accessors — read
+ * them inside JSX or effects; a component that fills the window is
+ * `<box width={window.width()} height={window.height()}>`.
+ */
+export interface AppWindow {
+  readonly id: string;
+  /** Content width in pixels (excluding chrome). */
+  width: Accessor<number>;
+  /** Content height in pixels. */
+  height: Accessor<number>;
+  /** Whether this is the frontmost window. */
+  isActive: Accessor<boolean>;
+  /** Current vertical scroll offset of the content, when `scrollable`. */
+  scrollY: Accessor<number>;
+  setTitle(title: string): void;
+  close(): void;
+}
+
 export interface AppServices {
   getSprite(name: string): Sprite | undefined;
   storage: AppStorage;
   fs: AppFileSystem;
+  /** The window this component is mounted in. */
+  window: AppWindow;
   os: AppProps["os"];
   fetch?: AppProps["fetch"];
   env: AppProps["env"];

@@ -9,7 +9,7 @@ export type { UIServices, UIClipboard } from "./services";
 // -------------------------------------------------------------------------
 // Sprites — the 1-bit image asset format consumed by <image>
 // -------------------------------------------------------------------------
-export { BLACK, WHITE, defineSprite, fromGrid } from "./sprite";
+export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid } from "./sprite";
 export type { Sprite } from "./sprite";
 
 // -------------------------------------------------------------------------

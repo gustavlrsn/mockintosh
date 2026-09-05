@@ -2,21 +2,18 @@
  * Solid app registry — every window content is a registered SolidApp.
  */
 
-import type { JSX } from "solid-js";
 import type { Capability, SolidApp as SDKSolidApp } from "@mockintosh/sdk";
 import { setAppMenus, type OSWindowKind } from "./state";
 
 /**
  * A registered app. Same contract third-party apps declare with `defineApp`
- * (`@mockintosh/sdk`), widened for system apps: any window kind, and a typed
- * JSX component. `menus` is the app-level menubar; apps whose menus change at
- * runtime call `setAppMenus(id, …)`, or `useWindow().setMenus` for menus that
- * depend on a specific window.
+ * (`@mockintosh/sdk`), widened for the shell: any window kind (the Finder's
+ * desktop, dialogs). `menus` is the app-level menubar; apps whose menus change
+ * at runtime call `useApp().setMenus` for the current window.
  */
 export interface SolidApp<P extends Record<string, unknown> = Record<string, unknown>>
-  extends Omit<SDKSolidApp<P>, "windowKind" | "Component"> {
+  extends Omit<SDKSolidApp<P>, "windowKind"> {
   windowKind?: OSWindowKind;
-  Component: (props: P) => JSX.Element;
 }
 
 const apps = new Map<string, SolidApp<any>>();

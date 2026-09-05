@@ -1,11 +1,5 @@
 import { createSignal, onMount, Show, type JSX } from "solid-js";
-import { Button, type Sprite } from "@mockintosh/ui";
-import { MIME } from "@mockintosh/fs";
-import { useApp, type PrintableImage } from "@mockintosh/sdk";
-import { registerApp } from "../src/os/apps";
-import { useOS } from "../src/os/context";
-import { useWindow } from "../src/os/windowContext";
-import { loadSpriteFile } from "../src/os/spriteFiles";
+import { useApp, type PrintableImage, defineApp, Button, MIME, readSpriteFile, type Sprite } from "@mockintosh/sdk";
 
 const BROWSER_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif"];
 
@@ -13,12 +7,12 @@ const BROWSER_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif"];
  * Picture — views image files. Mockintosh sprite files draw directly; browser
  * image formats are decoded off-screen and thresholded to 1-bit.
  */
-export function Picture(props: Record<string, unknown>): JSX.Element {
-  const os = useOS();
-  const win = useWindow();
+function Picture(props: Record<string, unknown>): JSX.Element {
+  const app = useApp();
+  const win = app.window;
   const { print } = useApp();
   const [sprite, setSprite] = createSignal<Sprite | undefined>(
-    props.src ? os.sprites.get(String(props.src)) : undefined
+    props.src ? app.getSprite(String(props.src)) : undefined
   );
   const [pixels, setPixels] = createSignal<Uint8Array | null>(null);
   const [pw, setPw] = createSignal(0);
@@ -47,19 +41,19 @@ export function Picture(props: Record<string, unknown>): JSX.Element {
     if (props.title) win.setTitle(String(props.title));
     const fileId = props.fileId as string | undefined;
     if (!fileId) return;
-    const file = os.fs.file(fileId);
+    const file = app.fs.file(fileId);
     if (!file) return;
 
     if (file.type === MIME.sprite) {
-      const s = await loadSpriteFile(os.fs, os.sprites, fileId);
+      const s = await readSpriteFile(app.fs, fileId);
       if (s) setSprite(s);
       return;
     }
-    if (!os.capabilities.has("images")) {
-      void os.showDialog({ message: `This Macintosh cannot decode "${file.name}".` });
+    if (!app.capabilities.has("images")) {
+      void app.os.showDialog({ message: `This Macintosh cannot decode "${file.name}".` });
       return;
     }
-    const bytes = await os.fs.readBytes(fileId);
+    const bytes = await app.fs.readBytes(fileId);
     if (!bytes) return;
     const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: file.type }));
     const img = new Image();
@@ -85,7 +79,7 @@ export function Picture(props: Record<string, unknown>): JSX.Element {
     try {
       await print.printPicture(image, { caption: props.title ? String(props.title) : undefined });
     } catch (err) {
-      await os.showDialog({
+      await app.os.showDialog({
         message: `Couldn't print: ${err instanceof Error ? err.message : String(err)}`,
         buttons: ["OK"],
       });
@@ -119,7 +113,7 @@ export function Picture(props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "picture",
   title: "Picture",
   icon: "icon/MacFlim",

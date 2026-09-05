@@ -1,10 +1,9 @@
 import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Button } from "@mockintosh/ui";
-import { registerApp } from "../src/os/apps";
-import { useWindow } from "../src/os/windowContext";
+import { defineApp, useApp } from "@mockintosh/sdk";
 
-export function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
-  const win = useWindow();
+function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
+  const win = useApp().window;
   const [playing, setPlaying] = createSignal(false);
   let video: HTMLVideoElement | null = null;
   let frame: ImageData | null = null;
@@ -77,7 +76,7 @@ export function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "video",
   requires: ["video"],
   title: "1984.mp4",

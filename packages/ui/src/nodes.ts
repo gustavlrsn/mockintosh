@@ -274,6 +274,12 @@ export type RasterPaintFn = (surface: RasterSurface) => void;
 
 export interface RasterProps extends LayoutStyle, EventHandlers {
   onPaint?: RasterPaintFn;
+  /**
+   * Bump to repaint. `onPaint` runs at paint time, outside any reactive scope,
+   * so a raster whose pixels come from elsewhere (a camera, a decoder) sets
+   * `revision` from a signal to have the frame redrawn when the source changes.
+   */
+  revision?: number;
 }
 
 // -------------------------------------------------------------------------

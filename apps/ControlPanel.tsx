@@ -1,13 +1,11 @@
 import type { JSX } from "solid-js";
 import type { Ink } from "@mockintosh/ui";
-import { registerApp } from "../src/os/apps";
-import { useOS } from "../src/os/context";
-import { useWindow } from "../src/os/windowContext";
+import { defineApp, useApp } from "@mockintosh/sdk";
 
-export function ControlPanel(_props: Record<string, unknown>): JSX.Element {
-  const os = useOS();
-  const win = useWindow();
-  const computer = os.sprites.get("icon/computer");
+function ControlPanel(_props: Record<string, unknown>): JSX.Element {
+  const app = useApp();
+  const win = app.window;
+  const computer = app.getSprite("icon/computer");
 
   return (
     <box width={win.width()} height={win.height()} flexDirection="row" background={0}>
@@ -43,7 +41,7 @@ export function ControlPanel(_props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "control_panel",
   title: "Control Panel",
   icon: "icon/computer",

@@ -1,25 +1,23 @@
 import { Show, createSignal, onMount, type JSX } from "solid-js";
 import { MIME } from "@mockintosh/fs";
-import { registerApp } from "../src/os/apps";
-import { useOS } from "../src/os/context";
-import { useWindow } from "../src/os/windowContext";
 import { MarkdownView } from "./MarkdownView";
+import { defineApp, useApp } from "@mockintosh/sdk";
 
 function looksLikeMarkdown(title: string, content: string): boolean {
   if (/\.(md|markdown)$/i.test(title)) return true;
   return /^#{1,2}\s|^\*\s|^\-\s/m.test(content.slice(0, 400));
 }
 
-export function FileViewer(props: Record<string, unknown>): JSX.Element {
-  const os = useOS();
-  const win = useWindow();
+function FileViewer(props: Record<string, unknown>): JSX.Element {
+  const app = useApp();
+  const win = app.window;
   const [content, setContent] = createSignal((props.content as string) ?? "");
   const title = () => String(props.title ?? "File");
 
   onMount(() => {
     const fileId = props.fileId as string | undefined;
     if (fileId && !props.content) {
-      void os.fs.readText(fileId).then((text) => {
+      void app.fs.readText(fileId).then((text) => {
         if (text !== null) setContent(text);
       });
     }
@@ -48,7 +46,7 @@ export function FileViewer(props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "file",
   title: "File",
   icon: "icon/file",

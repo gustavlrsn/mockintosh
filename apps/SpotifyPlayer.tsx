@@ -1,9 +1,6 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Button, type Ink } from "@mockintosh/ui";
-import { useApp } from "@mockintosh/sdk";
-import { registerApp } from "../src/os/apps";
-import { useOS } from "../src/os/context";
-import { useWindow } from "../src/os/windowContext";
+import { useApp, defineApp } from "@mockintosh/sdk";
 import {
   CLIENT_ID,
   REDIRECT_URI,
@@ -52,10 +49,9 @@ interface DevicePollResponse {
   expires_in: number;
 }
 
-export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
-  const os = useOS();
-  const win = useWindow();
+function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
+  const win = app.window;
   const { storage } = app;
   const [tokens, setTokens] = createSignal<SpotifyTokens | null>(null);
   const [playlists, setPlaylists] = createSignal<SpotifyPlaylist[]>([]);
@@ -291,7 +287,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
     });
   }
 
-  const logo = os.sprites.get("icon/spotify");
+  const logo = app.getSprite("icon/spotify");
 
   return (
     <box width={win.width()} height={win.height()} background={0} flexDirection="column">
@@ -452,7 +448,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "spotify",
   requires: ["network", "browser"],
   title: "Spotify Player",

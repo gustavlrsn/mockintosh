@@ -25,7 +25,7 @@ You can parse the YAML in JavaScript/TypeScript (e.g. `js-yaml`) to:
 ## Relationship to the codebase
 
 - **QuickDraw**: The routine names and types in the spec align with [packages/quickdraw](../packages/quickdraw). The package is the authoritative implementation; the spec documents the original Mac API that the package re-implements.
-- **Managers**: Mockintosh implements subsets of the Toolbox (e.g. in `lib/toolbox/`). The spec documents the full original API; not every routine is implemented in mockintosh.
+- **Managers**: Mockintosh ports QuickDraw (`packages/quickdraw`) and re-creates the roles of the other managers in `@mockintosh/ui` and `src/os` rather than porting them. The spec documents the full original API; not every routine is implemented in mockintosh.
 
 ## Extending the spec
 

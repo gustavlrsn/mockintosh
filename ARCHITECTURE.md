@@ -26,7 +26,7 @@ The frontend is built with **Vite** and a **SolidJS custom renderer** (`@mockint
         ↓
 src/os shell (bootOS, signals, window chrome, menubar, dialogs, app registry)
         ↓
-apps/*.tsx system apps          @mockintosh/sdk v2 → third-party ESM
+apps/*.tsx bundled apps         @mockintosh/sdk v2 → third-party ESM
 
 src/platform/<host>  ─ implements Platform ─▶  bootOS(platform)
 ```
@@ -56,7 +56,7 @@ Implementations:
 - `src/platform/web/` — `<canvas>` + `CanvasPresenter`, DOM events, `requestAnimationFrame`, `OPFSBackend`, `navigator.clipboard`, `WebUSBPrinterTransport`, `fetch`. The only OS-level code allowed to touch the DOM.
 - `src/platform/headless/` — in-memory display with frame read-back, synthetic input injection, a hand-advanced clock, `InMemoryBackend`. `src/os/boot.test.ts` boots the whole shell on it and drives menus, ⌘N, and the capability dialog from Node. It is the starting point for any new host: swap `present()` and the input injectors for real drivers.
 
-Which apps ship is the entry point's decision, not the OS's: `src/systemApps.ts` registers the web build's bundled apps; a device build imports a different list.
+Which apps ship is the entry point's decision, not the OS's: `src/systemApps.ts` registers the web build's bundled apps; a device build imports a different list. Bundled apps are written against `@mockintosh/sdk` only — `export default defineApp(…)`, `useApp()` — so they are the same shape as a third-party bundle and could be moved out of the tree. Two are part of the shell and reach into `src/os` on purpose: the Finder (desktop, folder windows, opening files; the boot sequence depends on it) and the App Store (installing apps is an OS privilege, `OSServices.installer`, not an SDK power).
 
 ### Capabilities
 
@@ -108,7 +108,7 @@ export default defineApp({
 
 Bundles externalize `solid-js`, `solid-js/store`, `@mockintosh/ui`, and `@mockintosh/sdk`. The OS serves those via an import map so one Solid runtime is shared. The `AppInstaller` (`src/os/installedApps.ts`) fetches the bundle through `Platform.loadModule`, validates `Component`, registers the module's `sprites`, and calls `registerApp`; a platform without `loadModule` (an embedded build) has no installer and the App Store says so. The App Store filters catalog entries to `sdk` major ≥ 2.
 
-`useApp()` provides `getSprite`, `storage` (per-app folder), `fs` (the shared file system), `os.openWindow/closeWindow/showDialog`, `setMenus` (this window's menubar), optional `fetch`, and `env`. Apps that declare `fileTypes` are launched with `FileDocumentProps` when such a file is opened. The OS supplies one `AppServices` per window through the SDK's `AppServicesContext`, so each window's components see their own.
+`useApp()` provides `getSprite`, `storage` (per-app folder), `fs` (the shared file system), `window` (this window's reactive size, `isActive`, `scrollY`, `setTitle`, `close`), `os.openWindow/closeWindow/showDialog`, `setMenus` (this window's menubar), `capabilities`, optional `fetch` and `print`, and `env`. Sprite files (`image/x-mockintosh-sprite`) are read and written with `readSpriteFile` / `writeSpriteFile` from the SDK. Apps that declare `fileTypes` are launched with `FileDocumentProps` when such a file is opened. The OS supplies one `AppServices` per window through the SDK's `AppServicesContext`, so each window's components see their own.
 
 The SDK is the single source of the app contract shared with the OS: `SolidApp` (the internal `src/os/apps.ts` type extends it) and the menubar types (`MenubarDefinition`, `MenubarItemDef`, …) live in `packages/sdk/src` and the shell imports them from `@mockintosh/sdk`.
 
@@ -132,7 +132,7 @@ packages/markdown/          mdast → LayoutNode
 packages/print/             Print pages (QuickDraw ports) → ESC/POS → PrinterTransport
 packages/quickdraw/         GrafPort, CopyBits, BitBlt, packed 1-bit BitMap
 
-apps/                       Solid system apps (*.tsx)
+apps/                       Bundled apps (*.tsx), SDK-only except Finder and App Store
   Finder.solid.tsx
   finder/attributes.ts      Icon position / zOrder / custom icon on FS attributes
   MarkdownView.tsx
@@ -140,7 +140,7 @@ apps/                       Solid system apps (*.tsx)
 
 src/
   solidMain.ts              Browser entry: createWebPlatform → bootOS
-  systemApps.ts             Side-effect imports that register the web build's bundled apps
+  systemApps.ts             Registers the web build's bundled apps (each module's defineApp exports)
   os/                       Shell (DOM-free)
     boot.ts                 bootOS(platform): boot order, frame loop, input → UI, OSServices
     capabilities.ts         Platform capability set; `requires` checks and their wording
@@ -151,7 +151,6 @@ src/
     layering.ts             Kind-aware z-order
     fsBootstrap.ts          First-boot volume + role folders
     openers.ts              File type → app resolution
-    spriteFiles.ts          Sprite-file codec + cache
     sprites/                SpriteRegistry + generated built-in sprite data (scripts/convert-sprites.ts)
     cursor.ts               Draws QuickDraw's cursorState with CopyBits (the VBL cursor task)
     cursors.ts              The OS cursors as QuickDraw `Cursor`s (arrow, iBeam, watch, grab)
@@ -225,7 +224,7 @@ FileSystem (packages/fs)       catalog + bodies, roles, attributes, migrations
   └ FSBackend                  OPFSBackend | InMemoryBackend
 src/os/fsBootstrap.ts          first-boot layout; repairs role folders each boot
 src/os/openers.ts              MIME type → app (`SolidApp.fileTypes`)
-src/os/spriteFiles.ts          sprite-file codec ↔ SpriteRegistry cache
+packages/sdk/src/spriteFile.ts readSpriteFile / writeSpriteFile (image/x-mockintosh-sprite)
 src/os/appStorage.ts           useApp().storage → System Folder/Preferences/<appId>/
 src/os/installedApps.ts        App Store manifests as MIME.app files in Applications
 apps/finder/attributes.ts      Finder's typed view of node attributes
@@ -241,7 +240,7 @@ apps/finder/attributes.ts      Finder's typed view of node attributes
 
 **Opening.** A double-click asks `resolveOpenAction`: directories open a Finder window; `MIME.appShortcut` / `MIME.app` launch the referenced app; other files launch the first registered app whose `fileTypes` includes the MIME type, with `FileDocumentProps` (`fileId`, `title`) as props. FileViewer opens `text/*`, Picture sprites and PNG/JPEG/GIF. Unknown types show a dialog, as does a shortcut or manifest whose app is no longer registered (`reason: "unknown-app"`).
 
-**Apps.** `useApp().fs` exposes the same `FileSystem` (typed `AppFileSystem` in the SDK); `useApp().storage` is a per-app folder under `System Folder/Preferences`. Installed third-party manifests are `MIME.app` files in `Applications` (migrated from `localStorage` on first boot) and are loaded at boot by the `AppInstaller`.
+**Apps.** `useApp().fs` exposes the same `FileSystem` (typed `AppFileSystem` in the SDK); `useApp().storage` is a per-app folder under `System Folder/Preferences`. Installed third-party manifests are `MIME.app` files in `Applications` and are loaded at boot by the `AppInstaller`.
 
 ## Printing
 

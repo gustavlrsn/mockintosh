@@ -625,6 +625,15 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
     getSprite: (name) => os.sprites.get(name),
     storage: createAppStorage(os.fs, props.win.appId),
     fs: os.fs,
+    window: {
+      id: api.id,
+      width: api.width,
+      height: api.height,
+      isActive: api.isActive,
+      scrollY: api.scrollY,
+      setTitle: api.setTitle,
+      close: api.close,
+    },
     os: {
       openWindow: (appId, p) => os.openApp(appId, p),
       closeWindow: (id) => os.closeWindow(id),

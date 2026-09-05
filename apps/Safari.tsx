@@ -1,13 +1,11 @@
 import { createSignal, type JSX } from "solid-js";
 import { Button, TextInput } from "@mockintosh/ui";
-import { useApp } from "@mockintosh/sdk";
-import { registerApp } from "../src/os/apps";
-import { useWindow } from "../src/os/windowContext";
+import { useApp, defineApp } from "@mockintosh/sdk";
 
 type Mode = "markdown" | "stream" | "textweb";
 
-export function Safari(props: Record<string, unknown>): JSX.Element {
-  const win = useWindow();
+function Safari(props: Record<string, unknown>): JSX.Element {
+  const win = useApp().window;
   const fetch = useApp().fetch!; // present: the app requires "network"
   const [url, setUrl] = createSignal((props.url as string) ?? "https://example.com");
   const [body, setBody] = createSignal("Enter a URL and press Go.");
@@ -53,7 +51,7 @@ export function Safari(props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "safari",
   requires: ["network"],
   title: "Safari",
@@ -63,7 +61,7 @@ registerApp({
   Component: Safari,
 });
 
-registerApp({
+export const SafariStream = defineApp({
   id: "safari-stream",
   requires: ["network"],
   title: "Safari Stream",
@@ -72,7 +70,7 @@ registerApp({
   Component: (p) => <Safari {...p} mode="stream" />,
 });
 
-registerApp({
+export const SafariTextweb = defineApp({
   id: "safari-textweb",
   requires: ["network"],
   title: "Safari Textweb",

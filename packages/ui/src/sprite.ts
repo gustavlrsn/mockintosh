@@ -8,7 +8,7 @@
  * inspected as pixels; `<image>` packs each sprite once before drawing it.
  */
 import type { Ink } from "./nodes";
-import { decodeBase64 } from "./base64";
+import { decodeBase64, encodeBase64 } from "./base64";
 
 export const BLACK: Ink = 1;
 export const WHITE: Ink = 0;
@@ -38,6 +38,21 @@ export function defineSprite(width: number, height: number, b64: string): Sprite
     mask[i] = val === 0 ? 0 : 1;
   }
   return { width, height, data, mask };
+}
+
+/**
+ * Encode a sprite as base64 2 bpp — the inverse of `defineSprite`, and the
+ * pixel format of sprite files. A sprite without a mask is fully opaque.
+ */
+export function encodeSprite(sprite: Sprite): string {
+  const total = sprite.width * sprite.height;
+  const raw = new Uint8Array((total + 3) >> 2);
+  for (let i = 0; i < total; i++) {
+    const opaque = sprite.mask ? sprite.mask[i] !== 0 : true;
+    const val = !opaque ? 0 : sprite.data[i] === BLACK ? 2 : 1;
+    raw[i >> 2] |= val << (6 - (i & 3) * 2);
+  }
+  return encodeBase64(raw);
 }
 
 /** Build a sprite from an ASCII grid: `#` black, `.` transparent, anything else white. */

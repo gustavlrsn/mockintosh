@@ -1,15 +1,14 @@
 import type { JSX } from "solid-js";
 import { For } from "solid-js";
-import { useOS } from "../src/os/context";
-import { registerApp } from "../src/os/apps";
 import pkg from "../package.json";
+import { defineApp, useApp } from "@mockintosh/sdk";
 
 const contributors = [{ username: "gustavlrsn", commits: 74 }];
 
-export function About(props: Record<string, unknown>): JSX.Element {
-  const os = useOS();
-  const computer = os.sprites.get("icon/computer");
-  const user = os.sprites.get("user2");
+function About(props: Record<string, unknown>): JSX.Element {
+  const app = useApp();
+  const computer = app.getSprite("icon/computer");
+  const user = app.getSprite("user2");
 
   return (
     <box width="100%" height="100%" padding={8} flexDirection="column" gap={4} background={0}>
@@ -48,7 +47,7 @@ export function About(props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "about",
   title: "About This Mockintosh",
   icon: "icon/computer",

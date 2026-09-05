@@ -1,6 +1,6 @@
 import { For, type JSX } from "solid-js";
 import { parseMarkdown, type LayoutNode, type InlineSegment } from "@mockintosh/markdown";
-import { useOS } from "../src/os/context";
+import { useApp } from "@mockintosh/sdk";
 
 function InlineRun(props: { segments: InlineSegment[] }): JSX.Element {
   return (
@@ -11,7 +11,7 @@ function InlineRun(props: { segments: InlineSegment[] }): JSX.Element {
 }
 
 function Block(props: { node: LayoutNode }): JSX.Element {
-  const os = useOS();
+  const app = useApp();
   const node = props.node;
   if (node.type === "heading") {
     return <text font="menu">{node.text}</text>;
@@ -31,7 +31,7 @@ function Block(props: { node: LayoutNode }): JSX.Element {
     return <box height={1} background={1} />;
   }
   if (node.type === "image") {
-    const sprite = os.sprites.get(node.src);
+    const sprite = app.getSprite(node.src);
     if (sprite) {
       return (
         <image

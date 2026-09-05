@@ -1,16 +1,36 @@
 /**
- * Side-effect imports for the bundled system apps. Each module calls
- * `registerApp` on load; importing this file registers them all.
+ * The apps bundled with the web build. Each module exports its app(s) as
+ * `defineApp` results, exactly as a third-party bundle would; the entry point
+ * registers them with the OS. The Finder registers itself: it is part of the
+ * shell and the boot sequence depends on it.
  */
+import { registerApp } from "./os/apps";
+import About from "@/apps/About";
+import Testing from "@/apps/Testing";
+import FileViewer from "@/apps/FileViewer";
+import Picture from "@/apps/Picture";
+import ControlPanel from "@/apps/ControlPanel";
+import VideoPlayer from "@/apps/VideoPlayer";
+import PhotoBooth from "@/apps/PhotoBooth";
+import AppStore from "@/apps/AppStore";
+import ChatGippity from "@/apps/ChatGippity";
+import Safari, { SafariStream, SafariTextweb } from "@/apps/Safari";
+import SpotifyPlayer from "@/apps/SpotifyPlayer";
 
-import "@/apps/About.tsx";
-import "@/apps/Testing.tsx";
-import "@/apps/FileViewer.tsx";
-import "@/apps/Picture.tsx";
-import "@/apps/ControlPanel.tsx";
-import "@/apps/VideoPlayer.tsx";
-import "@/apps/PhotoBooth.tsx";
-import "@/apps/AppStore.tsx";
-import "@/apps/ChatGippity.tsx";
-import "@/apps/Safari.tsx";
-import "@/apps/SpotifyPlayer.tsx";
+for (const app of [
+  About,
+  Testing,
+  FileViewer,
+  Picture,
+  ControlPanel,
+  VideoPlayer,
+  PhotoBooth,
+  AppStore,
+  ChatGippity,
+  Safari,
+  SafariStream,
+  SafariTextweb,
+  SpotifyPlayer,
+]) {
+  registerApp(app);
+}

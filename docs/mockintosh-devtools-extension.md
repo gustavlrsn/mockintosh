@@ -50,7 +50,7 @@ All of this can be implemented inside the existing render loop in `main.tsx` and
 
 ### 2.1 In-repo: app-side bridge (dev-only or flag-gated)
 
-- **New file:** e.g. `lib/canvas/DevToolsBridge.ts` (or `src/devtools-bridge.ts`).
+- **New file:** e.g. `src/platform/web/DevToolsBridge.ts`.
 - **Responsibility:**
   - Expose a single function: `attachDevToolsBridge(callback: (stats: DevToolsFrameStats) => void)`.
   - Define a small `DevToolsFrameStats` type (frameTimeMs, flushTimeMs, windowCount, windows, hitRegionCount, fps?, etc.).

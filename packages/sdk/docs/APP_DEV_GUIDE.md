@@ -56,6 +56,8 @@ Use `<raster onPaint>` when you need to write pixels directly (dithered photos, 
 }} />
 ```
 
+`onPaint` runs at paint time, outside any reactive scope, so reading a signal inside it does not schedule a repaint. When the pixels come from somewhere else (a camera, a decoder, a timer), bump `revision` from a signal: `<raster revision={frame()} onPaint={…} />` redraws whenever `frame` changes.
+
 Never index the framebuffer yourself: its memory layout (packed 1 bpp) is an implementation detail of the platform.
 
 ### Layout
@@ -129,6 +131,7 @@ function MyView() {
 - `getSprite(name)` — OS sprites plus your exported `sprites`
 - `storage.read/write/remove/list` — per-app key-value storage (see [Storage](#storage))
 - `fs` — the shared file system (see [Files](#files))
+- `window` — the window this component is in (see [Window chrome](#window-chrome))
 - `os.openWindow / closeWindow / showDialog`
 - `setMenus(menus)` — this window's menubar (see [Menus](#menus))
 - `fetch` — network access, when this Macintosh has it (see [Capabilities](#capabilities))
@@ -239,7 +242,15 @@ export const sprites: Record<string, Sprite> = {
 };
 ```
 
-Prefix names with your app id (`"myapp/icon"`). OS sprites use `"icon/"`, `"cursor/"`, `"chrome/"`.
+Prefix names with your app id (`"myapp/icon"`). OS sprites use `"icon/"` and `"chrome/"`.
+
+Sprites are also a file type — `image/x-mockintosh-sprite`, `MIME.sprite` — which is how an app keeps a picture in the user's file system (PhotoBooth saves photos this way; Picture opens them). `readSpriteFile(fs, fileId)` decodes one; `writeSpriteFile(fs, parentId, name, sprite, { attributes })` writes one, optionally with a Finder `icon` attribute:
+
+```tsx
+const { fs } = useApp();
+const desktop = fs.locate("desktop");
+if (desktop) await writeSpriteFile(fs, desktop.id, "Photo", sprite, { attributes: { icon: "myapp/photo-icon" } });
+```
 
 ## Printing
 
@@ -311,6 +322,13 @@ Item types (`MenubarItemDef`): an action `{ label, shortcut?, disabled?, onClick
 ## Window chrome
 
 Third-party apps live inside a standard document window. Set `scrollable`, `resizable`, and `minSize` on `defineApp`.
+
+`useApp().window` is the window your component is mounted in. `width()` and `height()` are the content size (reactive accessors — read them in JSX or effects), `isActive()` is whether it is frontmost, `scrollY()` the content scroll offset; `setTitle(title)` renames it and `close()` closes it. A component that fills its window is:
+
+```tsx
+const { window: win } = useApp();
+return <box width={win.width()} height={win.height()} flexDirection="column">…</box>;
+```
 
 ## The Manifest: mockintosh.json
 

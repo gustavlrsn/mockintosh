@@ -1,10 +1,9 @@
 import type { JSX } from "solid-js";
 import { Button, Checkbox, TextInput, createSignal } from "@mockintosh/ui";
-import { registerApp } from "../src/os/apps";
-import { useWindow } from "../src/os/windowContext";
+import { defineApp, useApp } from "@mockintosh/sdk";
 
-export function Testing(_props: Record<string, unknown>): JSX.Element {
-  const win = useWindow();
+function Testing(_props: Record<string, unknown>): JSX.Element {
+  const win = useApp().window;
   const [count, setCount] = createSignal(0);
   const [checked, setChecked] = createSignal(false);
   const [name, setName] = createSignal("System 7");
@@ -48,7 +47,7 @@ export function Testing(_props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "testing",
   title: "Testing",
   icon: "icon/computer",

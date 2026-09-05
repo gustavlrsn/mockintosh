@@ -1,15 +1,11 @@
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Button, type Ink, type RasterSurface } from "@mockintosh/ui";
-import { registerApp } from "../src/os/apps";
-import { useOS } from "../src/os/context";
-import { useWindow } from "../src/os/windowContext";
-import { saveSpriteFile } from "../src/os/spriteFiles";
+import { defineApp, useApp, writeSpriteFile } from "@mockintosh/sdk";
 import {
   type DitherMode,
   type DitherState,
   ditherVideoFrame,
   getOrCreateDitherState,
-  pack1bitTo2bpp,
 } from "./photobooth/dither";
 
 const PREVIEW = 288;
@@ -28,9 +24,9 @@ function paint1bit(surface: RasterSurface, pixels: Uint8Array | null, fill: Ink)
   else surface.fill(fill);
 }
 
-export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
-  const os = useOS();
-  const win = useWindow();
+function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
+  const app = useApp();
+  const win = app.window;
 
   const [loading, setLoading] = createSignal(true);
   const [errorText, setErrorText] = createSignal("");
@@ -65,7 +61,6 @@ export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
       ditherVideoFrame(video, state, ditherMode());
       lastCapture = now;
       setFrame((n) => n + 1);
-      os.scheduleRepaint();
     }
     raf = requestAnimationFrame(captureLoop);
   }
@@ -122,14 +117,16 @@ export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   async function savePhoto(photo: Photo): Promise<void> {
     const date = new Date(photo.timestamp);
     const name = `Photo ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
-    const desktop = os.fs.locate("desktop");
+    const desktop = app.fs.locate("desktop");
     if (!desktop) return;
     try {
-      await saveSpriteFile(os.fs, os.sprites, desktop.id, name, {
-        width: PREVIEW,
-        height: PREVIEW,
-        data: pack1bitTo2bpp(photo.pixels),
-      }, { icon: "icon/photobooth-smr-32" });
+      await writeSpriteFile(
+        app.fs,
+        desktop.id,
+        name,
+        { width: PREVIEW, height: PREVIEW, data: photo.pixels },
+        { attributes: { icon: "icon/photobooth-smr-32" } }
+      );
     } catch (e) {
       console.error("Failed to save photo:", e);
     }
@@ -139,7 +136,7 @@ export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
     const viewing = viewingPhoto();
     const n = photos().length;
     const counting = countdown() !== null;
-    win.setMenus([
+    app.setMenus([
       {
         label: "File",
         items: [
@@ -193,8 +190,8 @@ export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
         <raster
           width={PREVIEW}
           height={PREVIEW}
+          revision={frame()}
           onPaint={(surface) => {
-            void frame();
             if (flash()) {
               paint1bit(surface, null, 0);
               return;
@@ -288,7 +285,7 @@ export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   );
 }
 
-registerApp({
+export default defineApp({
   id: "photobooth",
   requires: ["camera"],
   title: "Photo Booth",
