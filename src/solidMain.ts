@@ -2,7 +2,7 @@
  * solidMain.ts — New Solid-OS entry point.
  *
  * Replaces main.tsx. Initialises only the services needed by the Solid OS
- * (canvas, QuickDraw, sprites, FileManager, preferences) and mounts the
+ * (canvas, QuickDraw, sprites, file system, preferences) and mounts the
  * OSRoot Solid component tree as the entire screen.
  *
  * Legacy apps are NOT loaded here; port them to Solid one-by-one.
@@ -14,13 +14,10 @@ import { ResourceManager } from "../lib/toolbox/ResourceManager";
 import { registerAllSprites } from "../lib/canvas/sprites";
 import { InitGraf } from "@mockintosh/quickdraw";
 import { blitSprite } from "../lib/canvas/SpriteManager";
-import { FileManager, ROOT_ID, type FSFile } from "../lib/toolbox/FileManager";
-import { OPFSBackend } from "../lib/canvas/fs/OPFSBackend";
-import {
-  DEFAULT_SYSTEM_PREFERENCES,
-  loadSystemPreferences,
-  type SystemPreferences,
-} from "../lib/canvas/SystemPreferences";
+import { FileSystem, InMemoryBackend, OPFSBackend, isOPFSAvailable } from "@mockintosh/fs";
+import { bootstrapFileSystem } from "./os/fsBootstrap";
+import { resolveOpenAction } from "./os/openers";
+import { loadSystemPreferences } from "./os/systemPreferences";
 import { createUI } from "@mockintosh/ui";
 
 import { animateZoomRect, type AnimRect } from "../lib/canvas/ZoomAnimation";
@@ -102,22 +99,21 @@ async function main() {
     scheduleRender: scheduleRepaint,
   });
 
+  // --- File system ---
+  if (!isOPFSAvailable()) {
+    console.warn("OPFS unavailable — the file system will not persist across reloads.");
+  }
+  const mockFS = await FileSystem.open({
+    backend: isOPFSAvailable() ? new OPFSBackend() : new InMemoryBackend(),
+  });
+  await bootstrapFileSystem(mockFS);
+
+  // --- Installed third-party apps (manifests live in /Applications) ---
   initInstalledApps(sprites);
-  await loadInstalledApps();
+  await loadInstalledApps(mockFS);
 
-  // --- FileManager ---
-  const backend  = new OPFSBackend();
-  const mockFS   = new FileManager(backend, sprites);
-  await mockFS.init();
-
-  // --- System preferences ---
-  const systemPreferences: SystemPreferences = {
-    ...DEFAULT_SYSTEM_PREFERENCES,
-    ...(await loadSystemPreferences()),
-  };
-
-  // --- Bootstrap FS if empty ---
-  await ensureFS(mockFS);
+  // --- System preferences (System Folder/Preferences/System Preferences) ---
+  await loadSystemPreferences(mockFS);
 
   // --- OS services (passed to Solid components via context) ---
   const osServices: OSServices = {
@@ -256,35 +252,23 @@ async function main() {
   });
 
   async function openFSNodeImpl(nodeId: string, fromRect?: AnimRect): Promise<void> {
-    const node = mockFS.getNode(nodeId);
-    if (!node) return;
-    if (node.kind === "directory") {
-      osServices.openFolderWindow(node.name, nodeId, fromRect);
-      return;
-    }
-    const file = node as FSFile;
-    try {
-      if (file.fileType === "app-shortcut") {
-        const raw = await mockFS.readFile(file.id);
-        if (!raw) return;
-        const { appId } = JSON.parse(raw) as { appId: string };
-        osServices.openApp(appId, {}, fromRect);
+    const action = await resolveOpenAction(mockFS, nodeId);
+    switch (action.kind) {
+      case "folder":
+        osServices.openFolderWindow(action.title, action.directoryId, fromRect);
         return;
-      }
-      const name = file.name.toLowerCase();
-      if (name.endsWith(".deck") || name.endsWith(".html")) {
-        osServices.openApp("decker", { fileId: file.id, title: file.name }, fromRect);
+      case "launch":
+        osServices.openApp(action.appId, action.props, fromRect);
         return;
-      }
-      if (file.fileType === "text" || name.endsWith(".md") || name.endsWith(".markdown")) {
-        osServices.openApp("file", { fileId: file.id, title: file.name }, fromRect);
+      case "none":
+        if (action.reason === "unknown-type") {
+          const node = mockFS.file(nodeId);
+          await osServices.showDialog({
+            message: `There is no application to open "${node?.name ?? "this document"}".`,
+            buttons: ["OK"],
+          });
+        }
         return;
-      }
-      if (file.fileType === "image") {
-        osServices.openApp("picture", { fileId: file.id, title: file.name, src: file.id }, fromRect);
-      }
-    } catch (err) {
-      console.error(err);
     }
   }
 
@@ -426,58 +410,6 @@ async function main() {
       scheduleRepaint();
     }
   });
-}
-
-// ---------------------------------------------------------------------------
-// FS bootstrap helpers (adapted from main.tsx)
-// ---------------------------------------------------------------------------
-
-const DESKTOP_SHORTCUTS: Array<{ name: string; appId: string; icon: string }> = [
-  { name: "Photo Booth",      appId: "photobooth",      icon: "icon/photobooth-smr-32" },
-  { name: "1984.mp4",         appId: "video",            icon: "icon/MacFlim" },
-  { name: "Safari",           appId: "safari",           icon: "icon/safari" },
-  { name: "Decker",           appId: "decker",           icon: "icon/computer" },
-  { name: "App Store",        appId: "appstore",         icon: "icon/appstore-smr-32x32" },
-  { name: "ChatGippity",      appId: "chatgippity",      icon: "icon/computer" },
-  { name: "Spotify Player",   appId: "spotify",          icon: "icon/spotify" },
-];
-
-async function ensureFS(fs: FileManager): Promise<void> {
-  const root = fs.readDir(ROOT_ID);
-  if (root.length === 0) {
-    await bootstrapFreshFS(fs);
-  } else {
-    ensureBasicDirs(fs);
-  }
-}
-
-function ensureBasicDirs(fs: FileManager): void {
-  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
-  if (!hd) return;
-  if (!fs.findByName(hd.id, "Desktop Folder")) fs.mkdir(hd.id, "Desktop Folder");
-  if (!fs.findByName(hd.id, "Trash"))          fs.mkdir(hd.id, "Trash");
-}
-
-async function bootstrapFreshFS(fs: FileManager): Promise<void> {
-  const hd = fs.mkdir(ROOT_ID, "Mockintosh HD");
-  hd.icon = "icon/hd";
-
-  fs.mkdir(hd.id, "Applications");
-  fs.mkdir(hd.id, "Trash");
-
-  const desktop = fs.mkdir(hd.id, "Desktop Folder");
-
-  for (const s of DESKTOP_SHORTCUTS) {
-    await fs.writeFile(
-      desktop.id,
-      s.name,
-      JSON.stringify({ appId: s.appId }),
-      "app-shortcut",
-      { icon: s.icon }
-    );
-  }
-
-  await fs.flush();
 }
 
 main().catch(console.error);

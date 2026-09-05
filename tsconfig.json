@@ -27,6 +27,7 @@
     "apps/**/*.tsx",
     "packages/ui/src/**/*.ts",
     "packages/ui/src/**/*.tsx",
+    "packages/fs/src/**/*.ts",
     "utils/**/*.ts",
     "vite-env.d.ts"
   ],

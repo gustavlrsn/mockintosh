@@ -1,4 +1,5 @@
 import { Show, createSignal, onMount, type JSX } from "solid-js";
+import { MIME } from "@mockintosh/fs";
 import { registerApp } from "../src/os/apps";
 import { useOS } from "../src/os/context";
 import { useWindow } from "../src/os/windowContext";
@@ -18,7 +19,7 @@ export function FileViewer(props: Record<string, unknown>): JSX.Element {
   onMount(() => {
     const fileId = props.fileId as string | undefined;
     if (fileId && !props.content) {
-      void os.fs.readFile(fileId).then((text) => {
+      void os.fs.readText(fileId).then((text) => {
         if (text !== null) setContent(text);
       });
     }
@@ -53,5 +54,6 @@ registerApp({
   icon: "icon/file",
   defaultSize: { width: 350, height: 200 },
   scrollable: true,
+  fileTypes: [MIME.text, MIME.markdown, MIME.json],
   Component: FileViewer,
 });

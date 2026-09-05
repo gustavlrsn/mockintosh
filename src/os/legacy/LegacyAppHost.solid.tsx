@@ -23,12 +23,7 @@ import {
 import { useOS } from "../context";
 import { useWindow } from "../windowContext";
 import { createOSServices } from "../../../lib/canvas/OSServices";
-import { setColorMode } from "../../../lib/canvas/ColorSystem";
-import {
-  DEFAULT_SYSTEM_PREFERENCES,
-  saveSystemPreferences,
-} from "../../../lib/canvas/SystemPreferences";
-
+import { createAppStorage } from "../appStorage";
 export interface LegacyAppHostProps {
   app: SystemApp;
 }
@@ -111,21 +106,14 @@ export function LegacyAppHost(props: LegacyAppHostProps): JSX.Element {
     openWindow: (appId: string, p?: Record<string, unknown>) => os.openApp(appId, p),
     closeWindow: (id: string) => os.closeWindow(id),
     showDialog: (opts) => os.showDialog(opts),
+    storage: createAppStorage(os.fs, props.app.id),
   });
-  toolboxOS.fs = os.fs;
 
   const appProps: Record<string, unknown> = {
     ...win.win.props,
     _sprites: os.sprites,
     _fs: os.fs,
     _os: toolboxOS,
-    _systemPreferences: DEFAULT_SYSTEM_PREFERENCES,
-    _setColorMode: (mode: "monochrome" | "colors") => {
-      setColorMode(mode);
-      DEFAULT_SYSTEM_PREFERENCES.colorMode = mode;
-      void saveSystemPreferences(DEFAULT_SYSTEM_PREFERENCES);
-      os.scheduleRepaint();
-    },
     _openFSNode: (nodeId: string) => os.openFSNode(nodeId),
     _openWindow: (type: string, _t: string, payload: Record<string, unknown>) =>
       os.openApp(type, payload),

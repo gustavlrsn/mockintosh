@@ -1,25 +1,20 @@
-import { createSignal, type JSX } from "solid-js";
+import type { JSX } from "solid-js";
 import { Button } from "@mockintosh/ui";
 import { registerApp } from "../src/os/apps";
 import { useOS } from "../src/os/context";
 import { useWindow } from "../src/os/windowContext";
-import { setColorMode, type ColorMode } from "../lib/canvas/ColorSystem";
-import { DEFAULT_SYSTEM_PREFERENCES, saveSystemPreferences } from "../lib/canvas/SystemPreferences";
+import type { ColorMode } from "../lib/canvas/ColorSystem";
+import { systemPreferences, updateSystemPreferences } from "../src/os/systemPreferences";
 import type { GrafPort } from "@mockintosh/quickdraw";
 
 export function ControlPanel(_props: Record<string, unknown>): JSX.Element {
   const os = useOS();
   const win = useWindow();
-  const [mode, setMode] = createSignal<ColorMode>(
-    DEFAULT_SYSTEM_PREFERENCES.colorMode ?? "monochrome"
-  );
+  const mode = (): ColorMode => systemPreferences.colorMode;
   const computer = os.sprites.get("icon/computer");
 
   function applyMode(next: ColorMode): void {
-    setMode(next);
-    setColorMode(next);
-    DEFAULT_SYSTEM_PREFERENCES.colorMode = next;
-    void saveSystemPreferences(DEFAULT_SYSTEM_PREFERENCES);
+    void updateSystemPreferences(os.fs, { colorMode: next });
     os.scheduleRepaint();
   }
 

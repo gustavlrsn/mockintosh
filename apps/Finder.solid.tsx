@@ -13,21 +13,27 @@
 
 import { JSX, For, Show, createSignal, createMemo, createEffect, onCleanup, type Accessor } from "solid-js";
 import { measureText, TextInput, type MouseEventHandlers } from "@mockintosh/ui";
-import { useOS } from "../src/os/context";
+import { useOS, type OSServices } from "../src/os/context";
 import {
   openOSWindow,
   updateOSWindow,
   setAppMenus,
-  getFsVersion,
-  notifyFsChanged,
   getWindows,
   FINDER_APP_ID,
   type OSWindow,
 } from "../src/os/state";
 import { registerApp } from "../src/os/apps";
 import { useWindow } from "../src/os/windowContext";
-import { FileManager, getIconForNode, ROOT_ID } from "../lib/toolbox/FileManager";
+import { ROOT_ID, isFSError, type FileSystem, type FSNode } from "@mockintosh/fs";
 import type { MenubarDefinition } from "@mockintosh/sdk";
+import {
+  bumpZOrder,
+  clearPositions,
+  finderAttributes,
+  iconForNode,
+  placeIcons,
+  type IconPlacement,
+} from "./finder/attributes";
 import { windowContentRect, windowTotalHeight } from "../src/os/windowGeometry";
 
 // ---------------------------------------------------------------------------
@@ -307,16 +313,29 @@ function buildGhostOutline(
 // FileSystem helpers
 // ---------------------------------------------------------------------------
 
-function getTrashId(fs: FileManager): string | undefined {
-  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
-  if (!hd) return undefined;
-  return fs.findByName(hd.id, "Trash")?.id;
+function getTrashId(fs: FileSystem): string | undefined {
+  return fs.locate("trash")?.id;
 }
 
-function getDesktopFolderId(fs: FileManager): string | undefined {
-  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
-  if (!hd) return undefined;
-  return fs.findByName(hd.id, "Desktop Folder")?.id;
+function getDesktopFolderId(fs: FileSystem): string | undefined {
+  return fs.locate("desktop")?.id;
+}
+
+/**
+ * Run a file-system mutation from a Finder gesture. Expected failures (a name
+ * clash on drop, a folder dragged into itself) are reported to the user;
+ * anything else propagates.
+ */
+async function runFinderMutation(
+  showDialog: OSServices["showDialog"],
+  mutate: () => void | Promise<void>
+): Promise<void> {
+  try {
+    await mutate();
+  } catch (err) {
+    if (isFSError(err)) await showDialog({ message: err.message, buttons: ["OK"] });
+    else throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -340,8 +359,8 @@ function folderItemCountLabel(count: number): string {
 }
 
 /** Build the OSWindow record for a Finder folder window. */
-export function buildFolderWindow(fs: FileManager, spec: FolderWindowSpec): OSWindow {
-  const count = fs.readDir(spec.directoryId).length;
+export function buildFolderWindow(fs: FileSystem, spec: FolderWindowSpec): OSWindow {
+  const count = fs.childCount(spec.directoryId);
   return {
     id: `folder-${spec.directoryId}-${Date.now()}`,
     appId: FINDER_APP_ID,
@@ -368,64 +387,42 @@ export function windowOuterRect(win: OSWindow): { x: number; y: number; width: n
   return { x: win.x, y: win.y, width: win.width, height: windowTotalHeight(win) };
 }
 
-function buildFolderIcons(fs: FileManager, directoryId: string): FinderIcon[] {
-  return fs.readDir(directoryId).map((n) => ({
-    title: n.name,
-    img: getIconForNode(n),
-    nodeId: n.id,
-    isDirectory: n.kind === "directory",
-    position: n.position,
-    zOrder: n.zOrder ?? 0,
-  }));
+function toFinderIcon(fs: FileSystem, node: FSNode, isVolume = false): FinderIcon {
+  const attrs = finderAttributes(fs, node.id);
+  return {
+    title: node.name,
+    img: iconForNode(fs, node),
+    nodeId: node.id,
+    isDirectory: node.kind === "directory",
+    isVolume,
+    position: attrs.position,
+    zOrder: attrs.zOrder ?? 0,
+  };
 }
 
-function buildDesktopIcons(fs: FileManager): FinderIcon[] {
+function buildFolderIcons(fs: FileSystem, directoryId: string): FinderIcon[] {
+  return fs.children(directoryId).map((n) => toFinderIcon(fs, n));
+}
+
+function buildDesktopIcons(fs: FileSystem): FinderIcon[] {
   const icons: FinderIcon[] = [];
-  const volumes = fs.readDir(ROOT_ID);
+  const volumes = fs.volumes();
+
+  for (const vol of volumes) icons.push(toFinderIcon(fs, vol, true));
 
   for (const vol of volumes) {
-    icons.push({
-      title: vol.name,
-      img: getIconForNode(vol),
-      nodeId: vol.id,
-      isDirectory: true,
-      isVolume: true,
-      position: vol.position,
-      zOrder: vol.zOrder ?? 0,
-    });
-  }
-
-  for (const vol of volumes) {
-    if (vol.kind !== "directory") continue;
-    const df = fs.findByName(vol.id, "Desktop Folder");
-    if (!df) continue;
-    for (const node of fs.readDir(df.id)) {
-      icons.push({
-        title: node.name,
-        img: getIconForNode(node),
-        nodeId: node.id,
-        isDirectory: node.kind === "directory",
-        position: node.position,
-        zOrder: node.zOrder ?? 0,
-      });
-    }
+    const desktop = fs.locate("desktop", vol.id);
+    if (!desktop) continue;
+    for (const node of fs.children(desktop.id)) icons.push(toFinderIcon(fs, node));
   }
 
   // Trash (if not already included)
   const trashId = getTrashId(fs);
   if (trashId && !icons.some((ic) => ic.nodeId === trashId)) {
     for (const vol of volumes) {
-      if (vol.kind !== "directory") continue;
-      const trash = fs.findByName(vol.id, "Trash");
+      const trash = fs.locate("trash", vol.id);
       if (trash) {
-        icons.push({
-          title: trash.name,
-          img: getIconForNode(trash),
-          nodeId: trash.id,
-          isDirectory: true,
-          position: trash.position,
-          zOrder: trash.zOrder ?? 0,
-        });
+        icons.push(toFinderIcon(fs, trash));
         break;
       }
     }
@@ -592,13 +589,35 @@ export function handleGlobalMouseUp(
   x: number,
   y: number,
   menubarH: number,
-  fs: FileManager
+  fs: FileSystem,
+  showDialog: OSServices["showDialog"]
 ): void {
   const drag = finderDrag();
+  const targetIconId = dropTargetId();
   pendingDragInfo = null;
   setDropTargetId(null);
 
   if (!drag) return;
+  setFinderDrag(null);
+
+  /** The dragged icon plus its companions, laid out around (x, y). */
+  const placementsAt = (px: number, py: number): IconPlacement[] => [
+    { nodeId: drag.nodeId, position: { x: Math.max(0, px), y: Math.max(0, py) } },
+    ...drag.companions.map((c) => ({
+      nodeId: c.nodeId,
+      position: { x: Math.max(0, px + c.offsetX), y: Math.max(0, py + c.offsetY) },
+    })),
+  ];
+
+  // Released over a folder icon: move inside and let the icons auto-arrange.
+  if (targetIconId && targetIconId !== drag.sourceDirectoryId) {
+    const placements: IconPlacement[] = [
+      { nodeId: drag.nodeId, position: undefined },
+      ...drag.companions.map((c) => ({ nodeId: c.nodeId, position: undefined })),
+    ];
+    void runFinderMutation(showDialog, () => placeIcons(fs, targetIconId, placements));
+    return;
+  }
 
   // Check if the release was inside an open folder window's content area.
   for (const win of [...getWindows()].reverse()) {
@@ -607,47 +626,24 @@ export function handleGlobalMouseUp(
     if (dirId === drag.nodeId) continue; // can't drop into itself
 
     const content = windowContentRect(win);
-    const cx1 = content.x;
-    const cx2 = content.x + content.width;
-    const cy1 = content.y;
-    const cy2 = content.y + content.height;
-
-    if (x >= cx1 && x < cx2 && y >= cy1 && y < cy2) {
+    const inside =
+      x >= content.x && x < content.x + content.width &&
+      y >= content.y && y < content.y + content.height;
+    if (inside) {
       const dropX = drag.ghostX - content.x + win.scrollX;
       const dropY = drag.ghostY - content.y + win.scrollY;
-      if (drag.sourceDirectoryId !== dirId) {
-        fs.move(drag.nodeId, dirId);
-      }
-      fs.setPosition(drag.nodeId, { x: Math.max(0, dropX), y: Math.max(0, dropY) });
-      fs.bumpZOrder(drag.nodeId);
-      for (const c of drag.companions) {
-        if (drag.sourceDirectoryId !== dirId) fs.move(c.nodeId, dirId);
-        fs.setPosition(c.nodeId, { x: Math.max(0, dropX + c.offsetX), y: Math.max(0, dropY + c.offsetY) });
-        fs.bumpZOrder(c.nodeId);
-      }
-      setFinderDrag(null);
-      notifyFsChanged();
+      void runFinderMutation(showDialog, () => placeIcons(fs, dirId, placementsAt(dropX, dropY)));
       return;
     }
   }
 
-  // Default: drop onto the desktop
-  const desktopFolderId = getDesktopFolderId(fs);
+  // Default: drop onto the desktop. Volumes stay at the root; everything else
+  // lands in the Desktop Folder.
   const isVolume = drag.sourceDirectoryId === ROOT_ID;
-  if (!isVolume && desktopFolderId && drag.sourceDirectoryId !== desktopFolderId) {
-    fs.move(drag.nodeId, desktopFolderId);
-  }
-  fs.setPosition(drag.nodeId, { x: Math.max(0, drag.ghostX), y: Math.max(0, drag.ghostY - menubarH) });
-  fs.bumpZOrder(drag.nodeId);
-  for (const c of drag.companions) {
-    if (!isVolume && desktopFolderId && drag.sourceDirectoryId !== desktopFolderId) {
-      fs.move(c.nodeId, desktopFolderId);
-    }
-    fs.setPosition(c.nodeId, { x: Math.max(0, drag.ghostX + c.offsetX), y: Math.max(0, drag.ghostY - menubarH + c.offsetY) });
-    fs.bumpZOrder(c.nodeId);
-  }
-  setFinderDrag(null);
-  notifyFsChanged();
+  const targetDir = isVolume ? ROOT_ID : getDesktopFolderId(fs) ?? drag.sourceDirectoryId;
+  void runFinderMutation(showDialog, () =>
+    placeIcons(fs, targetDir, placementsAt(drag.ghostX, drag.ghostY - menubarH))
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -660,7 +656,6 @@ export function FinderDesktop(): JSX.Element {
   // The desktop owns the Finder's app-level menus (shown when no window, or a
   // window without its own menus, is active). Folder windows override per window.
   createEffect(() => {
-    getFsVersion();
     setAppMenus(FINDER_APP_ID, buildFinderMenus(os.fs));
   });
 
@@ -684,7 +679,6 @@ export function FinderDesktop(): JSX.Element {
   });
 
   const icons = createMemo(() => {
-    getFsVersion();
     return buildDesktopIcons(os.fs);
   });
 
@@ -807,8 +801,7 @@ export function FinderDesktop(): JSX.Element {
               }}
               onCommitRename={(newName) => {
                 setRenamingNodeId(null);
-                os.fs.rename(item.icon.nodeId, newName);
-                notifyFsChanged();
+                void runFinderMutation(os.showDialog, () => os.fs.rename(item.icon.nodeId, newName));
               }}
               onCancelRename={() => setRenamingNodeId(null)}
             />
@@ -867,7 +860,6 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
   const directoryId = () => props.directoryId;
 
   const icons = createMemo(() => {
-    getFsVersion();
     const id = directoryId();
     return id ? buildFolderIcons(os.fs, id) : [];
   });
@@ -952,7 +944,6 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
 
   // This window's menus reflect its folder (Clean Up) and the trash state.
   createEffect(() => {
-    getFsVersion();
     windowApi.setMenus(buildFinderMenus(os.fs, dirId()));
   });
 
@@ -1021,8 +1012,7 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
               }}
               onCommitRename={(newName) => {
                 setRenamingNodeId(null);
-                os.fs.rename(item.icon.nodeId, newName);
-                notifyFsChanged();
+                void runFinderMutation(os.showDialog, () => os.fs.rename(item.icon.nodeId, newName));
               }}
               onCancelRename={() => setRenamingNodeId(null)}
             />
@@ -1149,7 +1139,7 @@ function IconCell(props: IconCellProps): JSX.Element {
         mouseDownLY = ly;
         if (ly >= ICON_SIZE) lastLabelMouseDownX = lx;
         if (!props.isSelected()) props.onClick();
-        os.fs.bumpZOrder(props.icon.nodeId);
+        bumpZOrder(os.fs, props.icon.nodeId);
         pendingDragInfo = {
           nodeId:             props.icon.nodeId,
           sourceDirectoryId:  props.sourceDirectoryId,
@@ -1164,28 +1154,8 @@ function IconCell(props: IconCellProps): JSX.Element {
           companions:         props.getCompanions?.() ?? [],
         };
       }}
-      onMouseUp={(lx, ly) => {
-        const drag = finderDrag();
+      onMouseUp={() => {
         pendingDragInfo = null;
-        if (drag) {
-          const validTarget =
-            props.icon.isDirectory &&
-            !isPartOfActiveDrag(props.icon.nodeId) &&
-            props.icon.nodeId !== drag.sourceDirectoryId;
-          if (validTarget) {
-            os.fs.move(drag.nodeId, props.icon.nodeId);
-            os.fs.setPosition(drag.nodeId, undefined);
-            os.fs.bumpZOrder(drag.nodeId);
-            for (const c of drag.companions) {
-              os.fs.move(c.nodeId, props.icon.nodeId);
-              os.fs.setPosition(c.nodeId, undefined);
-              os.fs.bumpZOrder(c.nodeId);
-            }
-            setFinderDrag(null);
-            setDropTargetId(null);
-            notifyFsChanged();
-          }
-        }
       }}
       onClick={() => {
         if (props.isRenaming()) return;
@@ -1206,8 +1176,7 @@ function IconCell(props: IconCellProps): JSX.Element {
             }, RENAME_DELAY_MS);
           }
           props.onClick();
-          os.fs.bumpZOrder(props.icon.nodeId);
-          notifyFsChanged();
+          bumpZOrder(os.fs, props.icon.nodeId);
         }
       }}
       onDoubleClick={() => {
@@ -1216,7 +1185,7 @@ function IconCell(props: IconCellProps): JSX.Element {
       }}
       onDrag={(_lx, _ly, gx, gy) => handleDrag(gx, gy)}
       onDragEnd={(_lx, _ly, gx, gy) => {
-        handleGlobalMouseUp(gx, gy, os.menubarHeight, os.fs);
+        handleGlobalMouseUp(gx, gy, os.menubarHeight, os.fs, os.showDialog);
       }}
       onScroll={props.onScroll}
       onMouseEnter={() => {
@@ -1390,15 +1359,24 @@ export function FinderDragGhost(): JSX.Element {
  * Pure: callers install the result via `setAppMenus` / `useWindow().setMenus`
  * and rebuild it when the file system changes.
  */
-export function buildFinderMenus(fs: FileManager, activeDirId?: string): MenubarDefinition[] {
+export function buildFinderMenus(fs: FileSystem, activeDirId?: string): MenubarDefinition[] {
   const trashId = getTrashId(fs);
-  const trashEmpty = !trashId || fs.readDir(trashId).length === 0;
+  const trashEmpty = !trashId || fs.childCount(trashId) === 0;
+  // New folders go in the active folder window, or on the desktop.
+  const newFolderParent = activeDirId ?? getDesktopFolderId(fs);
 
   return [
     {
       label: "File",
       items: [
-        { label: "New Folder", disabled: true },
+        {
+          label: "New Folder",
+          shortcut: "N",
+          disabled: !newFolderParent,
+          onClick: () => {
+            if (newFolderParent) fs.mkdir(newFolderParent, fs.availableName(newFolderParent, "untitled folder"));
+          },
+        },
         { type: "separator" },
         { label: "Open",  shortcut: "O", disabled: true },
         { label: "Close", disabled: true },
@@ -1429,14 +1407,17 @@ export function buildFinderMenus(fs: FileManager, activeDirId?: string): Menubar
     {
       label: "Special",
       items: [
-        { label: "Clean Up",   disabled: !activeDirId },
+        {
+          label: "Clean Up",
+          disabled: !activeDirId,
+          onClick: () => { if (activeDirId) clearPositions(fs, activeDirId); },
+        },
         {
           label: "Empty Trash",
           disabled: trashEmpty,
           onClick: async () => {
             if (!trashId) return;
-            for (const child of fs.readDir(trashId)) await fs.remove(child.id);
-            notifyFsChanged(); // menus rebuild reactively
+            for (const child of fs.children(trashId)) await fs.remove(child.id);
           },
         },
         { type: "separator" },

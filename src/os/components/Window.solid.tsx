@@ -14,6 +14,7 @@ import { WindowCtx, type WindowAPI } from "../windowContext";
 import { isBlockedByModal } from "../layering";
 import { getWindows } from "../state";
 import { AppServicesContext, type AppServices } from "@mockintosh/sdk";
+import { createAppStorage } from "../appStorage";
 import { measureText, type PointerCaptureEvent } from "@mockintosh/ui";
 
 import {
@@ -622,11 +623,8 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
   // window's components see their own instance.
   const services: AppServices = {
     getSprite: (name) => os.sprites.get(name),
-    storage: {
-      read: async () => null,
-      write: async () => {},
-      list: async () => [],
-    },
+    storage: createAppStorage(os.fs, props.win.appId),
+    fs: os.fs,
     os: {
       openWindow: (appId, p) => os.openApp(appId, p),
       closeWindow: (id) => os.closeWindow(id),

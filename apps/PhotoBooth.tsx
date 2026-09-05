@@ -4,6 +4,7 @@ import type { GrafPort } from "@mockintosh/quickdraw";
 import { registerApp } from "../src/os/apps";
 import { useOS } from "../src/os/context";
 import { useWindow } from "../src/os/windowContext";
+import { saveSpriteFile } from "../src/os/spriteFiles";
 import {
   type DitherMode,
   type DitherState,
@@ -136,10 +137,10 @@ export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   async function savePhoto(photo: Photo): Promise<void> {
     const date = new Date(photo.timestamp);
     const name = `Photo ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
-    const desktop = os.fs.resolvePath("/Mockintosh HD/Desktop Folder");
+    const desktop = os.fs.locate("desktop");
     if (!desktop) return;
     try {
-      await os.fs.writeImage(desktop.id, name, {
+      await saveSpriteFile(os.fs, os.sprites, desktop.id, name, {
         width: PREVIEW,
         height: PREVIEW,
         data: pack1bitTo2bpp(photo.pixels),

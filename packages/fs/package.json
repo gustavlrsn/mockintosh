@@ -1,0 +1,18 @@
+{
+  "name": "@mockintosh/fs",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "license": "MIT",
+  "description": "Mockintosh virtual file system — a reactive catalog over a pluggable blob backend (OPFS in the browser, in-memory for tests)",
+  "dependencies": {
+    "solid-js": "^1.9.0"
+  }
+}

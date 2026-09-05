@@ -5,7 +5,7 @@
 
 import { createContext, useContext } from "solid-js";
 import type { ResourceManager } from "../../lib/toolbox/ResourceManager";
-import type { FileManager } from "../../lib/toolbox/FileManager";
+import type { FileSystem } from "@mockintosh/fs";
 import type { AnimRect } from "../../lib/canvas/ZoomAnimation";
 
 export interface IconScreenRect {
@@ -27,7 +27,7 @@ export interface DialogOptions {
 
 export interface OSServices {
   sprites: ResourceManager;
-  fs: FileManager;
+  fs: FileSystem;
   resolution: { width: number; height: number };
   menubarHeight: number;
   openApp: (appId: string, props?: Record<string, unknown>, fromRect?: IconScreenRect) => void;

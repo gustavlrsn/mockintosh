@@ -5,7 +5,7 @@ import { BLACK, WHITE } from "../canvas/BitCanvas";
 import { measureText } from "../canvas/fontAdapter";
 import { OSEvent } from "../toolbox/EventManager";
 import type { MenubarDefinition } from "@mockintosh/sdk";
-import { FileManager } from "../toolbox/FileManager";
+import { MIME, ROOT_ID, type FileSystem } from "@mockintosh/fs";
 import { OSServices } from "../canvas/OSServices";
 import {
   DeckerCard,
@@ -589,7 +589,7 @@ async function saveDocument(
   props: any
 ): Promise<void> {
   if (!state.deck) return;
-  const fs: FileManager | undefined = props._fs;
+  const fs: FileSystem | undefined = props._fs;
   const os: OSServices | undefined = props._os;
   if (!fs || !os) return;
 
@@ -607,20 +607,17 @@ async function saveDocument(
     fileName = entered;
   }
 
-  const existing = fileId ? fs.getNode(fileId) : null;
+  // Save next to the original; new documents go on the desktop.
+  const existing = fileId ? fs.node(fileId) : undefined;
   const parent =
-    existing?.parentId ??
-    fs.findByName(
-      fs.findByName("__root__", "Mockintosh HD")?.id ?? "__root__",
-      "Development"
-    )?.id ??
-    fs.findByName("__root__", "Mockintosh HD")?.id ??
-    "__root__";
+    existing?.parentId ?? fs.locate("desktop")?.id ?? fs.locate("volume")?.id ?? ROOT_ID;
 
   const html =
     fileName.toLowerCase().endsWith(".html") || state.sourceFormat === "html";
   const content = DECKER.writeDeck(state.deck, html);
-  const written = await fs.writeFile(parent, fileName, content, "text");
+  const written = await fs.writeFile(parent, fileName, content, {
+    type: html ? MIME.html : MIME.deck,
+  });
 
   setState((prev) => ({
     ...prev,
@@ -705,13 +702,13 @@ export const DeckerApp: SystemApp = {
 
       const load = async () => {
         try {
-          const fs: FileManager | undefined = props._fs;
+          const fs: FileSystem | undefined = props._fs;
           let source = props.initialSource ?? BLANK_DECK_SOURCE;
           let fileName = props.title ?? props.fileName ?? "Untitled.deck";
           if (fs && props.fileId) {
-            const raw = await fs.readFile(props.fileId);
+            const raw = await fs.readText(props.fileId);
             if (raw) source = raw;
-            const node = fs.getNode(props.fileId);
+            const node = fs.node(props.fileId);
             if (node?.kind === "file") fileName = node.name;
           }
 

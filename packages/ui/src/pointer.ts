@@ -220,7 +220,10 @@ export function createPointerDispatcher(
 
       if (type === "mousemove") {
         const hit = hitTest(root, x, y);
-        if (!captured) setHovered(hit);
+        // Hover tracks the pointer even while a press is captured, like the
+        // DOM: drop targets highlight under a drag, a pressed button unpresses
+        // when the pointer leaves it, menus highlight on press-drag.
+        setHovered(hit);
         if (captured) {
           const { lx, ly } = localOf(captured, x, y);
           if (!dragging) {

@@ -117,13 +117,66 @@ function MyView() {
 ```
 
 - `getSprite(name)` — OS sprites plus your exported `sprites`
-- `storage.read/write/list` — namespaced key-value storage
+- `storage.read/write/remove/list` — per-app key-value storage (see [Storage](#storage))
+- `fs` — the shared file system (see [Files](#files))
 - `os.openWindow / closeWindow / showDialog`
 - `setMenus(menus)` — this window's menubar (see [Menus](#menus))
 - `fetch` — only if the manifest declares `"network"`
 - `env.origin`
 
 `useApp()` reads a per-window context, so call it during component setup (not in a callback created elsewhere).
+
+## Storage
+
+`useApp().storage` is a string key/value store private to your app. Each key is a file in `System Folder/Preferences/<your app id>/`, so users can inspect and delete your data from the Finder.
+
+```tsx
+const app = useApp();
+const saved = await app.storage.read("settings.json");
+await app.storage.write("settings.json", JSON.stringify({ volume: 7 }));
+await app.storage.remove("settings.json");
+```
+
+## Files
+
+`useApp().fs` is the user's file system — the same one the Finder shows. Catalog reads are reactive (call them inside `createMemo`/`createEffect` and they re-run when that folder changes); bodies are read with `readText`/`readBytes`/`readJSON`.
+
+```tsx
+import { useApp, MIME, createMemo, For } from "@mockintosh/sdk";
+
+function DesktopList() {
+  const { fs } = useApp();
+  // Find folders by role, never by name — the user may have renamed them.
+  const desktop = () => fs.locate("desktop");
+  const files = createMemo(() => (desktop() ? fs.children(desktop()!.id) : []));
+  return <For each={files()}>{(n) => <text font="body">{n.name}</text>}</For>;
+}
+
+async function saveNote(fs: AppFileSystem, text: string) {
+  const desktop = fs.locate("desktop")!;
+  await fs.writeFile(desktop.id, "Note.txt", text, { type: MIME.text });
+}
+```
+
+Files have one MIME `type` (`MIME.text`, `MIME.markdown`, `MIME.sprite`, …; `inferMimeType(name)` guesses from an extension). Mutations throw `FSError` (`isFSError(err, "exists")`) on name clashes and invalid moves — show the message in a dialog rather than swallowing it.
+
+### Opening documents
+
+Declare the types your app can open and the Finder will launch it on double-click, merging `FileDocumentProps` (`fileId`, `title`) into your props:
+
+```tsx
+export default defineApp<FileDocumentProps>({
+  id: "notes",
+  fileTypes: [MIME.text, MIME.markdown],
+  Component(props) {
+    const { fs } = useApp();
+    const [text, setText] = createSignal("");
+    onMount(async () => setText((await fs.readText(props.fileId)) ?? ""));
+    return <text font="body">{text()}</text>;
+  },
+  // …
+});
+```
 
 ## Sprites
 
@@ -243,10 +296,12 @@ export default defineConfig({
 
 The bundle's default export is the `defineApp({...})` object. Optional named export: `sprites`.
 
+Installing from the App Store writes the manifest to `Applications/<title>` as a `MIME.app` file; opening it launches the app and trashing it uninstalls.
+
 ## Constraints
 
 - **512×342 pixels** — the entire screen. Your window is smaller.
 - **Indexed pixels** — `BLACK`/`WHITE` are safest.
 - **No DOM UI** — hidden `<video>`/`<audio>` for media is fine; do not render HTML into the screen.
-- **No direct fetch / localStorage** — use `useApp().fetch` and `useApp().storage`.
+- **No direct fetch / localStorage / OPFS** — use `useApp().fetch`, `useApp().storage` and `useApp().fs`. Import file-system types and `MIME` from `@mockintosh/sdk`, not `@mockintosh/fs`.
 - `createUI` is a single-instance renderer inside the OS; third-party apps share that runtime via the import map.

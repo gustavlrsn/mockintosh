@@ -7,6 +7,7 @@
  */
 
 import { createContext, useContext } from "solid-js";
+import type { FileSystem } from "@mockintosh/fs";
 import type { MenubarDefinition } from "./menus";
 
 export type {
@@ -16,6 +17,26 @@ export type {
   MenubarRadioGroupDef,
   MenubarSeparator,
 } from "./menus";
+
+// File-system vocabulary, re-exported so apps never import @mockintosh/fs
+// directly (the OS owns the one FileSystem instance; apps reach it via
+// `useApp().fs`).
+export {
+  MIME,
+  ROOT_ID,
+  FSError,
+  isFSError,
+  inferMimeType,
+  isTextType,
+  type NodeId,
+  type NodeRole,
+  type FSNode,
+  type FSFile,
+  type FSDirectory,
+  type FileContent,
+  type WriteFileOptions,
+  type FSErrorCode,
+} from "@mockintosh/fs";
 
 export const BLACK = 1;
 export const WHITE = 0;
@@ -87,13 +108,52 @@ export interface DialogOptions {
   inputDefault?: string;
 }
 
+/**
+ * Per-app key/value storage. Keys are file names inside the app's own folder
+ * (`System Folder/Preferences/<appId>/`), so the user can see and delete an
+ * app's data from the Finder.
+ */
+export interface AppStorage {
+  read(key: string): Promise<string | null>;
+  write(key: string, value: string): Promise<void>;
+  remove(key: string): Promise<void>;
+  list(): Promise<string[]>;
+}
+
+/**
+ * The shared file system as seen by apps: reactive catalog reads (call them
+ * inside memos/effects), content access, and mutations. Well-known folders
+ * are found by role (`fs.locate("desktop")`), never by name.
+ */
+export type AppFileSystem = Pick<
+  FileSystem,
+  | "node"
+  | "file"
+  | "directory"
+  | "exists"
+  | "children"
+  | "childCount"
+  | "child"
+  | "resolve"
+  | "pathOf"
+  | "locate"
+  | "volumes"
+  | "volumeOf"
+  | "readBytes"
+  | "readText"
+  | "readJSON"
+  | "mkdir"
+  | "writeFile"
+  | "writeJSON"
+  | "rename"
+  | "move"
+  | "remove"
+  | "batch"
+>;
+
 export interface AppProps {
   getSprite(name: string): Sprite | undefined;
-  storage: {
-    read(key: string): Promise<string | null>;
-    write(key: string, value: string): Promise<void>;
-    list(): Promise<string[]>;
-  };
+  storage: AppStorage;
   os: {
     openWindow(appId: string, props?: Record<string, unknown>): void;
     closeWindow(windowId: string): void;
@@ -121,7 +181,21 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
    * `useApp().setMenus` from inside the component instead.
    */
   menus?: MenubarDefinition[];
+  /**
+   * MIME types this app opens. When the user opens such a file from the
+   * Finder, the OS launches the app with `FileDocumentProps` merged into its
+   * props. The first registered app for a type wins.
+   */
+  fileTypes?: string[];
   Component: (props: P) => unknown;
+}
+
+/** Props the OS passes when an app is launched to open a file. */
+export interface FileDocumentProps {
+  /** File-system node id — read it with `useApp().fs.readText(fileId)`. */
+  fileId: string;
+  /** The file's name, suitable as a window title. */
+  title: string;
 }
 
 export function defineApp<P extends Record<string, unknown>>(app: SolidApp<P>): SolidApp<P> {
@@ -130,7 +204,8 @@ export function defineApp<P extends Record<string, unknown>>(app: SolidApp<P>): 
 
 export interface AppServices {
   getSprite(name: string): Sprite | undefined;
-  storage: AppProps["storage"];
+  storage: AppStorage;
+  fs: AppFileSystem;
   os: AppProps["os"];
   fetch?: AppProps["fetch"];
   env: AppProps["env"];

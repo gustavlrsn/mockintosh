@@ -8,13 +8,23 @@ export const REDIRECT_URI = `${
 }/callback.html`;
 export const SCOPES =
   "streaming user-read-playback-state user-modify-playback-state user-read-email playlist-read-private";
-const TOKEN_KEY = "mockintosh:spotify:tokens";
 const API_BASE = "https://api.spotify.com/v1";
 
 export interface SpotifyTokens {
   access_token: string;
   refresh_token: string;
   expires_at: number;
+}
+
+/**
+ * The signed-in state shared by every API call. The owner (the player
+ * component) holds the current tokens and is told whenever they change —
+ * refreshed on expiry, or revoked (`null`) when a refresh fails — so it can
+ * persist them and update its UI. The API layer itself never stores anything.
+ */
+export interface SpotifySession {
+  tokens: SpotifyTokens | null;
+  onChange(tokens: SpotifyTokens | null): void;
 }
 
 export interface SpotifyPlaylist {
@@ -68,29 +78,14 @@ export async function generateCodeChallenge(verifier: string): Promise<string> {
     .replace(/=+$/, "");
 }
 
-export function saveTokens(tokens: SpotifyTokens): void {
-  try {
-    localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
-  } catch {
-    /* ignore quota */
-  }
-}
-
-export function loadTokens(): SpotifyTokens | null {
-  try {
-    const raw = localStorage.getItem(TOKEN_KEY);
-    return raw ? (JSON.parse(raw) as SpotifyTokens) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function clearTokens(): void {
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* ignore */
-  }
+export function isSpotifyTokens(v: unknown): v is SpotifyTokens {
+  const t = v as Partial<SpotifyTokens> | null;
+  return (
+    !!t &&
+    typeof t.access_token === "string" &&
+    typeof t.refresh_token === "string" &&
+    typeof t.expires_at === "number"
+  );
 }
 
 export async function exchangeCodeForTokens(
@@ -138,22 +133,18 @@ async function refreshAccessToken(refreshToken: string): Promise<SpotifyTokens> 
   };
 }
 
-export async function getValidToken(
-  tokensRef: { current: SpotifyTokens | null },
-  onUpdate: (t: SpotifyTokens) => void
-): Promise<string | null> {
-  const tokens = tokensRef.current;
+export async function getValidToken(session: SpotifySession): Promise<string | null> {
+  const tokens = session.tokens;
   if (!tokens) return null;
   if (Date.now() > tokens.expires_at - 60_000) {
     try {
       const refreshed = await refreshAccessToken(tokens.refresh_token);
-      tokensRef.current = refreshed;
-      saveTokens(refreshed);
-      onUpdate(refreshed);
+      session.tokens = refreshed;
+      session.onChange(refreshed);
       return refreshed.access_token;
     } catch {
-      tokensRef.current = null;
-      clearTokens();
+      session.tokens = null;
+      session.onChange(null);
       return null;
     }
   }
@@ -162,11 +153,10 @@ export async function getValidToken(
 
 async function authorized(
   path: string,
-  tokensRef: { current: SpotifyTokens | null },
-  onUpdate: (t: SpotifyTokens) => void,
+  session: SpotifySession,
   init?: RequestInit
 ): Promise<Response | null> {
-  const token = await getValidToken(tokensRef, onUpdate);
+  const token = await getValidToken(session);
   if (!token) return null;
   return fetch(`${API_BASE}${path}`, {
     ...init,
@@ -177,12 +167,8 @@ async function authorized(
   });
 }
 
-export async function spotifyGet(
-  path: string,
-  tokensRef: { current: SpotifyTokens | null },
-  onUpdate: (t: SpotifyTokens) => void
-): Promise<unknown> {
-  const resp = await authorized(path, tokensRef, onUpdate);
+export async function spotifyGet(path: string, session: SpotifySession): Promise<unknown> {
+  const resp = await authorized(path, session);
   if (!resp?.ok) return null;
   return resp.json();
 }
@@ -190,10 +176,9 @@ export async function spotifyGet(
 export async function spotifyPut(
   path: string,
   body: unknown,
-  tokensRef: { current: SpotifyTokens | null },
-  onUpdate: (t: SpotifyTokens) => void
+  session: SpotifySession
 ): Promise<boolean> {
-  const resp = await authorized(path, tokensRef, onUpdate, {
+  const resp = await authorized(path, session, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: body != null ? JSON.stringify(body) : undefined,
@@ -201,20 +186,13 @@ export async function spotifyPut(
   return !!resp && (resp.ok || resp.status === 204);
 }
 
-export async function spotifyPost(
-  path: string,
-  tokensRef: { current: SpotifyTokens | null },
-  onUpdate: (t: SpotifyTokens) => void
-): Promise<boolean> {
-  const resp = await authorized(path, tokensRef, onUpdate, { method: "POST" });
+export async function spotifyPost(path: string, session: SpotifySession): Promise<boolean> {
+  const resp = await authorized(path, session, { method: "POST" });
   return !!resp && (resp.ok || resp.status === 204);
 }
 
-export async function fetchPlaylists(
-  tokensRef: { current: SpotifyTokens | null },
-  onUpdate: (t: SpotifyTokens) => void
-): Promise<SpotifyPlaylist[]> {
-  const data = (await spotifyGet("/me/playlists?limit=50", tokensRef, onUpdate)) as
+export async function fetchPlaylists(session: SpotifySession): Promise<SpotifyPlaylist[]> {
+  const data = (await spotifyGet("/me/playlists?limit=50", session)) as
     | { items?: Array<{ id: string; name: string; uri: string; images?: Array<{ url: string }> }> }
     | null;
   if (!data?.items) return [];

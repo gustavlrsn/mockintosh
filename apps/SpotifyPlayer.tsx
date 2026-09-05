@@ -1,5 +1,6 @@
-import { For, Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Button } from "@mockintosh/ui";
+import { useApp } from "@mockintosh/sdk";
 import { registerApp } from "../src/os/apps";
 import { useOS } from "../src/os/context";
 import { useWindow } from "../src/os/windowContext";
@@ -11,6 +12,7 @@ import {
   type DeviceFlowState,
   type PlayerState,
   type SpotifyPlaylist,
+  type SpotifySession,
   type SpotifyTokens,
   buildQRMatrix,
   ditherImageFromUrl,
@@ -18,19 +20,24 @@ import {
   fetchPlaylists,
   generateCodeChallenge,
   generateCodeVerifier,
+  isSpotifyTokens,
   loadSpotifySDK,
-  loadTokens,
-  saveTokens,
   spotifyPost,
   spotifyPut,
 } from "./spotify/api";
 
 const SIDEBAR_W = 90;
 
+/** Key in the app's storage folder (System Folder/Preferences/spotify/). */
+const TOKENS_KEY = "tokens.json";
+/** Pre-FS location; migrated on first open and then removed. */
+const LEGACY_TOKENS_KEY = "mockintosh:spotify:tokens";
+
 export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   const os = useOS();
   const win = useWindow();
-  const [tokens, setTokens] = createSignal<SpotifyTokens | null>(loadTokens());
+  const { storage } = useApp();
+  const [tokens, setTokens] = createSignal<SpotifyTokens | null>(null);
   const [playlists, setPlaylists] = createSignal<SpotifyPlaylist[]>([]);
   const [selected, setSelected] = createSignal(-1);
   const [player, setPlayer] = createSignal<PlayerState | null>(null);
@@ -41,20 +48,41 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   const [deviceFlow, setDeviceFlow] = createSignal<DeviceFlowState | null>(null);
   const [sidebarScroll, setSidebarScroll] = createSignal(0);
 
-  const tokensRef = { current: tokens() };
+  // The API layer reads `session.tokens` and reports refreshes/revocations
+  // through `onChange`; we own persistence.
+  const session: SpotifySession = {
+    tokens: null,
+    onChange(next) {
+      setTokens(next);
+      void (next ? storage.write(TOKENS_KEY, JSON.stringify(next)) : storage.remove(TOKENS_KEY));
+    },
+  };
+
+  onMount(async () => {
+    let raw = await storage.read(TOKENS_KEY);
+    if (raw === null && typeof localStorage !== "undefined") {
+      raw = localStorage.getItem(LEGACY_TOKENS_KEY);
+      if (raw !== null) {
+        localStorage.removeItem(LEGACY_TOKENS_KEY);
+        await storage.write(TOKENS_KEY, raw);
+      }
+    }
+    if (raw === null) return;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (isSpotifyTokens(parsed)) setTokens(parsed);
+    } catch {
+      await storage.remove(TOKENS_KEY);
+    }
+  });
+
   let codeVerifier = "";
   let deviceId: string | null = null;
   let sdkPlayer: { connect: () => Promise<void>; disconnect: () => void; setVolume: (v: number) => void; addListener: Function } | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-  const onTokenUpdate = (t: SpotifyTokens) => {
-    tokensRef.current = t;
-    saveTokens(t);
-    setTokens(t);
-  };
-
   createEffect(() => {
-    tokensRef.current = tokens();
+    session.tokens = tokens();
   });
 
   createEffect(() => {
@@ -68,14 +96,14 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
         sdkPlayer = new Spotify.Player({
           name: "Mockintosh Player",
           getOAuthToken: (cb: (token: string) => void) => {
-            const tok = tokensRef.current?.access_token;
+            const tok = session.tokens?.access_token;
             if (tok) cb(tok);
           },
           volume: volume() / 100,
         });
         sdkPlayer.addListener("ready", ({ device_id }: { device_id: string }) => {
           deviceId = device_id;
-          void spotifyPut("/me/player", { device_ids: [device_id], play: false }, tokensRef, onTokenUpdate);
+          void spotifyPut("/me/player", { device_ids: [device_id], play: false }, session);
         });
         sdkPlayer.addListener("player_state_changed", (state: {
           paused: boolean;
@@ -115,7 +143,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
         setError(e instanceof Error ? e.message : "SDK failed");
       }
     })();
-    void fetchPlaylists(tokensRef, onTokenUpdate).then((pls) => {
+    void fetchPlaylists(session).then((pls) => {
       if (pls.length) setPlaylists(pls);
     });
   });
@@ -130,7 +158,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
       if (!e.data.code || !codeVerifier) return;
       try {
         const next = await exchangeCodeForTokens(e.data.code, codeVerifier);
-        onTokenUpdate(next);
+        session.onChange(next);
         setError("");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Auth failed");
@@ -155,7 +183,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
         const resp = await fetch(`/api/spotify/device-poll?poll_id=${encodeURIComponent(current.pollId)}`);
         const data = await resp.json();
         if (data.status === "ready") {
-          onTokenUpdate({
+          session.onChange({
             access_token: data.access_token,
             refresh_token: data.refresh_token,
             expires_at: Date.now() + data.expires_in * 1000,
@@ -331,7 +359,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
                   onClick={() => {
                     setSelected(i());
                     if (deviceId) {
-                      void spotifyPut("/me/player/play", { context_uri: pl.uri }, tokensRef, onTokenUpdate);
+                      void spotifyPut("/me/player/play", { context_uri: pl.uri }, session);
                     }
                   }}
                 >
@@ -378,18 +406,18 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
                 : "No track playing"}
             </text>
             <box flexDirection="row" gap={6} alignItems="center">
-              <Button label="<<" onClick={() => void spotifyPost("/me/player/previous", tokensRef, onTokenUpdate)} />
+              <Button label="<<" onClick={() => void spotifyPost("/me/player/previous", session)} />
               <Button
                 label={player()?.paused ?? true ? ">" : "||"}
                 onClick={() => {
                   if (player()?.paused ?? true) {
-                    void spotifyPut("/me/player/play", null, tokensRef, onTokenUpdate);
+                    void spotifyPut("/me/player/play", null, session);
                   } else {
-                    void spotifyPut("/me/player/pause", null, tokensRef, onTokenUpdate);
+                    void spotifyPut("/me/player/pause", null, session);
                   }
                 }}
               />
-              <Button label=">>" onClick={() => void spotifyPost("/me/player/next", tokensRef, onTokenUpdate)} />
+              <Button label=">>" onClick={() => void spotifyPost("/me/player/next", session)} />
               <text font="body">{`Vol ${volume()}`}</text>
               <Button
                 label="-"
@@ -397,7 +425,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
                   const next = Math.max(0, volume() - 10);
                   setVolume(next);
                   sdkPlayer?.setVolume(next / 100);
-                  void spotifyPut(`/me/player/volume?volume_percent=${next}`, null, tokensRef, onTokenUpdate);
+                  void spotifyPut(`/me/player/volume?volume_percent=${next}`, null, session);
                 }}
               />
               <Button
@@ -406,7 +434,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
                   const next = Math.min(100, volume() + 10);
                   setVolume(next);
                   sdkPlayer?.setVolume(next / 100);
-                  void spotifyPut(`/me/player/volume?volume_percent=${next}`, null, tokensRef, onTokenUpdate);
+                  void spotifyPut(`/me/player/volume?volume_percent=${next}`, null, session);
                 }}
               />
             </box>

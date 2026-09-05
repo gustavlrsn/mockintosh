@@ -142,12 +142,6 @@ export const [getWindowOutline, setWindowOutline] = createSignal<{
   height: number;
 } | null>(null);
 
-/** Incremented after any FileManager mutation — lets Finder views re-render reactively. */
-export const [getFsVersion, setFsVersion] = createSignal(0);
-export function notifyFsChanged(): void {
-  setFsVersion((v) => v + 1);
-}
-
 // ---------------------------------------------------------------------------
 // Window helpers
 // ---------------------------------------------------------------------------

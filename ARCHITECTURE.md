@@ -77,14 +77,14 @@ export default defineApp({
 
 Bundles externalize `solid-js`, `solid-js/store`, `@mockintosh/ui`, and `@mockintosh/sdk`. The OS serves those via an import map so one Solid runtime is shared. `AppLoader` validates `Component` and calls `registerApp`. The App Store filters catalog entries to `sdk` major ≥ 2.
 
-`useApp()` provides `getSprite`, `storage`, `os.openWindow/closeWindow/showDialog`, `setMenus` (this window's menubar), optional `fetch`, and `env`. The OS supplies one `AppServices` per window through the SDK's `AppServicesContext`, so each window's components see their own.
+`useApp()` provides `getSprite`, `storage` (per-app folder), `fs` (the shared file system), `os.openWindow/closeWindow/showDialog`, `setMenus` (this window's menubar), optional `fetch`, and `env`. Apps that declare `fileTypes` are launched with `FileDocumentProps` when such a file is opened. The OS supplies one `AppServices` per window through the SDK's `AppServicesContext`, so each window's components see their own.
 
 The SDK is the single source of the app contract shared with the OS: `SolidApp` (the internal `src/os/apps.ts` type extends it) and the menubar types (`MenubarDefinition`, `MenubarItemDef`, …) live in `packages/sdk/src` and the shell imports them from `@mockintosh/sdk`.
 
 ## Directory Structure
 
 ```
-lib/canvas/                 Pixel buffer, sprites, FS, color, zoom
+lib/canvas/                 Pixel buffer, sprites, color, zoom
   BitCanvas.ts
   AppLoader.ts              Dynamic ESM loading (SDK v2 Component)
   AppBuilder.ts             Hook slots — used by Decker host only
@@ -93,14 +93,11 @@ lib/canvas/                 Pixel buffer, sprites, FS, color, zoom
   qdDraw.ts                 GrafPort conveniences
   OSServices.ts             Toolbox-facing services for the Decker host
   ColorSystem.ts
-  SystemPreferences.ts
-  fs/OPFSBackend.ts
   sprites/
 
-lib/toolbox/                Event, file, font, control, window record
+lib/toolbox/                Event, font, control, window record
   WindowRecord.ts           Window record + chrome constants
   WindowContext.ts          GrafPort drawing helper (Decker)
-  FileManager.ts
   EventManager.ts
   ControlManager.ts
 
@@ -109,12 +106,14 @@ lib/decker/                 Lil runtime + Decker card engine
   systemApp.ts              Decker SystemApp painted via LegacyAppHost
 
 packages/ui/                Solid universal renderer
-packages/sdk/               defineApp, useApp, menubar types, UI re-exports
+packages/fs/                Reactive virtual file system + backends
+packages/sdk/               defineApp, useApp, menubar types, UI + fs re-exports
 packages/markdown/          mdast → LayoutNode
 packages/quickdraw/         GrafPort, CopyBits, fonts
 
 apps/                       Solid system apps (*.tsx)
   Finder.solid.tsx
+  finder/attributes.ts      Icon position / zOrder / custom icon on FS attributes
   MarkdownView.tsx
   …
 
@@ -126,7 +125,12 @@ src/
     windowContext.ts        useWindow()
     windowGeometry.ts       Chrome metrics + content-rect helpers (single source of truth)
     layering.ts             Kind-aware z-order
-    installedApps.ts        Persist + load App Store installs
+    fsBootstrap.ts          First-boot volume + role folders
+    openers.ts              File type → app resolution
+    spriteFiles.ts          Sprite-file codec + cache
+    appStorage.ts           Per-app storage folder
+    systemPreferences.ts    Reactive system prefs, persisted beside app storage
+    installedApps.ts        App Store installs as .app manifest files
     legacy/LegacyAppHost    Decker raster bridge
     components/             Desktop, Window, Menubar, Dialog, Splash
 
@@ -179,13 +183,31 @@ DOM → EventManager → ui.dispatchPointer / dispatchKeyboard
 
 ## File System
 
-Virtual hierarchical FS persisted via OPFS (`FileManager` + `OPFSBackend`).
+`@mockintosh/fs` (`packages/fs`) is the virtual file system: a **reactive catalog** (Solid store of `FSNode`s keyed by id, plus a per-directory child index and a per-volume role index) over a pluggable **`FSBackend`** that stores the catalog as one JSON document and file bodies as blobs (`OPFSBackend` in the browser, `InMemoryBackend` in tests). Reads (`children`, `node`, `locate`, `attributes`, …) are store reads, so a Finder memo that lists one folder re-runs only when that folder changes — there is no change-notification plumbing. Mutations (`mkdir`, `writeFile`, `rename`, `move`, `remove`, `setAttributes`) are the only writers; `batch()` coalesces several into one reactive update and one persistence write.
 
-File types: `"text"`, `"image"`, `"app"`, `"app-shortcut"`, `"binary"`.
+```
+FileSystem (packages/fs)       catalog + bodies, roles, attributes, migrations
+  └ FSBackend                  OPFSBackend | InMemoryBackend
+src/os/fsBootstrap.ts          first-boot layout; repairs role folders each boot
+src/os/openers.ts              MIME type → app (`SolidApp.fileTypes`)
+src/os/spriteFiles.ts          sprite-file codec ↔ ResourceManager cache
+src/os/appStorage.ts           useApp().storage → System Folder/Preferences/<appId>/
+src/os/systemPreferences.ts    System Folder/Preferences/System Preferences (color mode)
+src/os/installedApps.ts        App Store manifests as MIME.app files in Applications
+apps/finder/attributes.ts      Finder's typed view of node attributes
+```
 
-Finder launches: app-shortcut → `openApp`; `.md`/text → FileViewer; image → Picture; `.deck`/`.html` → Decker.
+**Layout.** Root → volumes → folders. Well-known folders carry a `role` (`volume`, `desktop`, `trash`, `applications`, `system`, `preferences`) and are found with `fs.locate(role)`, never by name — the user may rename them. At most one folder per role per volume.
 
-Installed third-party manifests persist in `localStorage` (`mockintosh:installed-apps`) and are loaded at boot by `AppLoader`.
+**Types.** A file has one MIME `type` (`MIME` constants: `text/plain`, `image/x-mockintosh-sprite`, `application/x-mockintosh-app-shortcut`, `application/x-mockintosh-app`, `application/x-decker`, …) and a byte `size`. Bodies are bytes; `readText`/`readJSON`/`writeJSON` are conveniences.
+
+**Attributes.** Consumers (not the FS) own per-node metadata bags: the Finder's icon, free-form position and stacking order live there, typed only in `apps/finder/attributes.ts`; the installer keeps `appId` on manifest files. The FS persists them and removes them with the node.
+
+**Durability.** A body is written to the backend *before* its catalog entry appears; an entry is removed *before* its body is deleted. The catalog is debounced (500 ms) and versioned: `parseCatalog` migrates older documents (the v1 `FileManager` catalog → v2: MIME types, roles, attributes) and drops unreachable nodes rather than failing.
+
+**Opening.** A double-click asks `resolveOpenAction`: directories open a Finder window; `MIME.appShortcut` / `MIME.app` launch the referenced app; other files launch the first registered app whose `fileTypes` includes the MIME type, with `FileDocumentProps` (`fileId`, `title`) as props. Decker opens `deck`/`html`, FileViewer `text/*`, Picture sprites and PNG/JPEG/GIF. Unknown types show a dialog.
+
+**Apps.** `useApp().fs` exposes the same `FileSystem` (typed `AppFileSystem` in the SDK); `useApp().storage` is a per-app folder under `System Folder/Preferences`. Installed third-party manifests are `MIME.app` files in `Applications` (migrated from `localStorage` on first boot) and are loaded at boot by `AppLoader`.
 
 ## App Store
 

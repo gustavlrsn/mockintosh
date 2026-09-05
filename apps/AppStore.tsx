@@ -1,9 +1,9 @@
-import { For, Show, createSignal, onMount, type JSX } from "solid-js";
+import { For, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { Button } from "@mockintosh/ui";
 import { registerApp } from "../src/os/apps";
 import { useOS } from "../src/os/context";
 import { useWindow } from "../src/os/windowContext";
-import { installManifest, readInstalledManifests } from "../src/os/installedApps";
+import { installManifest, installedAppIds } from "../src/os/installedApps";
 import type { AppManifest } from "../lib/canvas/AppLoader";
 
 interface RegistryEntry {
@@ -30,7 +30,8 @@ export function AppStore(_props: Record<string, unknown>): JSX.Element {
   const os = useOS();
   const win = useWindow();
   const [entries, setEntries] = createSignal<RegistryEntry[]>([]);
-  const [installed, setInstalled] = createSignal(new Set(readInstalledManifests().map((m) => m.id)));
+  // Reactive: installing (or trashing a .app in the Finder) updates the list.
+  const installed = createMemo(() => new Set(installedAppIds(os.fs)));
   const [status, setStatus] = createSignal("Loading catalog…");
   const [busyId, setBusyId] = createSignal<string | null>(null);
 
@@ -65,8 +66,7 @@ export function AppStore(_props: Record<string, unknown>): JSX.Element {
         permissions: e.permissions ?? [],
         entry: e.entry,
       };
-      await installManifest(manifest);
-      setInstalled((prev) => new Set([...prev, e.id]));
+      await installManifest(os.fs, manifest);
       setStatus(`Installed ${e.title}.`);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Install failed.");

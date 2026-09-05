@@ -67,6 +67,22 @@ describe("pointer capture", () => {
     expect(events).toEqual(["down", "start", "drag", "end", "up"]);
   });
 
+  it("keeps delivering hover to nodes under the pointer during a capture", () => {
+    const { root, a, b } = tree();
+    const events: string[] = [];
+    a._eventHandlers.onMouseDown = () => {};
+    a._eventHandlers.onMouseLeave = () => events.push("a:leave");
+    b._eventHandlers.onMouseEnter = () => events.push("b:enter");
+    b._eventHandlers.onMouseLeave = () => events.push("b:leave");
+    const focus = createFocusManager(root);
+    const ptr = createPointerDispatcher(root, focus);
+    ptr.dispatch("mousedown", 10, 10); // on a
+    ptr.dispatch("mousemove", 60, 60); // over b (drop target)
+    ptr.dispatch("mousemove", 90, 5);  // over nothing
+    ptr.dispatch("mouseup", 90, 5);
+    expect(events).toEqual(["a:leave", "b:enter", "b:leave"]);
+  });
+
   it("does not click if released outside the node", () => {
     const { root, a } = tree();
     let clicked = false;

@@ -68,7 +68,11 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["packages/ui/tests/**/*.test.ts"],
+    include: [
+      "packages/ui/tests/**/*.test.ts",
+      "packages/fs/tests/**/*.test.ts",
+      "src/os/**/*.test.ts",
+    ],
   },
   build: {
     outDir: "dist",

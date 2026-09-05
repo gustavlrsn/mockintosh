@@ -1,4 +1,4 @@
-import { FileManager } from "../toolbox/FileManager";
+import type { AppStorage } from "@mockintosh/sdk";
 import { ZeroScrap, PutScrap, GetScrap } from "../toolbox/ScrapManager";
 
 /**
@@ -21,12 +21,8 @@ export interface OSServices {
   audio: {
     play(src: string): void;
   };
-  storage: {
-    read(key: string): Promise<string | null>;
-    write(key: string, value: string): Promise<void>;
-    list(): Promise<string[]>;
-  };
-  fs: FileManager | null;
+  /** Per-app storage — the same folder-backed store SDK apps get from `useApp().storage`. */
+  storage: AppStorage;
 }
 
 export interface DialogOptions {
@@ -44,6 +40,7 @@ export function createOSServices(dependencies: {
   openWindow: (appId: string, props?: any) => void;
   closeWindow: (windowId: string) => void;
   showDialog: (options: DialogOptions) => Promise<string | null>;
+  storage: AppStorage;
   videoElement?: HTMLVideoElement;
   ditherWorker?: Worker;
 }): OSServices {
@@ -55,7 +52,6 @@ export function createOSServices(dependencies: {
     openWindow: dependencies.openWindow,
     closeWindow: dependencies.closeWindow,
     showDialog: dependencies.showDialog,
-    fs: null,
 
     clipboard: {
       read() {
@@ -131,42 +127,6 @@ export function createOSServices(dependencies: {
       },
     },
 
-    storage: {
-      async read(key: string): Promise<string | null> {
-        try {
-          const root = await navigator.storage.getDirectory();
-          const file = await root.getFileHandle(key);
-          const blob = await file.getFile();
-          return await blob.text();
-        } catch {
-          return null;
-        }
-      },
-
-      async write(key: string, value: string): Promise<void> {
-        try {
-          const root = await navigator.storage.getDirectory();
-          const file = await root.getFileHandle(key, { create: true });
-          const writable = await (file as any).createWritable();
-          await writable.write(value);
-          await writable.close();
-        } catch (e) {
-          console.error("storage write error:", e);
-        }
-      },
-
-      async list(): Promise<string[]> {
-        try {
-          const root = await navigator.storage.getDirectory();
-          const names: string[] = [];
-          for await (const [name] of (root as any).entries()) {
-            names.push(name);
-          }
-          return names;
-        } catch {
-          return [];
-        }
-      },
-    },
+    storage: dependencies.storage,
   };
 }
