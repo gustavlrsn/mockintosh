@@ -1,0 +1,99 @@
+/**
+ * Platform — everything the OS needs from the machine it runs on.
+ *
+ * The OS core (`src/os`, `lib`, and the `@mockintosh/*` packages) is written
+ * against this interface only and compiles without DOM types. A platform is
+ * one object built by the host entry point — `createWebPlatform()` in the
+ * browser, a panel + touch controller on a microcontroller, a PNG writer in
+ * tests — and handed to `bootOS()`.
+ *
+ * Required members are what a Macintosh has: a screen, a mouse and keyboard,
+ * a clock, and a disk. Optional members are peripherals; the OS hides the
+ * corresponding features when they are absent.
+ */
+import type { BitMap } from "@mockintosh/quickdraw";
+import type { FSBackend } from "@mockintosh/fs";
+import type { PrinterTransport } from "@mockintosh/print";
+import type { UIClipboard, Modifiers } from "@mockintosh/ui";
+import type { Capability, FetchFunction } from "@mockintosh/sdk";
+
+export interface PlatformDisplay {
+  readonly width: number;
+  readonly height: number;
+  /**
+   * Framebuffer the display hardware owns, if any (DMA buffers, shared
+   * memory). When omitted, QuickDraw allocates the screen bitmap.
+   */
+  readonly framebuffer?: BitMap;
+  /** Show the current contents of `screen` (QuickDraw's `screenBits`). */
+  present(screen: BitMap): void;
+}
+
+export type PointerButton = 0 | 1 | 2;
+
+export interface PlatformPointerEvent {
+  type: "down" | "up" | "move" | "scroll";
+  /** Screen coordinates, already scaled to the display's pixel grid. */
+  x: number;
+  y: number;
+  button?: PointerButton;
+  deltaX?: number;
+  deltaY?: number;
+}
+
+export interface PlatformKeyEvent {
+  type: "down" | "up";
+  /** Key value as in `KeyboardEvent.key` ("a", "Enter", "ArrowLeft", …). */
+  key: string;
+  modifiers: Modifiers;
+}
+
+/** Returned by every subscription; call to unsubscribe. */
+export type Unsubscribe = () => void;
+
+export interface PlatformInput {
+  onPointer(handler: (event: PlatformPointerEvent) => void): Unsubscribe;
+  onKey(handler: (event: PlatformKeyEvent) => void): Unsubscribe;
+}
+
+/**
+ * What varies between hosts about time. Plain timers (`setTimeout`,
+ * `setInterval`) are assumed host globals — see `core-env.d.ts`.
+ */
+export interface PlatformScheduler {
+  /** Run `callback` before the next display refresh (one-shot, like `requestAnimationFrame`). */
+  requestFrame(callback: (timeMs: number) => void): void;
+  /** Monotonic milliseconds. */
+  now(): number;
+}
+
+/** Capabilities a platform declares outright; the rest follow from which services it provides. */
+export type HostCapability = Exclude<Capability, "network" | "clipboard" | "printer">;
+
+export interface PlatformEnv {
+  /** Origin the OS is served from ("" when there is no such notion). */
+  origin: string;
+}
+
+export interface Platform {
+  display: PlatformDisplay;
+  input: PlatformInput;
+  scheduler: PlatformScheduler;
+  /** Backing store for the file system. */
+  storage: FSBackend;
+  env: PlatformEnv;
+  /** Host features present beyond the services below (camera, video, …). */
+  hostCapabilities: readonly HostCapability[];
+  clipboard?: UIClipboard;
+  printer?: PrinterTransport;
+  fetch?: FetchFunction;
+  /**
+   * Load a JavaScript module by URL, for installing third-party apps. Absent
+   * on hosts that only run code linked into the firmware (an embedded build),
+   * where the App Store then cannot install anything.
+   */
+  loadModule?: ModuleLoader;
+}
+
+/** `import(url)` as a service — see {@link Platform.loadModule}. */
+export type ModuleLoader = (url: string) => Promise<unknown>;

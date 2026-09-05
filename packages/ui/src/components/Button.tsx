@@ -1,5 +1,5 @@
 import { createSignal, type JSX } from "solid-js";
-import type { LayoutStyle, PatternName } from "../nodes";
+import type { Ink, LayoutStyle, PatternName } from "../nodes";
 
 export interface ButtonProps {
   label: string;
@@ -14,7 +14,7 @@ export interface ButtonProps {
 export function Button(props: ButtonProps): JSX.Element {
   const [pressed, setPressed] = createSignal(false);
 
-  const background = (): number | PatternName =>
+  const background = (): Ink | PatternName =>
     pressed() ? 1 : props.disabled ? "checker" : 0;
 
   const borderStyle = (): "solid" | "dotted" =>

@@ -2,7 +2,6 @@ import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Button } from "@mockintosh/ui";
 import { registerApp } from "../src/os/apps";
 import { useWindow } from "../src/os/windowContext";
-import type { GrafPort } from "@mockintosh/quickdraw";
 
 export function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
   const win = useWindow();
@@ -45,19 +44,15 @@ export function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
       <raster
         width={win.width()}
         height={win.height() - 20}
-        onPaint={(portUnknown, rect) => {
+        onPaint={({ rect, setPixel }) => {
           if (!frame) return;
-          const port = portUnknown as GrafPort;
-          const { baseAddr, rowBytes, bounds } = port.portBits;
           const w = Math.min(frame.width, rect.width);
           const h = Math.min(frame.height, rect.height);
           for (let y = 0; y < h; y++) {
             for (let x = 0; x < w; x++) {
               const i = (y * frame.width + x) * 4;
               const lum = frame.data[i] * 0.3 + frame.data[i + 1] * 0.59 + frame.data[i + 2] * 0.11;
-              const gx = rect.x + x;
-              const gy = rect.y + y;
-              baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] = lum < 128 ? 1 : 0;
+              setPixel(x, y, lum < 128 ? 1 : 0);
             }
           }
         }}
@@ -84,6 +79,7 @@ export function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
 
 registerApp({
   id: "video",
+  requires: ["video"],
   title: "1984.mp4",
   icon: "icon/MacFlim",
   defaultSize: { width: 340, height: 260 },

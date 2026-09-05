@@ -2,11 +2,13 @@
 
 ## Overview
 
-Mockintosh is a Macintosh-style simulator running in the browser. The entire UI is rendered on a single `<canvas>` element at **512×342 pixels** using an indexed pixel buffer. The OS can run in either **`monochrome`** or **`colors`** mode. There is no HTML/CSS inside the simulated screen.
+Mockintosh is a Macintosh-style simulator running in the browser. The entire UI is rendered on a single `<canvas>` element at **512×342 pixels** into a **1-bit** framebuffer (packed 8 pixels per byte, as on the original Macintosh): black, white, and dither patterns. There is no HTML/CSS inside the simulated screen.
 
 **SDK v2 is Solid-only.** Third-party apps are ES modules that `defineApp({ Component })` and optionally export `sprites`. They are loaded at runtime via dynamic `import()`. The OS shares one Solid runtime; externalize `solid-js`, `solid-js/store`, `@mockintosh/ui`, and `@mockintosh/sdk` in your Vite build and consume them through the OS import map.
 
 v1 `App.render` / `WindowContext` apps are not loaded. The App Store hides catalog entries with `sdk` major &lt; 2.
+
+**SDK 2.1:** `<raster onPaint>` now receives a single `RasterSurface` argument instead of `(port, rect)`, and the framebuffer is packed 1 bpp — apps that indexed `port.portBits.baseAddr` directly must switch to `surface.setPixel` / `surface.blitPixels` (see below).
 
 ## Quick Start
 
@@ -32,17 +34,29 @@ export default defineApp({
 
 ## The Rendering Model
 
-JSX compiles through `@mockintosh/ui` (universal Solid renderer) into a retained `box` / `text` / `image` / `raster` tree. The OS layouts that tree with flexbox and paints it through QuickDraw into the indexed buffer.
+JSX compiles through `@mockintosh/ui` (universal Solid renderer) into a retained `box` / `text` / `image` / `raster` tree. The OS layouts that tree with flexbox and paints it through QuickDraw into the framebuffer.
 
 ```tsx
 <box padding={8} flexDirection="column" gap={6} background={0}>
   <text font="menu">Hello</text>
   <image width={32} height={32} src={icon} />
-  <raster width={80} height={40} onPaint={(port, rect) => { /* pixel push */ }} />
+  <raster width={80} height={40} onPaint={({ rect, setPixel }) => { /* pixel push */ }} />
 </box>
 ```
 
-Use `<raster onPaint>` when you need to write pixels directly (dithered photos, Decker cards, video frames).
+Use `<raster onPaint>` when you need to write pixels directly (dithered photos, video frames). The callback receives a `RasterSurface`:
+
+```tsx
+<raster width={w} height={h} onPaint={(surface) => {
+  surface.fill(WHITE);                          // whole raster
+  surface.setPixel(x, y, BLACK);                // raster-local coordinates, clipped
+  surface.blitPixels(pixels, imgW, imgH, 0, 0); // 1 byte per pixel, 0 = white, non-zero = black
+  // surface.port is the QuickDraw port (already clipped to the raster);
+  // offset QuickDraw coordinates by surface.rect.x / surface.rect.y.
+}} />
+```
+
+Never index the framebuffer yourself: its memory layout (packed 1 bpp) is an implementation detail of the platform.
 
 ### Layout
 
@@ -58,13 +72,9 @@ Borders follow the CSS box model: `borderWidth` insets the padding box, so child
 </box>
 ```
 
-### Color Indices and Device Mode
+### Ink
 
-- `WHITE` = `0`
-- `BLACK` = `1`
-- Named palette exports (`RED`, `GREEN`, …) map to the default system palette
-
-`colors` mode resolves indices through the RGB palette; `monochrome` approximates them as black/white or dither.
+The screen is 1-bit. Every colour prop (`background`, `color`, `borderColor`) takes an `Ink`: `WHITE` (`0`) or `BLACK` (`1`). Anything in between is a dither — use a `PatternName` (`"gray50"`, `"checker"`, …) for `background`.
 
 ### Fonts
 
@@ -121,10 +131,45 @@ function MyView() {
 - `fs` — the shared file system (see [Files](#files))
 - `os.openWindow / closeWindow / showDialog`
 - `setMenus(menus)` — this window's menubar (see [Menus](#menus))
-- `fetch` — only if the manifest declares `"network"`
+- `fetch` — network access, when this Macintosh has it (see [Capabilities](#capabilities))
+- `print` — the system printer, when the platform has one (see [Printing](#printing))
+- `capabilities` — the set of things this Macintosh can do (see [Capabilities](#capabilities))
 - `env.origin`
 
 `useApp()` reads a per-window context, so call it during component setup (not in a callback created elsewhere).
+
+## Capabilities
+
+Mockintosh runs in more than one place — a browser today, small devices with a 1-bit panel tomorrow — and not every machine has every peripheral. A `Capability` names one such thing:
+
+| Capability  | Means                                                                 |
+|-------------|-----------------------------------------------------------------------|
+| `network`   | `useApp().fetch` is available                                         |
+| `clipboard` | copy and paste work                                                   |
+| `printer`   | `useApp().print` is available                                         |
+| `camera`    | live camera frames can be captured                                    |
+| `video`     | compressed video can be decoded and played                            |
+| `images`    | PNG/JPEG and similar raster formats can be decoded                    |
+| `browser`   | the OS runs inside a web browser your app may use directly (DOM, OAuth redirects, …) |
+
+Two ways to use them:
+
+- **`requires`** — for things your app cannot work without. Put them on `defineApp` (and in the manifest, so the OS need not even load a bundle it cannot run). The OS refuses to launch the app and tells the user why: *"Snapshot" needs a camera, which this Macintosh does not have.*
+
+  ```tsx
+  export default defineApp({ id: "snapshot", requires: ["camera"], /* … */ });
+  ```
+
+- **`useApp().capabilities`** — for features your app can do without. Check at the point of use and degrade gracefully:
+
+  ```tsx
+  const { capabilities, fetch } = useApp();
+  <Show when={capabilities.has("network")} fallback={<text>Offline</text>}>
+    <Button label="Refresh" onClick={() => fetch!("/api/feed")} />
+  </Show>
+  ```
+
+`fetch` has the portable signature `(url, { method?, headers?, body? }) => Promise<{ ok, status, headers, text(), json(), arrayBuffer() }>` — the browser's `fetch` satisfies it, and so will a device's HTTP client. Stay within that subset.
 
 ## Storage
 
@@ -196,6 +241,23 @@ export const sprites: Record<string, Sprite> = {
 
 Prefix names with your app id (`"myapp/icon"`). OS sprites use `"icon/"`, `"cursor/"`, `"chrome/"`.
 
+## Printing
+
+`useApp().print` is the system thermal printer. It is `undefined` on platforms that cannot reach one, so wrap printing UI in `<Show when={print}>`. Connecting prompts the user (a USB device picker on the web), so trigger it from a click.
+
+```tsx
+const { print } = useApp();
+
+<Show when={print}>
+  <Button label="Print" onClick={() => print!.printPicture(image, { caption: "Hello" })} />
+</Show>
+```
+
+- `printPicture(image, { caption?, scale? })` — a 1-bit image (`{ width, height, data }`, 1 byte per pixel, `1` = black; a `Sprite` works) printed as a polaroid-style card, enlarged and centred with the caption beneath.
+- `printPage(height, (port, size) => …)` — draw a page yourself with QuickDraw; `port` is `paperWidth` dots wide.
+- `connected()` — reactive; `connect()` — connect without printing.
+- `paperWidth` — dots per line (576 on 80 mm paper).
+
 ## Menus
 
 The menubar always shows the menus of the *active app* — the app that owns the front window. Your menus appear when one of your windows is active and disappear when the user switches away; you never manage that. ⌘ shortcuts declared on items are bound automatically while your menus are showing.
@@ -262,9 +324,12 @@ Third-party apps live inside a standard document window. Set `scrollable`, `resi
   "version": "1.0.0",
   "sdk": "^2.0.0",
   "permissions": [],
+  "requires": ["network"],
   "entry": "./dist/index.js"
 }
 ```
+
+**Requires:** the capabilities the app cannot run without (see [Capabilities](#capabilities)); the OS skips loading the bundle on a machine that lacks any of them. Omit it if your app runs anywhere.
 
 **Permissions:**
 
@@ -303,5 +368,5 @@ Installing from the App Store writes the manifest to `Applications/<title>` as a
 - **512×342 pixels** — the entire screen. Your window is smaller.
 - **Indexed pixels** — `BLACK`/`WHITE` are safest.
 - **No DOM UI** — hidden `<video>`/`<audio>` for media is fine; do not render HTML into the screen.
-- **No direct fetch / localStorage / OPFS** — use `useApp().fetch`, `useApp().storage` and `useApp().fs`. Import file-system types and `MIME` from `@mockintosh/sdk`, not `@mockintosh/fs`.
+- **No direct fetch / localStorage / OPFS** — use `useApp().fetch`, `useApp().storage` and `useApp().fs`. Import file-system types and `MIME` from `@mockintosh/sdk`, not `@mockintosh/fs`. Anything else you need from the host is a [capability](#capabilities): declare it in `requires` or check it at the point of use.
 - `createUI` is a single-instance renderer inside the OS; third-party apps share that runtime via the import map.

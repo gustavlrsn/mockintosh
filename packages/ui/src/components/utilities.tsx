@@ -1,6 +1,7 @@
 import { type JSX } from "solid-js";
+import type { Ink } from "../nodes";
 
-export function Divider(props: { color?: number }): JSX.Element {
+export function Divider(props: { color?: Ink }): JSX.Element {
   return <box height={1} background={props.color ?? 1} />;
 }
 

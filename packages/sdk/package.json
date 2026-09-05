@@ -1,10 +1,11 @@
 {
   "name": "@mockintosh/sdk",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "peerDependencies": {
     "solid-js": "^1.9.0",
     "@mockintosh/ui": "*",
-    "@mockintosh/fs": "*"
+    "@mockintosh/fs": "*",
+    "@mockintosh/quickdraw": "*"
   },
   "type": "module",
   "main": "./src/index.ts",

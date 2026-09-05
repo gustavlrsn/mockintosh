@@ -8,6 +8,8 @@
 
 import { createContext, useContext } from "solid-js";
 import type { FileSystem } from "@mockintosh/fs";
+import type { GrafPort } from "@mockintosh/quickdraw";
+import type { Sprite } from "@mockintosh/ui";
 import type { MenubarDefinition } from "./menus";
 
 export type {
@@ -38,68 +40,10 @@ export {
   type FSErrorCode,
 } from "@mockintosh/fs";
 
-export const BLACK = 1;
-export const WHITE = 0;
-export const RED = 2;
-export const GREEN = 3;
-export const BLUE = 4;
-export const CYAN = 5;
-export const MAGENTA = 6;
-export const YELLOW = 7;
-export const ORANGE = 8;
-export const PURPLE = 9;
-export const BROWN = 10;
-export const TAN = 11;
-export const LIGHT_GRAY = 12;
-export const MEDIUM_GRAY = 13;
-export const DARK_GRAY = 14;
-export const PINK = 15;
-
-export interface Sprite {
-  width: number;
-  height: number;
-  data: Uint8Array;
-  mask?: Uint8Array;
-}
-
-/** Decode a base64-encoded 2bpp sprite (00=transparent, 01=white, 10=black). */
-export function defineSprite(width: number, height: number, b64: string): Sprite {
-  const raw = atob(b64);
-  const total = width * height;
-  const data = new Uint8Array(total);
-  const mask = new Uint8Array(total);
-  for (let i = 0; i < total; i++) {
-    const byteIdx = i >> 2;
-    const shift = 6 - (i & 3) * 2;
-    const val = (raw.charCodeAt(byteIdx) >> shift) & 0x03;
-    data[i] = val === 2 ? BLACK : WHITE;
-    mask[i] = val === 0 ? 0 : 1;
-  }
-  return { width, height, data, mask };
-}
-
-/** Create a sprite from an ASCII grid: '#' black, '.' transparent, ' ' white. */
-export function fromGrid(width: number, height: number, rows: string[]): Sprite {
-  const data = new Uint8Array(width * height);
-  const mask = new Uint8Array(width * height);
-  for (let y = 0; y < height; y++) {
-    const row = rows[y] || "";
-    for (let x = 0; x < width; x++) {
-      const ch = row[x] || ".";
-      if (ch === "#") {
-        data[y * width + x] = BLACK;
-        mask[y * width + x] = 1;
-      } else if (ch === ".") {
-        data[y * width + x] = WHITE;
-        mask[y * width + x] = 0;
-      } else {
-        data[y * width + x] = WHITE;
-        mask[y * width + x] = 1;
-      }
-    }
-  }
-  return { width, height, data, mask };
-}
+// The screen is 1-bit: every pixel is one of two inks. Sprites are the
+// 1-bit image asset format; `defineSprite` / `fromGrid` build them.
+export { BLACK, WHITE, defineSprite, fromGrid } from "@mockintosh/ui";
+export type { Sprite } from "@mockintosh/ui";
 
 export interface DialogOptions {
   message: string;
@@ -151,6 +95,44 @@ export type AppFileSystem = Pick<
   | "batch"
 >;
 
+/** A 1-bit image to print: 1 byte per pixel, `1` = black (a `Sprite` qualifies). */
+export interface PrintableImage {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
+
+export interface PrintPictureOptions {
+  /** Text printed beneath the picture, centred, in the menu font. */
+  caption?: string;
+  /** Integer enlargement of the picture (default 2). */
+  scale?: number;
+}
+
+/**
+ * System printer (a thermal receipt printer). Present on `useApp()` only when
+ * the platform can reach one; apps that print should hide the feature when
+ * `print` is undefined.
+ */
+export interface PrintService {
+  /** Paper width in dots — 576 for 80 mm paper at 203 dpi. */
+  readonly paperWidth: number;
+  /** Whether a printer is connected. Reactive; read it inside JSX or effects. */
+  connected(): boolean;
+  /**
+   * Connect to a printer. On the web this opens the browser's USB device
+   * picker, so it must run from a user gesture such as a button click.
+   */
+  connect(): Promise<void>;
+  /** Print a picture as a polaroid-style card with an optional caption. Connects first if needed. */
+  printPicture(image: PrintableImage, options?: PrintPictureOptions): Promise<void>;
+  /**
+   * Draw a page `height` dots tall with QuickDraw and print it. `port` is the
+   * current port while `draw` runs and is `paperWidth` wide.
+   */
+  printPage(height: number, draw: (port: GrafPort, size: { width: number; height: number }) => void): Promise<void>;
+}
+
 export interface AppProps {
   getSprite(name: string): Sprite | undefined;
   storage: AppStorage;
@@ -159,16 +141,67 @@ export interface AppProps {
     closeWindow(windowId: string): void;
     showDialog(options: DialogOptions): Promise<string | null>;
   };
-  fetch?(url: string, options?: RequestInit): Promise<Response>;
+  fetch?: FetchFunction;
   env: {
     origin: string;
   };
 }
 
+/** Request options an app may pass to `fetch` — the portable subset of `RequestInit`. */
+export interface FetchRequest {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string | Uint8Array;
+}
+
+/** The response surface apps may rely on — the portable subset of `Response`. */
+export interface FetchResponse {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly headers: { get(name: string): string | null };
+  text(): Promise<string>;
+  json(): Promise<unknown>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+/**
+ * Network access as the platform provides it. The browser's `fetch`
+ * satisfies this; a microcontroller supplies its own HTTP client.
+ */
+export type FetchFunction = (url: string, options?: FetchRequest) => Promise<FetchResponse>;
+
+/**
+ * Something an app needs from the machine that not every Mockintosh has.
+ * Service capabilities (`network`, `clipboard`, `printer`) follow from the
+ * platform's services; the rest are host features the platform declares.
+ *
+ * - `network`   — `useApp().fetch` is available
+ * - `clipboard` — copy and paste work
+ * - `printer`   — `useApp().print` is available
+ * - `camera`    — live camera frames can be captured
+ * - `video`     — compressed video can be decoded and played
+ * - `images`    — PNG/JPEG and similar raster formats can be decoded
+ * - `browser`   — the OS runs inside a web browser the app may use directly (DOM, OAuth redirects, …)
+ */
+export type Capability =
+  | "network"
+  | "clipboard"
+  | "printer"
+  | "camera"
+  | "video"
+  | "images"
+  | "browser";
+
 export interface SolidApp<P extends Record<string, unknown> = Record<string, unknown>> {
   id: string;
   title: string;
   icon: string;
+  /**
+   * Capabilities the app cannot work without. The OS refuses to launch the
+   * app on a platform that lacks any of them and tells the user why, instead
+   * of the app failing at runtime. Omit when the app runs anywhere.
+   */
+  requires?: Capability[];
   defaultSize: { width: number; height: number };
   windowKind?: "document" | "dialog" | "alert" | "utility";
   scrollable?: boolean;
@@ -187,6 +220,12 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
    * props. The first registered app for a type wins.
    */
   fileTypes?: string[];
+  /**
+   * Sprites the app draws by name (`<image src>`, `getSprite`) — including
+   * its own `icon`. Registered with the OS alongside the app; keys should be
+   * prefixed with the app id to avoid clashing with built-ins.
+   */
+  sprites?: Record<string, Sprite>;
   Component: (props: P) => unknown;
 }
 
@@ -210,6 +249,13 @@ export interface AppServices {
   fetch?: AppProps["fetch"];
   env: AppProps["env"];
   /**
+   * What this Macintosh can do. Apps that work with or without a feature
+   * check here instead of declaring it in `requires`.
+   */
+  capabilities: ReadonlySet<Capability>;
+  /** The system printer, when this platform has one. */
+  print?: PrintService;
+  /**
    * Set the menubar for the window this component is mounted in. It replaces
    * the app-level `menus` while this window is active, so each window's menus
    * can close over that window's own state. Call it from an effect to keep
@@ -232,7 +278,13 @@ export function useApp(): AppServices {
   return services;
 }
 
-export { measureText } from "@mockintosh/ui";
+export {
+  measureText,
+  type Ink,
+  type RasterSurface,
+  type RasterPaintRect,
+  type RasterPaintFn,
+} from "@mockintosh/ui";
 
 export {
   createSignal,
@@ -259,4 +311,6 @@ export interface AppManifest {
   sdk: string;
   permissions: string[];
   entry: string;
+  /** Same as `SolidApp.requires`; lets the OS skip loading a bundle it cannot run. */
+  requires?: Capability[];
 }

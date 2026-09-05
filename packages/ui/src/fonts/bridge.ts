@@ -1,5 +1,13 @@
-import type { GrafPort } from "@mockintosh/quickdraw";
-import { __injectFontFunctions, globals } from "@mockintosh/quickdraw";
+import type { BitMap, GrafPort } from "@mockintosh/quickdraw";
+import {
+  __injectFontFunctions,
+  setBit,
+  DrawString,
+  GetPort,
+  MoveTo,
+  SetPort,
+  globals,
+} from "@mockintosh/quickdraw";
 import {
   getGlyphIndexForChar,
   getGlyphPixel,
@@ -31,7 +39,7 @@ export function installFontBridge(): void {
       (port as GrafPort & { _uiFontName?: string })._uiFontName ?? "body";
     const color = (port as GrafPort & { _uiTextColor?: number })._uiTextColor ?? 1;
     const font = requireFont(fontName);
-    const { baseAddr, rowBytes, bounds } = port.portBits;
+    const bounds = port.portBits.bounds;
     const cl = port.clipRgn?.rgn.rgnBBox;
     const vis = port.visRgn?.rgn.rgnBBox;
     const pr = port.portRect;
@@ -61,11 +69,8 @@ export function installFontBridge(): void {
       bounds.bottom
     );
 
-    drawTextToPixels(
-      baseAddr,
-      rowBytes,
-      bounds.left,
-      bounds.top,
+    drawTextToBitMap(
+      port.portBits,
       clipLeft,
       clipTop,
       clipRight,
@@ -82,11 +87,8 @@ export function installFontBridge(): void {
   bridgeInstalled = true;
 }
 
-function drawTextToPixels(
-  pixels: Uint8Array,
-  rowBytes: number,
-  boundsLeft: number,
-  boundsTop: number,
+function drawTextToBitMap(
+  bits: BitMap,
   clipLeft: number,
   clipTop: number,
   clipRight: number,
@@ -121,13 +123,9 @@ function drawTextToPixels(
       const y1 = Math.min(font.glyphHeight, clipBottom - gy);
 
       for (let gy2 = y0; gy2 < y1; gy2++) {
-        const ty = gy + gy2;
-        if (ty < 0) continue;
-        const dstRow = (ty - boundsTop) * rowBytes;
         for (let gx2 = x0; gx2 < x1; gx2++) {
           if (getGlyphPixel(font, glyphIndex, gx2, gy2)) {
-            const tx = gx + gx2;
-            if (tx >= 0) pixels[dstRow + (tx - boundsLeft)] = color;
+            setBit(bits, gx + gx2, gy + gy2, color);
           }
         }
       }
@@ -142,4 +140,36 @@ function drawTextToPixels(
 export function measureText(text: string, fontName: string = "body"): number {
   const font = requireFont(fontName);
   return measureDeckerText(font, text).width;
+}
+
+/** Line height of a named font, in pixels. */
+export function fontLineHeight(fontName: string = "body"): number {
+  return requireFont(fontName).glyphHeight;
+}
+
+/**
+ * Draw one line of text on `port` with a named UI font, `(x, y)` being the
+ * top-left of the line — the same origin `<text>` nodes use. For hosts that
+ * paint outside the node tree (print pages, rasters); clipped to the port.
+ */
+export function drawString(
+  port: GrafPort,
+  text: string,
+  x: number,
+  y: number,
+  fontName: string = "body",
+  color: number = 1
+): void {
+  const meta = port as GrafPort & { _uiFontName?: string; _uiTextColor?: number };
+  const previous = GetPort();
+  const savedFont = meta._uiFontName;
+  const savedColor = meta._uiTextColor;
+  SetPort(port);
+  meta._uiFontName = fontName;
+  meta._uiTextColor = color;
+  MoveTo(x, y);
+  DrawString(text);
+  meta._uiFontName = savedFont;
+  meta._uiTextColor = savedColor;
+  if (previous) SetPort(previous);
 }

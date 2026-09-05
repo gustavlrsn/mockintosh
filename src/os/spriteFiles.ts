@@ -1,14 +1,14 @@
 /**
  * Sprite files — `image/x-mockintosh-sprite` bodies decoded into the sprite
- * `ResourceManager` under `fs:<fileId>`, so a file's picture can be drawn
- * with the same `<image>`/`blitSprite` path as any built-in sprite.
+ * `SpriteRegistry` under `fs:<fileId>`, so a file's picture can be drawn
+ * with the same `<image>` path as any built-in sprite.
  *
  * This is codec + cache glue between the file system and the resource layer;
  * neither side knows about the other.
  */
 import { MIME, type FileSystem, type FSFile, type NodeAttributes } from "@mockintosh/fs";
-import type { Sprite } from "../../lib/canvas/BitCanvas";
-import { defineSprite, type ResourceManager } from "../../lib/toolbox/ResourceManager";
+import { defineSprite, type Sprite } from "@mockintosh/ui";
+import type { SpriteRegistry } from "./sprites/registry";
 
 /** JSON body of a sprite file: 2bpp base64 pixels, see `defineSprite`. */
 export interface SpriteFileContent {
@@ -23,7 +23,7 @@ export function spriteResourceKey(fileId: string): string {
 
 export async function saveSpriteFile(
   fs: FileSystem,
-  sprites: ResourceManager,
+  sprites: SpriteRegistry,
   parentId: string,
   name: string,
   content: SpriteFileContent,
@@ -36,7 +36,7 @@ export async function saveSpriteFile(
 
 export async function loadSpriteFile(
   fs: FileSystem,
-  sprites: ResourceManager,
+  sprites: SpriteRegistry,
   fileId: string
 ): Promise<Sprite | null> {
   const key = spriteResourceKey(fileId);

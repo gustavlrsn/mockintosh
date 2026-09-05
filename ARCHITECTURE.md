@@ -1,12 +1,12 @@
 # Mockintosh Architecture
 
-Mockintosh is a mock operating system in the style of an early Macintosh, running in the browser. It renders at the original 512×342 resolution, scaled up to fit the browser window, using an indexed pixel buffer with a global palette and a device mode of either `monochrome` or `colors`.
+Mockintosh is a mock operating system in the style of an early Macintosh, running in the browser. It renders at the original 512×342 resolution, scaled up to fit the browser window, into a 1-bit pixel buffer: every pixel is white or black, and every shade in between is a dither pattern, exactly as on the original hardware.
 
 ## High-Level Overview
 
-The entire UI is rendered to a **single `<canvas>` element** backed by an indexed pixel buffer (`BitCanvas`). There is no HTML/CSS rendering within the simulated screen. In `monochrome` mode, palette entries are resolved to black/white or dithered approximations at output time; in `colors` mode, those same entries resolve to RGB through the global palette.
+The entire UI is rendered to a **single `<canvas>` element** backed by the 1-bit framebuffer: a QuickDraw `BitMap` packed exactly as on the original Macintosh — 8 pixels per byte, most-significant bit leftmost, `1` = black, rows padded to a 16-bit word (`packedBits.ts` in `@mockintosh/quickdraw` is the only code that knows this layout). A 512×342 screen is 22 KB, and the same bytes can be handed to a 1-bit panel driver or an ESC/POS printer unchanged. There is no HTML/CSS rendering within the simulated screen. Colour is deliberately out of scope; if it ever returns it will come in the way Color QuickDraw did — a `PixMap` with a `pixelSize` beside the 1-bit `BitMap` — rather than as a palette bolted onto the monochrome path.
 
-The frontend is built with **Vite** and a **SolidJS custom renderer** (`@mockintosh/ui`) that paints a retained `box` / `text` / `image` / `raster` tree through QuickDraw into the same indexed buffer. The OS shell lives in `src/os` and boots from `src/solidMain.ts`. The backend runs as **Vercel Edge Functions** in the same repo.
+The frontend is built with **Vite** and a **SolidJS custom renderer** (`@mockintosh/ui`) that paints a retained `box` / `text` / `image` / `raster` tree through QuickDraw into that framebuffer. The OS shell lives in `src/os` and is brought up by `bootOS(platform)` (`src/os/boot.ts`); the browser entry point `src/solidMain.ts` just builds the web platform and calls it. The backend runs as **Vercel Edge Functions** in the same repo.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -24,12 +24,43 @@ The frontend is built with **Vite** and a **SolidJS custom renderer** (`@mockint
         ↓
 @mockintosh/ui (Solid universal renderer, layout, draw, pointer + focus)
         ↓
-src/os shell (signals, window chrome, menubar, dialogs, app registry)
+src/os shell (bootOS, signals, window chrome, menubar, dialogs, app registry)
         ↓
 apps/*.tsx system apps          @mockintosh/sdk v2 → third-party ESM
+
+src/platform/<host>  ─ implements Platform ─▶  bootOS(platform)
 ```
 
 `createUI` is a **single-instance** renderer (`_setRepaintHook`, QuickDraw font globals). The OS is the only caller.
+
+## Platform layer
+
+Everything above the dashed line compiles **without DOM types**; `npm run check:core` (`tsconfig.core.json`, `lib: es2022`, no `@types`) enforces it. The only host globals the core assumes are the ones every engine we target provides — `console`, timers, `TextEncoder`/`TextDecoder` — listed exhaustively in `src/platform/core-env.d.ts`. Anything else the OS needs from the machine comes through one object:
+
+```ts
+interface Platform {
+  display:   { width, height, framebuffer?, present(screen: BitMap) }
+  input:     { onPointer(handler), onKey(handler) }      // raw events, screen coordinates
+  scheduler: { requestFrame(cb), now() }                  // what varies about time
+  storage:   FSBackend                                    // the disk
+  env:       { origin }
+  hostCapabilities: HostCapability[]                      // camera, video, images, browser
+  clipboard?, printer?, fetch?                            // peripherals; absent = feature hidden
+}
+```
+
+The design follows the Macintosh: required members are what every Mac had (screen, mouse, keyboard, clock, disk); optional members are peripherals, and the OS hides the corresponding features (Print buttons, copy/paste) when they are missing. Double-click detection, ⌘-shortcuts, and paste are OS policy and live in `bootOS`, so a platform only reports what the hardware saw.
+
+Implementations:
+
+- `src/platform/web/` — `<canvas>` + `CanvasPresenter`, DOM events, `requestAnimationFrame`, `OPFSBackend`, `navigator.clipboard`, `WebUSBPrinterTransport`, `fetch`. The only OS-level code allowed to touch the DOM.
+- `src/platform/headless/` — in-memory display with frame read-back, synthetic input injection, a hand-advanced clock, `InMemoryBackend`. `src/os/boot.test.ts` boots the whole shell on it and drives menus, ⌘N, and the capability dialog from Node. It is the starting point for any new host: swap `present()` and the input injectors for real drivers.
+
+Which apps ship is the entry point's decision, not the OS's: `src/systemApps.ts` registers the web build's bundled apps; a device build imports a different list.
+
+### Capabilities
+
+Apps declare what they cannot work without — `requires: ["camera"]` on `defineApp`/`registerApp`, and on App Store manifests. `platformCapabilities(platform)` (`src/os/capabilities.ts`) derives the set this machine has: `network`/`clipboard`/`printer` from the services present, the rest from `hostCapabilities`. The OS refuses to launch an app with unmet requirements and tells the user why (“*"Photo Booth" needs a camera, which this Macintosh does not have.*”), and skips loading installed bundles it cannot run (their shortcuts explain the same when opened). Apps that work with *or* without a feature check `useApp().capabilities` at the point of use instead — Picture opens sprite files everywhere and gates PNG decoding on `images`.
 
 ## App model
 
@@ -55,7 +86,7 @@ interface SolidApp<P = Record<string, never>> {
 
 `WindowContent` mounts `registry.get(win.appId).Component`. `useWindow()` exposes `{ id, width, height, isActive, scrollY, setTitle, setContentSize, setInfoBar, setMenus, close }`.
 
-Finder is registered like any other app (`FINDER_APP_ID`): the desktop is its window-less surface and folder windows are its windows (`kind: "finder-folder"`, `props: { directoryId }`). Decker still paints its card surface through a `<raster>` host over `lib/decker` (`LegacyAppHost`).
+Finder is registered like any other app (`FINDER_APP_ID`): the desktop is its window-less surface and folder windows are its windows (`kind: "finder-folder"`, `props: { directoryId }`). Apps that need to write pixels directly (video frames, dithered photos) use a `<raster onPaint>` node, which hands them a `RasterSurface` (`setPixel` / `blitPixels` / `fill` in raster-local coordinates, plus the clipped QuickDraw port); the framebuffer's memory layout never reaches app code. There is no other rendering path.
 
 ### Apps, windows, and the menubar
 
@@ -75,7 +106,7 @@ export default defineApp({
 });
 ```
 
-Bundles externalize `solid-js`, `solid-js/store`, `@mockintosh/ui`, and `@mockintosh/sdk`. The OS serves those via an import map so one Solid runtime is shared. `AppLoader` validates `Component` and calls `registerApp`. The App Store filters catalog entries to `sdk` major ≥ 2.
+Bundles externalize `solid-js`, `solid-js/store`, `@mockintosh/ui`, and `@mockintosh/sdk`. The OS serves those via an import map so one Solid runtime is shared. The `AppInstaller` (`src/os/installedApps.ts`) fetches the bundle through `Platform.loadModule`, validates `Component`, registers the module's `sprites`, and calls `registerApp`; a platform without `loadModule` (an embedded build) has no installer and the App Store says so. The App Store filters catalog entries to `sdk` major ≥ 2.
 
 `useApp()` provides `getSprite`, `storage` (per-app folder), `fs` (the shared file system), `os.openWindow/closeWindow/showDialog`, `setMenus` (this window's menubar), optional `fetch`, and `env`. Apps that declare `fileTypes` are launched with `FileDocumentProps` when such a file is opened. The OS supplies one `AppServices` per window through the SDK's `AppServicesContext`, so each window's components see their own.
 
@@ -84,32 +115,22 @@ The SDK is the single source of the app contract shared with the OS: `SolidApp` 
 ## Directory Structure
 
 ```
-lib/canvas/                 Pixel buffer, sprites, color, zoom
-  BitCanvas.ts
-  AppLoader.ts              Dynamic ESM loading (SDK v2 Component)
-  AppBuilder.ts             Hook slots — used by Decker host only
-  AppRegistry.ts            SystemApp type — used by Decker host only
-  HitRegion.ts              Retained hit map — used by Decker host only
-  qdDraw.ts                 GrafPort conveniences
-  OSServices.ts             Toolbox-facing services for the Decker host
-  ColorSystem.ts
-  sprites/
-
-lib/toolbox/                Event, font, control, window record
-  WindowRecord.ts           Window record + chrome constants
-  WindowContext.ts          GrafPort drawing helper (Decker)
-  EventManager.ts
-  ControlManager.ts
-
-lib/decker/                 Lil runtime + Decker card engine
-  core.ts
-  systemApp.ts              Decker SystemApp painted via LegacyAppHost
+src/platform/
+  types.ts                  Platform interface (display, input, scheduler, storage, peripherals)
+  core-env.d.ts             The host globals the DOM-free core may assume
+  web/                      Browser platform
+    index.ts                createWebPlatform: canvas + zoom, DOM input, RAF, OPFS, WebUSB, clipboard
+    CanvasPresenter.ts      Expands QuickDraw's screenBits to RGBA on a 2D canvas
+    OPFSBackend.ts          FSBackend on the Origin Private File System
+    WebUSBPrinterTransport.ts
+  headless/                 In-memory platform for tests and as a template for new hosts
 
 packages/ui/                Solid universal renderer
 packages/fs/                Reactive virtual file system + backends
 packages/sdk/               defineApp, useApp, menubar types, UI + fs re-exports
 packages/markdown/          mdast → LayoutNode
-packages/quickdraw/         GrafPort, CopyBits, fonts
+packages/print/             Print pages (QuickDraw ports) → ESC/POS → PrinterTransport
+packages/quickdraw/         GrafPort, CopyBits, BitBlt, packed 1-bit BitMap
 
 apps/                       Solid system apps (*.tsx)
   Finder.solid.tsx
@@ -118,9 +139,12 @@ apps/                       Solid system apps (*.tsx)
   …
 
 src/
-  solidMain.ts              Boot: canvas, createUI, OSRoot, events
-  os/                       Shell
-    apps.ts                 SolidApp registry
+  solidMain.ts              Browser entry: createWebPlatform → bootOS
+  systemApps.ts             Side-effect imports that register the web build's bundled apps
+  os/                       Shell (DOM-free)
+    boot.ts                 bootOS(platform): boot order, frame loop, input → UI, OSServices
+    capabilities.ts         Platform capability set; `requires` checks and their wording
+    apps.ts                 SolidApp registry (+ apps skipped as unavailable)
     state.ts                Window store, active app, app menus
     windowContext.ts        useWindow()
     windowGeometry.ts       Chrome metrics + content-rect helpers (single source of truth)
@@ -128,10 +152,13 @@ src/
     fsBootstrap.ts          First-boot volume + role folders
     openers.ts              File type → app resolution
     spriteFiles.ts          Sprite-file codec + cache
+    sprites/                SpriteRegistry + generated built-in sprite data (scripts/convert-sprites.ts)
+    cursor.ts               Draws QuickDraw's cursorState with CopyBits (the VBL cursor task)
+    cursors.ts              The OS cursors as QuickDraw `Cursor`s (arrow, iBeam, watch, grab)
+    zoomAnimation.ts        XOR zoom-rect animation (presents via a callback)
     appStorage.ts           Per-app storage folder
-    systemPreferences.ts    Reactive system prefs, persisted beside app storage
-    installedApps.ts        App Store installs as .app manifest files
-    legacy/LegacyAppHost    Decker raster bridge
+    installedApps.ts        AppInstaller: .app manifests in Applications, bundles via Platform.loadModule
+    printing.ts             System printer: PrintService over a PrinterTransport
     components/             Desktop, Window, Menubar, Dialog, Splash
 
 templates/app/              vite-plugin-solid universal starter
@@ -142,8 +169,14 @@ templates/app/              vite-plugin-solid universal starter
 Each dirty frame:
 
 1. Solid tree → layout → QuickDraw paint (`ui.frame()`). The tree ends with `ScreenCorners`, an inert layer that anchors the rounded-CRT corner sprites with `right`/`bottom` absolute layout above every window and menu.
-2. Cursor sprite blits on the UI port (the only thing drawn outside the tree)
-3. `BitCanvas.flush` to the 2D canvas
+2. `drawCursor` composites QuickDraw's `cursorState.cursor` (mask `srcBic`, data `srcOr`) at the pointer — the only thing drawn outside the tree, standing in for the Mac's VBL cursor task
+3. `platform.display.present(screen)` — on the web, `CanvasPresenter` expands the packed bits to RGBA on the 2D canvas
+
+`InitGraf` allocates the framebuffer (`globals.screenBits`) unless the display owns one (`display.framebuffer`, for DMA-backed panels); the shell hands the same `BitMap` to `createUI` and to the display, so nothing else owns pixel memory.
+
+QuickDraw moves bytes, not pixels, wherever it can: `drawRectToPort`, `BitBlt`, `CopyBits` and `ScrollRect` combine whole bytes under edge masks (`fillRowBits` / `blitRowBits` in `packedBits.ts`, the way `BitBlt.a` moved words) and fall back to per-pixel work only under a complex clip region, a region mask, or a scale factor. `BitBltSlow` is the per-pixel reference the fast path is tested against.
+
+Sprites (`Sprite` in `@mockintosh/ui`, re-exported by the SDK) stay 1 byte per pixel as an asset format, with `defineSprite` (2 bpp base64) and `fromGrid` (ASCII art) as the two decoders; `<image>` packs each sprite to a `BitMap` once (cached per sprite) and draws it with `CopyBits`.
 
 Layout snaps every node to the pixel grid (positions floor, sizes round) so centering and percentages never produce half-pixels, which QuickDraw would refuse to draw.
 
@@ -177,8 +210,10 @@ Activation is owned by the shell, not by content. The window body's `onMouseDown
 ## Event flow
 
 ```
-DOM → EventManager → ui.dispatchPointer / dispatchKeyboard
-                   → ⌘ shortcut scan of active menubar
+platform.input (raw down/up/move/scroll, key down/up)
+   → bootOS: double-click detection, ⌘V paste via platform.clipboard,
+             ⌘ shortcut scan of the active menubar
+   → ui.dispatchPointer / dispatchKeyboard
 ```
 
 ## File System
@@ -190,9 +225,8 @@ FileSystem (packages/fs)       catalog + bodies, roles, attributes, migrations
   └ FSBackend                  OPFSBackend | InMemoryBackend
 src/os/fsBootstrap.ts          first-boot layout; repairs role folders each boot
 src/os/openers.ts              MIME type → app (`SolidApp.fileTypes`)
-src/os/spriteFiles.ts          sprite-file codec ↔ ResourceManager cache
+src/os/spriteFiles.ts          sprite-file codec ↔ SpriteRegistry cache
 src/os/appStorage.ts           useApp().storage → System Folder/Preferences/<appId>/
-src/os/systemPreferences.ts    System Folder/Preferences/System Preferences (color mode)
 src/os/installedApps.ts        App Store manifests as MIME.app files in Applications
 apps/finder/attributes.ts      Finder's typed view of node attributes
 ```
@@ -205,9 +239,20 @@ apps/finder/attributes.ts      Finder's typed view of node attributes
 
 **Durability.** A body is written to the backend *before* its catalog entry appears; an entry is removed *before* its body is deleted. The catalog is debounced (500 ms) and versioned: `parseCatalog` migrates older documents (the v1 `FileManager` catalog → v2: MIME types, roles, attributes) and drops unreachable nodes rather than failing.
 
-**Opening.** A double-click asks `resolveOpenAction`: directories open a Finder window; `MIME.appShortcut` / `MIME.app` launch the referenced app; other files launch the first registered app whose `fileTypes` includes the MIME type, with `FileDocumentProps` (`fileId`, `title`) as props. Decker opens `deck`/`html`, FileViewer `text/*`, Picture sprites and PNG/JPEG/GIF. Unknown types show a dialog.
+**Opening.** A double-click asks `resolveOpenAction`: directories open a Finder window; `MIME.appShortcut` / `MIME.app` launch the referenced app; other files launch the first registered app whose `fileTypes` includes the MIME type, with `FileDocumentProps` (`fileId`, `title`) as props. FileViewer opens `text/*`, Picture sprites and PNG/JPEG/GIF. Unknown types show a dialog, as does a shortcut or manifest whose app is no longer registered (`reason: "unknown-app"`).
 
-**Apps.** `useApp().fs` exposes the same `FileSystem` (typed `AppFileSystem` in the SDK); `useApp().storage` is a per-app folder under `System Folder/Preferences`. Installed third-party manifests are `MIME.app` files in `Applications` (migrated from `localStorage` on first boot) and are loaded at boot by `AppLoader`.
+**Apps.** `useApp().fs` exposes the same `FileSystem` (typed `AppFileSystem` in the SDK); `useApp().storage` is a per-app folder under `System Folder/Preferences`. Installed third-party manifests are `MIME.app` files in `Applications` (migrated from `localStorage` on first boot) and are loaded at boot by the `AppInstaller`.
+
+## Printing
+
+```
+PrintPage (off-screen GrafPort, paper width)  →  EscPosEncoder  →  PrinterTransport
+      @mockintosh/print                            @mockintosh/print       WebUSBPrinterTransport | (UART, socket…)
+```
+
+Printing follows the Macintosh Printing Manager model: the page is an ordinary QuickDraw port (`createPrintPage`), so anything that draws to the screen can draw to paper — `CopyBits` for pictures, `drawString` from `@mockintosh/ui` for text in the UI fonts. `EscPosEncoder` packs the finished 1-bit page into banded `GS v 0` raster commands plus feed and cut; it is pure and unit-tested. The `PrinterTransport` is the platform edge: `WebUSBPrinterTransport` (browser, Chromium) finds the device's bulk OUT endpoint and streams the bytes; a microcontroller would send the same bytes over UART.
+
+The shell owns one system printer (`src/os/printing.ts`, like the Chooser) and hands it to apps as `useApp().print`, an *optional* capability: it is `undefined` when the platform has no transport, so apps hide their Print UI with `<Show when={print}>`. `printPicture` is the polaroid layout (picture enlarged and centred, caption beneath); `printPage` gives an app the raw port.
 
 ## App Store
 

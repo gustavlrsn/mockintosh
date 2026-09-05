@@ -1,10 +1,9 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { Button } from "@mockintosh/ui";
+import { Button, type Ink } from "@mockintosh/ui";
 import { useApp } from "@mockintosh/sdk";
 import { registerApp } from "../src/os/apps";
 import { useOS } from "../src/os/context";
 import { useWindow } from "../src/os/windowContext";
-import type { GrafPort } from "@mockintosh/quickdraw";
 import {
   CLIENT_ID,
   REDIRECT_URI,
@@ -25,6 +24,7 @@ import {
   spotifyPost,
   spotifyPut,
 } from "./spotify/api";
+import { spotifySprites } from "./sprites/spotify";
 
 const SIDEBAR_W = 90;
 
@@ -33,10 +33,30 @@ const TOKENS_KEY = "tokens.json";
 /** Pre-FS location; migrated on first open and then removed. */
 const LEGACY_TOKENS_KEY = "mockintosh:spotify:tokens";
 
+/** `/api/spotify/device-request` — starts the device-code login flow. */
+interface DeviceRequestResponse {
+  error?: string;
+  poll_id: string;
+  verification_uri: string;
+  verification_uri_complete?: string;
+  user_code: string;
+  interval?: number;
+  expires_in?: number;
+}
+
+/** `/api/spotify/device-poll` — the flow's current state. */
+interface DevicePollResponse {
+  status: "pending" | "ready" | "expired" | "denied";
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}
+
 export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   const os = useOS();
   const win = useWindow();
-  const { storage } = useApp();
+  const app = useApp();
+  const { storage } = app;
   const [tokens, setTokens] = createSignal<SpotifyTokens | null>(null);
   const [playlists, setPlaylists] = createSignal<SpotifyPlaylist[]>([]);
   const [selected, setSelected] = createSignal(-1);
@@ -52,6 +72,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   // through `onChange`; we own persistence.
   const session: SpotifySession = {
     tokens: null,
+    fetch: app.fetch!, // present: the app requires "network"
     onChange(next) {
       setTokens(next);
       void (next ? storage.write(TOKENS_KEY, JSON.stringify(next)) : storage.remove(TOKENS_KEY));
@@ -133,7 +154,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
           if (url) {
             const size = Math.max(32, Math.min(win.width() - SIDEBAR_W - 16, win.height() - 60));
             setArtSize(size);
-            void ditherImageFromUrl(url, size, size).then((px) => {
+            void ditherImageFromUrl(url, size, size, session).then((px) => {
               if (px) setArt(px);
             });
           }
@@ -157,7 +178,7 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
       }
       if (!e.data.code || !codeVerifier) return;
       try {
-        const next = await exchangeCodeForTokens(e.data.code, codeVerifier);
+        const next = await exchangeCodeForTokens(e.data.code, codeVerifier, session);
         session.onChange(next);
         setError("");
       } catch (err) {
@@ -180,8 +201,8 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
         return;
       }
       try {
-        const resp = await fetch(`/api/spotify/device-poll?poll_id=${encodeURIComponent(current.pollId)}`);
-        const data = await resp.json();
+        const resp = await session.fetch(`/api/spotify/device-poll?poll_id=${encodeURIComponent(current.pollId)}`);
+        const data = (await resp.json()) as DevicePollResponse;
         if (data.status === "ready") {
           session.onChange({
             access_token: data.access_token,
@@ -221,8 +242,8 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
       expiresAt: 0,
       qrMatrix: null,
     });
-    void fetch("/api/spotify/device-request", { method: "POST" })
-      .then((r) => r.json())
+    void session.fetch("/api/spotify/device-request", { method: "POST" })
+      .then((r) => r.json() as Promise<DeviceRequestResponse>)
       .then((data) => {
         if (data.error) {
           setError(String(data.error));
@@ -290,20 +311,16 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
             <raster
               width={120}
               height={120}
-              onPaint={(portUnknown, rect) => {
+              onPaint={({ rect, setPixel }) => {
                 const matrix = deviceFlow()?.qrMatrix;
                 if (!matrix) return;
-                const port = portUnknown as GrafPort;
-                const { baseAddr, rowBytes, bounds } = port.portBits;
                 const module = Math.max(1, Math.floor(Math.min(rect.width, rect.height) / matrix.length));
                 for (let r = 0; r < matrix.length; r++) {
                   for (let c = 0; c < matrix[r].length; c++) {
-                    const color = matrix[r][c] ? 1 : 0;
+                    const ink: Ink = matrix[r][c] ? 1 : 0;
                     for (let py = 0; py < module; py++) {
                       for (let px = 0; px < module; px++) {
-                        const gx = rect.x + c * module + px;
-                        const gy = rect.y + r * module + py;
-                        baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] = color;
+                        setPixel(c * module + px, r * module + py, ink);
                       }
                     }
                   }
@@ -374,28 +391,15 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
             <raster
               width={artSize()}
               height={artSize()}
-              onPaint={(portUnknown, rect) => {
+              onPaint={({ rect, setPixel, blitPixels }) => {
                 const px = art();
-                const port = portUnknown as GrafPort;
-                const { baseAddr, rowBytes, bounds } = port.portBits;
-                if (!px) {
-                  for (let y = 0; y < rect.height; y++) {
-                    for (let x = 0; x < rect.width; x++) {
-                      const gx = rect.x + x;
-                      const gy = rect.y + y;
-                      baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] =
-                        (x + y) % 4 === 0 ? 1 : 0;
-                    }
-                  }
+                if (px) {
+                  blitPixels(px, artSize(), artSize());
                   return;
                 }
-                const w = Math.min(artSize(), rect.width);
-                const h = Math.min(artSize(), rect.height);
-                for (let y = 0; y < h; y++) {
-                  for (let x = 0; x < w; x++) {
-                    const gx = rect.x + x;
-                    const gy = rect.y + y;
-                    baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] = px[y * artSize() + x];
+                for (let y = 0; y < rect.height; y++) {
+                  for (let x = 0; x < rect.width; x++) {
+                    setPixel(x, y, (x + y) % 4 === 0 ? 1 : 0);
                   }
                 }
               }}
@@ -450,8 +454,10 @@ export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
 
 registerApp({
   id: "spotify",
+  requires: ["network", "browser"],
   title: "Spotify Player",
   icon: "icon/spotify",
+  sprites: spotifySprites,
   defaultSize: { width: 380, height: 280 },
   scrollable: false,
   Component: SpotifyPlayer,

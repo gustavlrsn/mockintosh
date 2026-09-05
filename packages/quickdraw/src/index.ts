@@ -3,12 +3,13 @@
  *
  * TypeScript re-implementation of the original Macintosh QuickDraw graphics
  * library (1984, Bill Atkinson). Exports the same function names as the
- * original Pascal API, targeting a 1-bit pixel buffer.
+ * original Pascal API, targeting a packed 1-bit pixel buffer (8 pixels per
+ * byte, MSB leftmost, 1 = black — see `packedBits.ts`).
  *
  * Usage:
  *   import { InitGraf, OpenPort, MoveTo, LineTo, FrameRect, ... } from "@mockintosh/quickdraw";
  *
- *   InitGraf({ width: 512, height: 342, pixels: myUint8Array });
+ *   InitGraf({ width: 512, height: 342 });   // allocates globals.screenBits
  *   const port = newGrafPort();
  *   OpenPort(port);
  *   MoveTo(10, 10);
@@ -108,6 +109,22 @@ export {
 
 export type { QDScreen } from "./globals";
 export { globals, __injectFontFunctions } from "./globals";
+
+// -------------------------------------------------------------------------
+// Packed 1-bit pixel storage
+// -------------------------------------------------------------------------
+
+export {
+  rowBytesFor,
+  newBitMap,
+  bitMapWidth,
+  bitMapHeight,
+  getBit,
+  setBit,
+  clearBitMap,
+  bitMapFromPixels,
+  pixelsFromBitMap,
+} from "./packedBits";
 
 // -------------------------------------------------------------------------
 // Fixed-point math and bit utilities (GrafUtil)
@@ -395,4 +412,4 @@ export {
 // Low-level BitBlt engine (exposed for advanced use)
 // -------------------------------------------------------------------------
 
-export { BitBlt, samplePattern, drawRectToPort, drawHSpan } from "./bitblt";
+export { BitBlt, BitBltSlow, samplePattern, drawRectToPort, drawHSpan } from "./bitblt";

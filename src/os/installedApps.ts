@@ -2,24 +2,98 @@
  * Installed third-party apps live in the file system: each is a `MIME.app`
  * file in the Applications folder whose body is the `AppManifest`. Opening
  * one from the Finder launches the app; trashing it uninstalls.
+ *
+ * Loading the code behind a manifest needs `Platform.loadModule`; the
+ * `AppInstaller` wraps it and is only offered (`OSServices.installer`) on
+ * platforms that have it.
  */
 import { MIME, type FileSystem, type FSFile } from "@mockintosh/fs";
-import { AppLoader, type AppManifest } from "../../lib/canvas/AppLoader";
-import type { ResourceManager } from "../../lib/toolbox/ResourceManager";
+import type { AppManifest, Capability } from "@mockintosh/sdk";
+import type { Sprite } from "@mockintosh/ui";
+import type { ModuleLoader } from "../platform/types";
+import { getApp, registerApp, registerUnavailableApp, type SolidApp } from "./apps";
+import { missingCapabilities, type CapabilitySet } from "./capabilities";
+import type { SpriteRegistry } from "./sprites/registry";
 
-/** Pre-FS location of the manifests; migrated on first boot and then removed. */
-const LEGACY_STORAGE_KEY = "mockintosh:installed-apps";
-
-let loader: AppLoader | null = null;
-
-export function initInstalledApps(sprites: ResourceManager): AppLoader {
-  loader = new AppLoader(sprites);
-  return loader;
+/**
+ * What an app bundle's entry module must export. A `defineApp` result is
+ * structurally the OS's `SolidApp`; the loader only checks shape at runtime.
+ */
+interface AppModule {
+  default: SolidApp<any>;
+  sprites?: Record<string, Sprite>;
 }
 
-export function getAppLoader(): AppLoader {
-  if (!loader) throw new Error("AppLoader not initialized");
-  return loader;
+export interface AppInstaller {
+  /** Load an app's bundle and register it; then record the install in the file system. */
+  install(manifest: AppManifest): Promise<void>;
+  /** Load every installed app this platform can run; record the rest as unavailable. */
+  loadInstalled(): Promise<void>;
+}
+
+export interface AppInstallerOptions {
+  fs: FileSystem;
+  sprites: SpriteRegistry;
+  capabilities: CapabilitySet;
+  loadModule: ModuleLoader;
+}
+
+export function createAppInstaller(options: AppInstallerOptions): AppInstaller {
+  const { fs, sprites, capabilities, loadModule } = options;
+  const loaded = new Set<string>();
+
+  async function load(manifest: AppManifest): Promise<SolidApp<any>> {
+    if (loaded.has(manifest.id)) {
+      const existing = getApp(manifest.id);
+      if (existing) return existing;
+    }
+
+    const module = validateModule(manifest.id, await loadModule(manifest.entry));
+    if (module.sprites) sprites.registerAll(module.sprites);
+    registerApp(module.default);
+    loaded.add(manifest.id);
+    return module.default;
+  }
+
+  return {
+    async install(manifest) {
+      await load(manifest);
+      await writeManifest(fs, manifest);
+    },
+
+    async loadInstalled() {
+      const loadable: AppManifest[] = [];
+      for (const manifest of await readInstalledManifests(fs)) {
+        const missing: Capability[] = missingCapabilities(manifest.requires, capabilities);
+        if (missing.length === 0) loadable.push(manifest);
+        else registerUnavailableApp({ id: manifest.id, title: manifest.title, missing });
+      }
+      const results = await Promise.allSettled(loadable.map(load));
+      results.forEach((result, i) => {
+        if (result.status === "rejected") {
+          console.error(`Failed to load installed app "${loadable[i].id}":`, result.reason);
+        }
+      });
+    },
+  };
+}
+
+function validateModule(appId: string, module: unknown): AppModule {
+  const m = module as Partial<AppModule> | null;
+  const app = m?.default;
+  if (!app || typeof app !== "object") {
+    throw new Error(`Invalid app bundle for "${appId}": no default export`);
+  }
+  if (!app.id || typeof app.Component !== "function") {
+    throw new Error(`Invalid app bundle for "${appId}": expected defineApp({ Component })`);
+  }
+  if (!app.title || !app.icon || !app.defaultSize) {
+    throw new Error(`Invalid app bundle for "${appId}": missing title, icon, or defaultSize`);
+  }
+  return {
+    default: app,
+    sprites: m.sprites && typeof m.sprites === "object" ? m.sprites : undefined,
+  };
 }
 
 function manifestFiles(fs: FileSystem): FSFile[] {
@@ -61,28 +135,4 @@ async function writeManifest(fs: FileSystem, manifest: AppManifest): Promise<FSF
     type: MIME.app,
     attributes: { icon: manifest.icon, appId: manifest.id },
   });
-}
-
-export async function installManifest(fs: FileSystem, manifest: AppManifest): Promise<void> {
-  await getAppLoader().load(manifest);
-  await writeManifest(fs, manifest);
-}
-
-export async function loadInstalledApps(fs: FileSystem): Promise<void> {
-  await migrateLegacyManifests(fs);
-  await getAppLoader().loadAll(await readInstalledManifests(fs));
-}
-
-async function migrateLegacyManifests(fs: FileSystem): Promise<void> {
-  if (typeof localStorage === "undefined") return;
-  const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-  if (!raw) return;
-  try {
-    const manifests = (JSON.parse(raw) as unknown[]).filter(isManifest);
-    for (const m of manifests) await writeManifest(fs, m);
-  } catch (err) {
-    console.error("Failed to migrate installed apps into the file system", err);
-    return;
-  }
-  localStorage.removeItem(LEGACY_STORAGE_KEY);
 }

@@ -21,13 +21,12 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "lib/**/*.ts",
-    "lib/**/*.js",
     "apps/**/*.ts",
     "apps/**/*.tsx",
     "packages/ui/src/**/*.ts",
     "packages/ui/src/**/*.tsx",
     "packages/fs/src/**/*.ts",
+    "packages/print/src/**/*.ts",
     "utils/**/*.ts",
     "vite-env.d.ts"
   ],

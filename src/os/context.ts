@@ -4,9 +4,14 @@
  */
 
 import { createContext, useContext } from "solid-js";
-import type { ResourceManager } from "../../lib/toolbox/ResourceManager";
+import type { SpriteRegistry } from "./sprites/registry";
 import type { FileSystem } from "@mockintosh/fs";
-import type { AnimRect } from "../../lib/canvas/ZoomAnimation";
+import type { AnimRect } from "./zoomAnimation";
+import type { AppInstaller } from "./installedApps";
+import type { PrintService } from "@mockintosh/sdk";
+import type { PlatformEnv } from "../platform/types";
+import type { FetchFunction } from "@mockintosh/sdk";
+import type { CapabilitySet } from "./capabilities";
 
 export interface IconScreenRect {
   x: number;
@@ -26,10 +31,19 @@ export interface DialogOptions {
 }
 
 export interface OSServices {
-  sprites: ResourceManager;
+  sprites: SpriteRegistry;
   fs: FileSystem;
   resolution: { width: number; height: number };
   menubarHeight: number;
+  env: PlatformEnv;
+  /** What this machine can do; apps' `requires` are checked against it. */
+  capabilities: CapabilitySet;
+  /** Network access, when the platform has it. */
+  fetch?: FetchFunction;
+  /** The system printer, when the platform provides a transport for one. */
+  printer?: PrintService;
+  /** Installs third-party apps, when the platform can load code at runtime. */
+  installer?: AppInstaller;
   openApp: (appId: string, props?: Record<string, unknown>, fromRect?: IconScreenRect) => void;
   openFolderWindow: (title: string, directoryId: string, fromRect?: IconScreenRect) => void;
   openFSNode: (nodeId: string, fromRect?: IconScreenRect) => void;

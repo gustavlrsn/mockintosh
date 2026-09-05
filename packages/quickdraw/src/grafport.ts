@@ -22,6 +22,7 @@ import {
 import { globals, QDScreen } from "./globals";
 import { patCopy, blackColor, whiteColor } from "./constants";
 import { SectRect } from "./rects";
+import { newBitMap } from "./packedBits";
 
 // -------------------------------------------------------------------------
 // Helpers
@@ -46,15 +47,11 @@ function copyPattern(src: Pattern): Pattern {
  * routine.  Provides the pixel buffer the OS will use as the screen.
  * Matches `PROCEDURE InitGraf(globalPtr: QDPtr)` from `QuickDraw.p`.
  *
- * @param screen  The OS-allocated framebuffer (width × height, 1 byte/pixel).
+ * @param screen  Screen size, optionally with a host-owned packed framebuffer.
  */
 export function InitGraf(screen: QDScreen): void {
   globals._screen = screen;
-  globals.screenBits = {
-    baseAddr: screen.pixels,
-    rowBytes: screen.width,
-    bounds: makeRect(0, 0, screen.height, screen.width),
-  };
+  globals.screenBits = screen.bits ?? newBitMap(screen.width, screen.height);
   globals.randSeed = 1;
   globals.thePort = null;
 }
@@ -337,15 +334,12 @@ export function BackPat(pat: Pattern): void {
  */
 
 export function newGrafPort(): GrafPort {
-  const bounds = globals._screen
-    ? makeRect(0, 0, globals._screen.height, globals._screen.width)
-    : makeRect(0, 0, 0, 0);
-  const pixels = globals._screen ? globals._screen.pixels : new Uint8Array(0);
-  const rowBytes = globals._screen ? globals._screen.width : 0;
+  const screen = globals.screenBits;
+  const bounds = cloneRect(screen.bounds);
 
   return {
     device: 0,
-    portBits: { baseAddr: pixels, rowBytes, bounds: cloneRect(bounds) },
+    portBits: { baseAddr: screen.baseAddr, rowBytes: screen.rowBytes, bounds: cloneRect(bounds) },
     portRect: cloneRect(bounds),
     visRgn: makeRegion(cloneRect(bounds)),
     clipRgn: makeRegion(makeRect(-32767, -32767, 32767, 32767)),

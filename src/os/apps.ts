@@ -3,7 +3,7 @@
  */
 
 import type { JSX } from "solid-js";
-import type { SolidApp as SDKSolidApp } from "@mockintosh/sdk";
+import type { Capability, SolidApp as SDKSolidApp } from "@mockintosh/sdk";
 import { setAppMenus, type OSWindowKind } from "./state";
 
 /**
@@ -32,4 +32,21 @@ export function getApp(id: string): SolidApp<any> | undefined {
 
 export function getAllApps(): SolidApp<any>[] {
   return Array.from(apps.values());
+}
+
+/** An installed app the OS knows about but did not load, because this platform cannot run it. */
+export interface UnavailableApp {
+  id: string;
+  title: string;
+  missing: Capability[];
+}
+
+const unavailable = new Map<string, UnavailableApp>();
+
+export function registerUnavailableApp(app: UnavailableApp): void {
+  unavailable.set(app.id, app);
+}
+
+export function getUnavailableApp(id: string): UnavailableApp | undefined {
+  return unavailable.get(id);
 }

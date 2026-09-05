@@ -38,6 +38,10 @@ import {
   PenPat,
   PenMode,
   PenNormal,
+  bitMapFromPixels,
+  bitMapWidth,
+  bitMapHeight,
+  setBit,
 } from "@mockintosh/quickdraw";
 import {
   hasMouseHandlers,
@@ -45,13 +49,16 @@ import {
   type CanvasNode,
   type HitRect,
   type HitMask,
+  type Ink,
   type PatternName,
-  type ImageSource,
   type RasterPaintFn,
+  type RasterPaintRect,
+  type RasterSurface,
   type TextAlign,
   type TextVerticalAlign,
 } from "./nodes";
 import type { FocusManager } from "./focus";
+import type { Sprite } from "./sprite";
 import { requireFont } from "./fonts/registry";
 import { layoutText } from "./fonts/textLayout";
 
@@ -70,6 +77,15 @@ const PATTERNS: Record<PatternName, Uint8Array> = {
   crosshatch: new Uint8Array([0xff, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80]),
   darkCheckers: new Uint8Array([0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa]),
 };
+
+/**
+ * The 8×8 QuickDraw pattern for a named fill, for hosts that paint outside
+ * the node tree (e.g. the shell's XOR zoom animation) and want to match the
+ * tree's `background` / `penMode="xor"` appearance exactly.
+ */
+export function patternBits(name: PatternName): Uint8Array {
+  return PATTERNS[name] ?? PATTERNS.checker;
+}
 
 // -------------------------------------------------------------------------
 // Port helpers
@@ -92,15 +108,13 @@ function _makeRgn(r: Rect): RgnHandle {
   return { rgn: { rgnSize: 10, rgnBBox: cloneRect(r) } };
 }
 
-export function createDrawContext(
-  pixels: Uint8Array,
-  width: number,
-  height: number
-): DrawContext {
-  const bounds = makeRect(0, 0, height, width);
+export function createDrawContext(screen: BitMap): DrawContext {
+  const width = bitMapWidth(screen);
+  const height = bitMapHeight(screen);
+  const bounds = cloneRect(screen.bounds);
   const port: PortWithMeta = {
     device: 0,
-    portBits: { baseAddr: pixels, rowBytes: width, bounds: cloneRect(bounds) },
+    portBits: screen,
     portRect: cloneRect(bounds),
     visRgn: _makeRgn(cloneRect(bounds)),
     clipRgn: _makeRgn(makeRect(-32767, -32767, 32767, 32767)),
@@ -129,35 +143,6 @@ export function createDrawContext(
   return { port, focusManager: null, width, height };
 }
 
-// -------------------------------------------------------------------------
-// Color fills — palette indices write directly (QD PaintRect is 1-bit)
-// -------------------------------------------------------------------------
-
-function fillIndexed(
-  port: PortWithMeta,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  color: number
-): void {
-  const { baseAddr, rowBytes, bounds } = port.portBits;
-  const clip = port.clipRgn?.rgn.rgnBBox;
-  const vis = port.visRgn?.rgn.rgnBBox;
-  const pr = port.portRect;
-  const x0 = Math.max(x, clip?.left ?? x, vis?.left ?? x, pr.left, bounds.left);
-  const y0 = Math.max(y, clip?.top ?? y, vis?.top ?? y, pr.top, bounds.top);
-  const x1 = Math.min(x + w, clip?.right ?? x + w, vis?.right ?? x + w, pr.right, bounds.right);
-  const y1 = Math.min(y + h, clip?.bottom ?? y + h, vis?.bottom ?? y + h, pr.bottom, bounds.bottom);
-  const idx = color & 0xff;
-  for (let py = y0; py < y1; py++) {
-    const row = (py - bounds.top) * rowBytes - bounds.left;
-    for (let px = x0; px < x1; px++) {
-      baseAddr[row + px] = idx;
-    }
-  }
-}
-
 function applyPenMode(port: PortWithMeta, penMode: "copy" | "xor" | undefined): void {
   if (penMode === "xor") PenMode(patXor);
   else PenNormal();
@@ -166,25 +151,19 @@ function applyPenMode(port: PortWithMeta, penMode: "copy" | "xor" | undefined): 
 function fillBackground(
   port: PortWithMeta,
   r: ReturnType<typeof makeRect>,
-  background: number | PatternName,
+  background: Ink | PatternName,
   penMode: "copy" | "xor" | undefined
 ): void {
   applyPenMode(port, penMode);
   if (typeof background === "number") {
     if (background === 0 && penMode !== "xor") {
       EraseRect(r);
-    } else if (background === 1 || penMode === "xor") {
-      if (background === 1 || background === 0) {
-        PenNormal();
-        if (penMode === "xor") PenMode(patXor);
-        if (background === 0) PenPat(globals.white);
-        PaintRect(r);
-        PenNormal();
-      } else {
-        fillIndexed(port, r.left, r.top, r.right - r.left, r.bottom - r.top, background);
-      }
     } else {
-      fillIndexed(port, r.left, r.top, r.right - r.left, r.bottom - r.top, background);
+      PenNormal();
+      if (penMode === "xor") PenMode(patXor);
+      if (background === 0) PenPat(globals.white);
+      PaintRect(r);
+      PenNormal();
     }
   } else {
     const pat = PATTERNS[background] ?? PATTERNS.checker;
@@ -271,8 +250,8 @@ function drawBox(
 ): void {
   const { background, borderColor, borderStyle, borderRadius, penMode } =
     node.props as {
-      background?: number | PatternName;
-      borderColor?: number;
+      background?: Ink | PatternName;
+      borderColor?: Ink;
       borderStyle?: "solid" | "dotted" | "dashed";
       borderRadius?: number;
       penMode?: "copy" | "xor";
@@ -289,17 +268,9 @@ function drawBox(
 
     if (borderColor === 0) {
       PenPat(globals.white);
-    } else if (borderColor === 1) {
+    } else {
       PenNormal();
       if (penMode === "xor") PenMode(patXor);
-    } else {
-      // Palette-index border: draw as indexed pixels on the four edges.
-      fillIndexed(ctx.port, x, y, width, bw, borderColor);
-      fillIndexed(ctx.port, x, y + height - bw, width, bw, borderColor);
-      fillIndexed(ctx.port, x, y, bw, height, borderColor);
-      fillIndexed(ctx.port, x + width - bw, y, bw, height, borderColor);
-      PenNormal();
-      return;
     }
 
     if (borderStyle === "dotted" || borderStyle === "dashed") {
@@ -354,22 +325,20 @@ function drawText(
 ): void {
   const port = ctx.port as PortWithMeta;
   const fontName = (node.props["font"] as string | undefined) ?? "body";
-  const color = (node.props["color"] as number | undefined) ?? 1;
+  const color = (node.props["color"] as Ink | undefined) ?? 1;
   const align = (node.props["align"] as TextAlign | undefined) ?? "left";
   const verticalAlign =
     (node.props["verticalAlign"] as TextVerticalAlign | undefined) ?? "top";
   const wrap = (node.props["wrap"] as boolean | undefined) ?? false;
-  const background = node.props["background"] as number | undefined;
+  const background = node.props["background"] as Ink | undefined;
   const stipple = (node.props["stipple"] as boolean | undefined) ?? false;
 
   if (background !== undefined) {
     const bgRect = makeRect(y, x, y + height, x + width);
     if (background === 0) EraseRect(bgRect);
-    else if (background === 1) {
+    else {
       PenNormal();
       PaintRect(bgRect);
-    } else {
-      fillIndexed(port, x, y, width, height, background);
     }
   }
 
@@ -421,8 +390,65 @@ function collectText(node: CanvasNode): string {
   return node.children.map(collectText).join("");
 }
 
-function makeBitMap(data: Uint8Array, w: number, h: number): BitMap {
-  return { baseAddr: data, rowBytes: w, bounds: makeRect(0, 0, h, w) };
+// -------------------------------------------------------------------------
+// Sprites → packed BitMaps
+//
+// `Sprite` keeps 1 byte per pixel (it is the asset format); the framebuffer
+// is packed. Pack once per sprite and reuse across frames.
+// -------------------------------------------------------------------------
+
+interface PackedImage {
+  pixels: BitMap;
+  mask: BitMap | null;
+  inverted?: BitMap;
+  outline?: BitMap;
+}
+
+const packedImages = new WeakMap<Sprite, PackedImage>();
+
+function packedImage(src: Sprite): PackedImage {
+  let entry = packedImages.get(src);
+  if (!entry) {
+    entry = {
+      pixels: bitMapFromPixels(src.data, src.width, src.height),
+      mask: src.mask ? bitMapFromPixels(src.mask, src.width, src.height) : null,
+    };
+    packedImages.set(src, entry);
+  }
+  return entry;
+}
+
+function outlineImage(src: Sprite): BitMap {
+  const entry = packedImage(src);
+  if (entry.outline) return entry.outline;
+  const buf = new Uint8Array(src.width * src.height);
+  const d = src.data;
+  for (let sy = 0; sy < src.height; sy++) {
+    for (let sx = 0; sx < src.width; sx++) {
+      const si = sy * src.width + sx;
+      if (src.mask && !src.mask[si]) continue;
+      if (!d[si]) continue;
+      const isEdge =
+        sx === 0 || !d[si - 1] ||
+        sx === src.width - 1 || !d[si + 1] ||
+        sy === 0 || !d[si - src.width] ||
+        sy === src.height - 1 || !d[si + src.width];
+      if (isEdge) buf[si] = 1;
+    }
+  }
+  entry.outline = bitMapFromPixels(buf, src.width, src.height);
+  return entry.outline;
+}
+
+function invertedImage(src: Sprite): BitMap {
+  const entry = packedImage(src);
+  if (entry.inverted) return entry.inverted;
+  const buf = new Uint8Array(src.width * src.height);
+  for (let i = 0; i < src.data.length; i++) {
+    if (src.mask ? src.mask[i] : 1) buf[i] = src.data[i] ^ 1;
+  }
+  entry.inverted = bitMapFromPixels(buf, src.width, src.height);
+  return entry.inverted;
 }
 
 function drawImage(
@@ -433,7 +459,7 @@ function drawImage(
   width: number,
   height: number
 ): void {
-  const src = node.props["src"] as ImageSource | undefined;
+  const src = node.props["src"] as Sprite | undefined;
   const mode = (node.props["mode"] as string | undefined) ?? "normal";
   if (!src) return;
 
@@ -442,43 +468,59 @@ function drawImage(
   const srcRect = makeRect(0, 0, ph, pw);
   const dstRect = makeRect(y, x, y + ph, x + pw);
 
-  let pixelBM: BitMap;
-
-  if (mode === "outline") {
-    const buf = new Uint8Array(src.width * src.height);
-    const d = src.data;
-    for (let sy = 0; sy < src.height; sy++) {
-      for (let sx = 0; sx < src.width; sx++) {
-        const si = sy * src.width + sx;
-        if (src.mask && !src.mask[si]) continue;
-        if (!d[si]) continue;
-        const isEdge =
-          sx === 0 || !d[si - 1] ||
-          sx === src.width - 1 || !d[si + 1] ||
-          sy === 0 || !d[si - src.width] ||
-          sy === src.height - 1 || !d[si + src.width];
-        if (isEdge) buf[si] = 1;
-      }
-    }
-    pixelBM = makeBitMap(buf, src.width, src.height);
-  } else if (mode === "inverted") {
-    const buf = new Uint8Array(src.width * src.height);
-    for (let i = 0; i < src.data.length; i++) {
-      if (src.mask ? src.mask[i] : 1) buf[i] = src.data[i] ^ 1;
-    }
-    pixelBM = makeBitMap(buf, src.width, src.height);
-  } else {
-    pixelBM = makeBitMap(src.data, src.width, src.height);
-  }
+  const pixelBM =
+    mode === "outline" ? outlineImage(src)
+    : mode === "inverted" ? invertedImage(src)
+    : packedImage(src).pixels;
+  const maskBM = packedImage(src).mask;
 
   const port = ctx.port;
-  if (src.mask) {
-    const maskBM = makeBitMap(src.mask, src.width, src.height);
+  if (maskBM) {
     CopyBits(maskBM, port.portBits, srcRect, dstRect, srcBic, null);
     CopyBits(pixelBM, port.portBits, srcRect, dstRect, srcOr, null);
   } else {
     CopyBits(pixelBM, port.portBits, srcRect, dstRect, srcCopy, null);
   }
+}
+
+/**
+ * Build the surface handed to `<raster onPaint>`. Direct pixel writes clip
+ * to the raster box ∩ the port's visible/clip rects ∩ the bitmap bounds so a
+ * raster in a partly off-screen window cannot scribble outside it.
+ */
+function createRasterSurface(port: GrafPort, rect: RasterPaintRect): RasterSurface {
+  const bits = port.portBits;
+  const vis = port.visRgn.rgn.rgnBBox;
+  const clip = port.clipRgn.rgn.rgnBBox;
+  const left = Math.max(rect.x, bits.bounds.left, port.portRect.left, vis.left, clip.left);
+  const top = Math.max(rect.y, bits.bounds.top, port.portRect.top, vis.top, clip.top);
+  const right = Math.min(rect.x + rect.width, bits.bounds.right, port.portRect.right, vis.right, clip.right);
+  const bottom = Math.min(rect.y + rect.height, bits.bounds.bottom, port.portRect.bottom, vis.bottom, clip.bottom);
+
+  return {
+    port,
+    rect,
+    setPixel(x, y, ink) {
+      const gx = rect.x + x;
+      const gy = rect.y + y;
+      if (gx < left || gx >= right || gy < top || gy >= bottom) return;
+      setBit(bits, gx, gy, ink);
+    },
+    blitPixels(pixels, width, height, x = 0, y = 0) {
+      const x0 = Math.max(left, rect.x + x);
+      const y0 = Math.max(top, rect.y + y);
+      const x1 = Math.min(right, rect.x + x + width);
+      const y1 = Math.min(bottom, rect.y + y + height);
+      for (let gy = y0; gy < y1; gy++) {
+        const srcRow = (gy - rect.y - y) * width - (rect.x + x);
+        for (let gx = x0; gx < x1; gx++) setBit(bits, gx, gy, pixels[srcRow + gx]);
+      }
+    },
+    fill(ink) {
+      for (let gy = top; gy < bottom; gy++)
+        for (let gx = left; gx < right; gx++) setBit(bits, gx, gy, ink);
+    },
+  };
 }
 
 function drawRaster(
@@ -496,7 +538,7 @@ function drawRaster(
     ? { ...ctx.port.clipRgn, rgn: { ...ctx.port.clipRgn.rgn, rgnBBox: { ...ctx.port.clipRgn.rgn.rgnBBox } } }
     : null;
   ClipRect(makeRect(y, x, y + height, x + width));
-  onPaint(ctx.port, { x, y, width, height });
+  onPaint(createRasterSurface(ctx.port, { x, y, width, height }));
   if (savedClip) ClipRect(savedClip.rgn.rgnBBox);
   else ClipRect(makeRect(-32767, -32767, 32767, 32767));
 }

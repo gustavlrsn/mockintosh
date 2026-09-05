@@ -13,8 +13,11 @@ import { makeRect } from "./types";
 export interface QDScreen {
   width: number;
   height: number;
-  /** Flat pixel buffer — 1 byte per pixel, `0`=white, `1`=black. */
-  pixels: Uint8Array;
+  /**
+   * Host-owned framebuffer. When omitted, `InitGraf` allocates a packed
+   * bitmap of `width` × `height` and exposes it as `globals.screenBits`.
+   */
+  bits?: BitMap;
 }
 
 /**

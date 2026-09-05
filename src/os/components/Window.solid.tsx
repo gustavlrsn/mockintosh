@@ -630,7 +630,10 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
       closeWindow: (id) => os.closeWindow(id),
       showDialog: (opts) => os.showDialog(opts),
     },
-    env: { origin: typeof location !== "undefined" ? location.origin : "" },
+    env: os.env,
+    capabilities: os.capabilities,
+    fetch: os.fetch,
+    print: os.printer,
     setMenus: api.setMenus,
   };
 

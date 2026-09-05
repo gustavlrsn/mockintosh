@@ -1,8 +1,8 @@
 /**
  * Draw pass tests — verify that the pixel buffer is written correctly.
  *
- * These tests initialise QuickDraw with a small in-memory pixel buffer
- * and assert that specific pixels are set after drawTree().
+ * These tests draw into a small packed BitMap and assert that specific
+ * pixels are set after drawTree().
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -11,6 +11,7 @@ import { createDrawContext, drawTree } from "../src/draw";
 import { createNode } from "../src/nodes";
 import type { MeasureFunc } from "../src/layout";
 import { createFocusManager } from "../src/focus";
+import { getBit, newBitMap, type BitMap } from "@mockintosh/quickdraw";
 
 const noMeasure: MeasureFunc = () => ({ width: 0, height: 0 });
 
@@ -18,23 +19,23 @@ const W = 32;
 const H = 32;
 
 function makeTestContext() {
-  const pixels = new Uint8Array(W * H);
-  const ctx = createDrawContext(pixels, W, H);
+  const screen = newBitMap(W, H);
+  const ctx = createDrawContext(screen);
   const root = createNode("_root");
   root.style.width = W;
   root.style.height = H;
   root.layout = { x: 0, y: 0, width: W, height: H };
   ctx.focusManager = createFocusManager(root);
-  return { pixels, ctx, root };
+  return { screen, ctx, root };
 }
 
-function px(pixels: Uint8Array, x: number, y: number): number {
-  return pixels[y * W + x];
+function px(screen: BitMap, x: number, y: number): number {
+  return getBit(screen, x, y);
 }
 
 describe("drawTree — background fill", () => {
   it("box with background=1 fills pixels black", () => {
-    const { pixels, ctx, root } = makeTestContext();
+    const { screen, ctx, root } = makeTestContext();
     const child = createNode("box");
     child.style = { width: 8, height: 8 };
     child.props = { background: 1 };
@@ -45,14 +46,14 @@ describe("drawTree — background fill", () => {
     drawTree(root, ctx);
 
     // Top-left region should be black
-    expect(px(pixels, 0, 0)).toBe(1);
-    expect(px(pixels, 7, 7)).toBe(1);
+    expect(px(screen, 0, 0)).toBe(1);
+    expect(px(screen, 7, 7)).toBe(1);
     // Area outside should be white
-    expect(px(pixels, 9, 0)).toBe(0);
+    expect(px(screen, 9, 0)).toBe(0);
   });
 
   it("box with background=0 keeps pixels white", () => {
-    const { pixels, ctx, root } = makeTestContext();
+    const { screen, ctx, root } = makeTestContext();
     const child = createNode("box");
     child.style = { width: 8, height: 8 };
     child.props = { background: 0 };
@@ -62,12 +63,12 @@ describe("drawTree — background fill", () => {
     computeLayout(root, W, H, noMeasure);
     drawTree(root, ctx);
 
-    expect(px(pixels, 0, 0)).toBe(0);
-    expect(px(pixels, 7, 7)).toBe(0);
+    expect(px(screen, 0, 0)).toBe(0);
+    expect(px(screen, 7, 7)).toBe(0);
   });
 
   it("checker pattern alternates pixels", () => {
-    const { pixels, ctx, root } = makeTestContext();
+    const { screen, ctx, root } = makeTestContext();
     const child = createNode("box");
     child.style = { width: 8, height: 8 };
     child.props = { background: "checker" };
@@ -78,14 +79,14 @@ describe("drawTree — background fill", () => {
     drawTree(root, ctx);
 
     // Checker pattern: pixel (0,0) = black (0xAA byte, bit 7 set)
-    expect(px(pixels, 0, 0)).toBe(1); // black
-    expect(px(pixels, 1, 0)).toBe(0); // white
+    expect(px(screen, 0, 0)).toBe(1); // black
+    expect(px(screen, 1, 0)).toBe(0); // white
   });
 });
 
 describe("drawTree — nested boxes", () => {
   it("inner box overwrites outer box pixels", () => {
-    const { pixels, ctx, root } = makeTestContext();
+    const { screen, ctx, root } = makeTestContext();
 
     const outer = createNode("box");
     outer.style = { width: 16, height: 16 };
@@ -104,9 +105,9 @@ describe("drawTree — nested boxes", () => {
     computeLayout(root, W, H, noMeasure);
     drawTree(root, ctx);
 
-    expect(px(pixels, 4, 4)).toBe(1);   // inner box start
-    expect(px(pixels, 11, 11)).toBe(1); // inner box end
-    expect(px(pixels, 0, 0)).toBe(0);   // outer box only (white)
-    expect(px(pixels, 16, 0)).toBe(0);  // outside both boxes
+    expect(px(screen, 4, 4)).toBe(1);   // inner box start
+    expect(px(screen, 11, 11)).toBe(1); // inner box end
+    expect(px(screen, 0, 0)).toBe(0);   // outer box only (white)
+    expect(px(screen, 16, 0)).toBe(0);  // outside both boxes
   });
 });

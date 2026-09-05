@@ -1,6 +1,7 @@
 import { createSignal, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 import { Show } from "solid-js";
 import { getFocusManager } from "../focusContext";
+import { useUIServices } from "../services";
 import { measureText } from "../fonts/bridge";
 import type { CanvasNode, Modifiers } from "../nodes";
 
@@ -36,6 +37,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
   // Capture focus manager at init time — useContext only works during
   // component initialization, not inside event callbacks.
   const focusManager = getFocusManager();
+  const { clipboard } = useUIServices();
 
   const initialLen = props.value.length;
   const initialCaret =
@@ -226,7 +228,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
     if ((mod.ctrl || mod.meta) && key.toLowerCase() === "c") {
       if (ss !== null && se !== null) {
         const lo = Math.min(ss, se), hi = Math.max(ss, se);
-        navigator.clipboard?.writeText(text.slice(lo, hi)).catch(() => {});
+        clipboard?.writeText(text.slice(lo, hi)).catch(() => {});
       }
       return;
     }

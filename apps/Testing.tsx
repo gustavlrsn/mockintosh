@@ -2,7 +2,6 @@ import type { JSX } from "solid-js";
 import { Button, Checkbox, TextInput, createSignal } from "@mockintosh/ui";
 import { registerApp } from "../src/os/apps";
 import { useWindow } from "../src/os/windowContext";
-import type { GrafPort } from "@mockintosh/quickdraw";
 
 export function Testing(_props: Record<string, unknown>): JSX.Element {
   const win = useWindow();
@@ -30,22 +29,17 @@ export function Testing(_props: Record<string, unknown>): JSX.Element {
       <TextInput value={name()} onChange={setName} width={160} />
       <box flexDirection="row" gap={4}>
         <box width={16} height={16} background={1} />
-        <box width={16} height={16} background={2} borderColor={1} borderWidth={1} />
-        <box width={16} height={16} background={4} borderColor={1} borderWidth={1} />
-        <box width={16} height={16} background={7} borderColor={1} borderWidth={1} />
+        <box width={16} height={16} background="gray75" borderColor={1} borderWidth={1} />
+        <box width={16} height={16} background="gray50" borderColor={1} borderWidth={1} />
+        <box width={16} height={16} background="gray25" borderColor={1} borderWidth={1} />
       </box>
       <raster
         width={80}
         height={24}
-        onPaint={(portUnknown, rect) => {
-          const port = portUnknown as GrafPort;
-          const { baseAddr, rowBytes, bounds } = port.portBits;
+        onPaint={({ rect, setPixel }) => {
           for (let y = 0; y < rect.height; y++) {
             for (let x = 0; x < rect.width; x++) {
-              const gx = rect.x + x;
-              const gy = rect.y + y;
-              baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] =
-                (x + y + count()) % 4 === 0 ? 1 : 0;
+              setPixel(x, y, (x + y + count()) % 4 === 0 ? 1 : 0);
             }
           }
         }}

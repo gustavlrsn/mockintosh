@@ -1,12 +1,11 @@
 import { createSignal, onMount, Show, type JSX } from "solid-js";
-import { Button } from "@mockintosh/ui";
+import { Button, type Sprite } from "@mockintosh/ui";
 import { MIME } from "@mockintosh/fs";
+import { useApp, type PrintableImage } from "@mockintosh/sdk";
 import { registerApp } from "../src/os/apps";
 import { useOS } from "../src/os/context";
 import { useWindow } from "../src/os/windowContext";
 import { loadSpriteFile } from "../src/os/spriteFiles";
-import type { Sprite } from "../lib/canvas/BitCanvas";
-import type { GrafPort } from "@mockintosh/quickdraw";
 
 const BROWSER_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif"];
 
@@ -17,6 +16,7 @@ const BROWSER_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif"];
 export function Picture(props: Record<string, unknown>): JSX.Element {
   const os = useOS();
   const win = useWindow();
+  const { print } = useApp();
   const [sprite, setSprite] = createSignal<Sprite | undefined>(
     props.src ? os.sprites.get(String(props.src)) : undefined
   );
@@ -55,6 +55,10 @@ export function Picture(props: Record<string, unknown>): JSX.Element {
       if (s) setSprite(s);
       return;
     }
+    if (!os.capabilities.has("images")) {
+      void os.showDialog({ message: `This Macintosh cannot decode "${file.name}".` });
+      return;
+    }
     const bytes = await os.fs.readBytes(fileId);
     if (!bytes) return;
     const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: file.type }));
@@ -67,27 +71,39 @@ export function Picture(props: Record<string, unknown>): JSX.Element {
     img.src = url;
   });
 
+  /** The picture as shown, whichever way it was loaded. */
+  function printableImage(): PrintableImage | null {
+    const s = sprite();
+    if (s) return { width: s.width, height: s.height, data: s.data };
+    const px = pixels();
+    return px ? { width: pw(), height: ph(), data: px } : null;
+  }
+
+  async function printPicture(): Promise<void> {
+    const image = printableImage();
+    if (!print || !image) return;
+    try {
+      await print.printPicture(image, { caption: props.title ? String(props.title) : undefined });
+    } catch (err) {
+      await os.showDialog({
+        message: `Couldn't print: ${err instanceof Error ? err.message : String(err)}`,
+        buttons: ["OK"],
+      });
+    }
+  }
+
   return (
     <box width={win.width()} height={win.height()} padding={4} flexDirection="column" gap={4} background={0}>
-      <Button label="Print" onClick={() => {}} />
+      <Show when={print}>
+        <Button label="Print" disabled={!printableImage()} onClick={() => void printPicture()} />
+      </Show>
       <Show when={sprite()} fallback={
         <raster
           width={win.width() - 8}
           height={win.height() - 28}
-          onPaint={(portUnknown, rect) => {
+          onPaint={({ blitPixels }) => {
             const px = pixels();
-            if (!px) return;
-            const port = portUnknown as GrafPort;
-            const { baseAddr, rowBytes, bounds } = port.portBits;
-            const w = Math.min(pw(), rect.width);
-            const h = Math.min(ph(), rect.height);
-            for (let y = 0; y < h; y++) {
-              for (let x = 0; x < w; x++) {
-                const gx = rect.x + x;
-                const gy = rect.y + y;
-                baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] = px[y * pw() + x];
-              }
-            }
+            if (px) blitPixels(px, pw(), ph());
           }}
         />
       }>

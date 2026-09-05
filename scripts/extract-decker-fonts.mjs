@@ -1,6 +1,6 @@
 /**
  * Reads `reference/Decker/js/lil.js` FONTS block and writes
- * `lib/fonts/deckerBuiltinFontData.ts` with embedded %%FNT strings.
+ * `packages/ui/src/fonts/data.ts` with embedded %%FNT strings.
  *
  * Usage: node scripts/extract-decker-fonts.mjs
  */
@@ -70,11 +70,11 @@ const mono = extractFontData(lilSource, "mono");
 
 const out = `// Vendored from Decker \`lil.js\` FONTS block. Regenerate:
 //   node scripts/extract-decker-fonts.mjs
-export const DECKER_BUILTIN_FONT_DATA_BODY = "${tsEscapeDoubleQuoted(body)}";
-export const DECKER_BUILTIN_FONT_DATA_MENU = "${tsEscapeDoubleQuoted(menu)}";
-export const DECKER_BUILTIN_FONT_DATA_MONO = "${tsEscapeDoubleQuoted(mono)}";
+export const BUILTIN_FONT_BODY = "${tsEscapeDoubleQuoted(body)}";
+export const BUILTIN_FONT_MENU = "${tsEscapeDoubleQuoted(menu)}";
+export const BUILTIN_FONT_MONO = "${tsEscapeDoubleQuoted(mono)}";
 `;
 
-const outPath = path.join(root, "lib/fonts/deckerBuiltinFontData.ts");
+const outPath = path.join(root, "packages/ui/src/fonts/data.ts");
 fs.writeFileSync(outPath, out, "utf8");
 console.log(`Wrote ${outPath} (${out.length} bytes)`);

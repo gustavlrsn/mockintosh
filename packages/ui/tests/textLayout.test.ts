@@ -10,6 +10,7 @@ import { createDrawContext, drawTree } from "../src/draw";
 import { createNode, type CanvasNode } from "../src/nodes";
 import { createMeasureFunc } from "../src/measure";
 import { installFontBridge } from "../src/fonts/bridge";
+import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw";
 import { requireFont } from "../src/fonts/registry";
 
 // Synthetic monospace font: every printable ASCII glyph is 5px + 1px spacing = 6px advance.
@@ -103,15 +104,15 @@ function inkBounds(pixels: Uint8Array, w: number, h: number) {
 }
 
 function render(t: CanvasNode, w: number, h: number): Uint8Array {
-  const pixels = new Uint8Array(w * h);
-  const ctx = createDrawContext(pixels, w, h);
+  const screen = newBitMap(w, h);
+  const ctx = createDrawContext(screen);
   const root = createNode("_root");
   root.style = { width: w, height: h };
   t.parent = root;
   root.children = [t];
   computeLayout(root, w, h, measure);
   drawTree(root, ctx);
-  return pixels;
+  return pixelsFromBitMap(screen);
 }
 
 describe("<text> alignment", () => {

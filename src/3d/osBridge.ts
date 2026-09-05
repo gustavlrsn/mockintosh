@@ -1,4 +1,4 @@
-import { resolution } from "../../lib/config";
+import { DEFAULT_SCREEN as resolution } from "../platform/web";
 import {
   RASTER_UV_MIN_X,
   RASTER_UV_MAX_X,

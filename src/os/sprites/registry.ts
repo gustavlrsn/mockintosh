@@ -1,0 +1,30 @@
+/**
+ * SpriteRegistry — every named 1-bit image the OS can draw, by key.
+ *
+ * Built-in sprites (icons, window chrome, UI widgets) are registered at boot;
+ * bundled apps contribute theirs through `SolidApp.sprites`, installed apps
+ * through their module's `sprites` export, and sprite files through
+ * `spriteFiles.ts`. Components look sprites up by name (`<image src>`,
+ * `useApp().getSprite`), so nothing else holds pixel data.
+ */
+import type { Sprite } from "@mockintosh/ui";
+
+export class SpriteRegistry {
+  private readonly sprites = new Map<string, Sprite>();
+
+  get(key: string): Sprite | undefined {
+    return this.sprites.get(key);
+  }
+
+  has(key: string): boolean {
+    return this.sprites.has(key);
+  }
+
+  register(key: string, sprite: Sprite): void {
+    this.sprites.set(key, sprite);
+  }
+
+  registerAll(sprites: Record<string, Sprite>): void {
+    for (const [key, sprite] of Object.entries(sprites)) this.sprites.set(key, sprite);
+  }
+}

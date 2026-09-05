@@ -1,4 +1,5 @@
 import { encodeQR } from "@paulmillr/qr";
+import type { FetchFunction, FetchRequest, FetchResponse } from "@mockintosh/sdk";
 
 export const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID ?? "";
 export const REDIRECT_URI = `${
@@ -25,6 +26,14 @@ export interface SpotifyTokens {
 export interface SpotifySession {
   tokens: SpotifyTokens | null;
   onChange(tokens: SpotifyTokens | null): void;
+  /** Network access from `useApp().fetch`; the API layer never reaches for a global. */
+  fetch: FetchFunction;
+}
+
+interface TokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
 }
 
 export interface SpotifyPlaylist {
@@ -90,7 +99,8 @@ export function isSpotifyTokens(v: unknown): v is SpotifyTokens {
 
 export async function exchangeCodeForTokens(
   code: string,
-  codeVerifier: string
+  codeVerifier: string,
+  session: SpotifySession
 ): Promise<SpotifyTokens> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -99,33 +109,33 @@ export async function exchangeCodeForTokens(
     client_id: CLIENT_ID,
     code_verifier: codeVerifier,
   });
-  const resp = await fetch("https://accounts.spotify.com/api/token", {
+  const resp = await session.fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
   });
   if (!resp.ok) throw new Error(`Token exchange failed: ${resp.status}`);
-  const data = await resp.json();
+  const data = (await resp.json()) as TokenResponse;
   return {
     access_token: data.access_token,
-    refresh_token: data.refresh_token,
+    refresh_token: data.refresh_token ?? "",
     expires_at: Date.now() + data.expires_in * 1000,
   };
 }
 
-async function refreshAccessToken(refreshToken: string): Promise<SpotifyTokens> {
+async function refreshAccessToken(refreshToken: string, session: SpotifySession): Promise<SpotifyTokens> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
     client_id: CLIENT_ID,
   });
-  const resp = await fetch("https://accounts.spotify.com/api/token", {
+  const resp = await session.fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
   });
   if (!resp.ok) throw new Error(`Token refresh failed: ${resp.status}`);
-  const data = await resp.json();
+  const data = (await resp.json()) as TokenResponse;
   return {
     access_token: data.access_token,
     refresh_token: data.refresh_token ?? refreshToken,
@@ -138,7 +148,7 @@ export async function getValidToken(session: SpotifySession): Promise<string | n
   if (!tokens) return null;
   if (Date.now() > tokens.expires_at - 60_000) {
     try {
-      const refreshed = await refreshAccessToken(tokens.refresh_token);
+      const refreshed = await refreshAccessToken(tokens.refresh_token, session);
       session.tokens = refreshed;
       session.onChange(refreshed);
       return refreshed.access_token;
@@ -154,11 +164,11 @@ export async function getValidToken(session: SpotifySession): Promise<string | n
 async function authorized(
   path: string,
   session: SpotifySession,
-  init?: RequestInit
-): Promise<Response | null> {
+  init?: FetchRequest
+): Promise<FetchResponse | null> {
   const token = await getValidToken(session);
   if (!token) return null;
-  return fetch(`${API_BASE}${path}`, {
+  return session.fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -238,11 +248,12 @@ export function buildQRMatrix(url: string): boolean[][] | null {
 export async function ditherImageFromUrl(
   url: string,
   targetW: number,
-  targetH: number
+  targetH: number,
+  session: SpotifySession
 ): Promise<Uint8Array | null> {
   try {
-    const resp = await fetch(url);
-    const blob = await resp.blob();
+    const resp = await session.fetch(url);
+    const blob = new Blob([await resp.arrayBuffer()]);
     const bmp = await createImageBitmap(blob);
     const canvas = new OffscreenCanvas(targetW, targetH);
     const ctx = canvas.getContext("2d", { willReadFrequently: true })!;

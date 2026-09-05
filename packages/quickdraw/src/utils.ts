@@ -4,6 +4,7 @@
  */
 
 import { globals } from "./globals";
+import { bmGetPixel } from "./bitblt";
 
 /**
  * Read a single pixel from the current port at `(h, v)`.
@@ -14,12 +15,7 @@ import { globals } from "./globals";
 export function GetPixel(h: number, v: number): boolean {
   const port = globals.thePort;
   if (!port) return false;
-  const pixels = port.portBits.baseAddr;
-  const rowBytes = port.portBits.rowBytes;
-  const bnd = port.portBits.bounds;
-  const idx = (v - bnd.top) * rowBytes + (h - bnd.left);
-  if (idx < 0 || idx >= pixels.length) return false;
-  return pixels[idx] === 1;
+  return bmGetPixel(port.portBits, h, v) === 1;
 }
 
 /**

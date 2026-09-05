@@ -10,10 +10,10 @@ export const MOCKINTOSH_CHAT_CONTEXT = `
 You are running inside Mockintosh and can answer questions about it authoritatively using the following information.
 
 ### What is Mockintosh?
-Mockintosh is a mock operating system in the style of an early Macintosh (1984-era), running in the browser. The entire UI is rendered on a **single <canvas> element** at **512×342 pixels**, scaled to fit the window. The screen uses an indexed pixel buffer with a global palette and a device mode of either **monochrome** or **colors**. There is no anti-aliasing. The design language and many icons are inspired by the original Macintosh GUI; design credit for that language belongs to Susan Kare.
+Mockintosh is a mock operating system in the style of an early Macintosh (1984-era), running in the browser. The entire UI is rendered on a **single <canvas> element** at **512×342 pixels**, scaled to fit the window. The screen is strictly 1-bit — black, white and dither patterns. There is no anti-aliasing. The design language and many icons are inspired by the original Macintosh GUI; design credit for that language belongs to Susan Kare.
 
 ### How is it built?
-- **Frontend:** Vite, pure TypeScript (no React for the OS layer). All rendering, state, and events are handled by the canvas OS layer (BitCanvas, AppContext, WindowManager, etc.).
+- **Frontend:** Vite, pure TypeScript (no React for the OS layer). All rendering, state, and events are handled by the canvas OS layer; the screen is a packed 1-bit QuickDraw BitMap presented on a single canvas.
 - **Backend:** Vercel Edge Functions in the same repo (e.g. /api/chat, /api/checkout, /api/verify-purchase).
 - **Deployment:** Vercel (static site + Edge Functions). Key env: LLM_API_KEY, LLM_API_URL, LLM_MODEL, POLAR_ACCESS_TOKEN.
 - **Who built it:** The project is open source at https://github.com/gustavlrsn/mockintosh. You can say it was built by the Mockintosh project / community and point users to the repo for contributors and setup.
@@ -29,7 +29,7 @@ Third-party app developers use the npm package \`@mockintosh/sdk\` (in this repo
 - **AppContext:** Scoped drawing surface (clipped to window content). Methods: clear, setPixel, getPixel, drawHLine, drawVLine, drawRect, fillRect, fillPattern, invertRect, blit, blitInverted, blitShadowOutline, blitImageData, drawText, drawTextBlock, getWindow (for NewControl + DrawControls), drawTextInput, scrollArea, pushClip/popClip, hitRegion.
 - **AppProps:** Typed OS services — getSprite(id), storage (read/write/list), os (openWindow, closeWindow, showDialog). Optional gated: fetch, openPopup, onPopupMessage (network); loadScript, getGlobal (script). env.origin.
 - **Sprites:** defineSprite(w, h, base64), fromGrid(w, h, rows). Apps export a \`sprites\` record; naming uses app id prefix (e.g. "myapp/icon"). OS sprites: "icon/", "cursor/", "ui/".
-- **Constants/types:** BLACK, WHITE, basic palette constants like RED/GREEN/BLUE, OSEvent, WindowSize, MenubarDefinition, TextInputState, PatternName, FontName, AppManifest. Built-in fonts: "body", "menu", "mono" (plus registered custom Decker font resources by name). Patterns: "black", "white", "checkers", "stripes", "gray25", "gray50", "gray75", "darkCheckers".
+- **Constants/types:** BLACK, WHITE (the only two inks), OSEvent, WindowSize, MenubarDefinition, TextInputState, PatternName, FontName, AppManifest. Built-in fonts: "body", "menu", "mono" (plus registered custom Decker font resources by name). Patterns: "black", "white", "checkers", "stripes", "gray25", "gray50", "gray75", "darkCheckers".
 
 ### Developing a third-party app
 1. Create an app that exports \`default\` (App) and optionally \`sprites\`.

@@ -1,31 +1,9 @@
 /**
- * Sprite definitions for the Spotify Player app.
- * These are owned by the app, not the OS — when SpotifyPlayer becomes a
- * third-party app, these will be exported from the app's ESM bundle.
+ * Sprite definitions for the Spotify Player app. Owned by the app and
+ * registered through `SolidApp.sprites`; a third-party bundle would export
+ * them as `sprites` from its entry module instead.
  */
-import { Sprite, BLACK, WHITE } from "../../lib/canvas/BitCanvas";
-
-function fromGrid(width: number, height: number, rows: string[]): Sprite {
-  const data = new Uint8Array(width * height);
-  const mask = new Uint8Array(width * height);
-  for (let y = 0; y < height; y++) {
-    const row = rows[y] || "";
-    for (let x = 0; x < width; x++) {
-      const ch = row[x] || ".";
-      if (ch === "#") {
-        data[y * width + x] = BLACK;
-        mask[y * width + x] = 1;
-      } else if (ch === ".") {
-        data[y * width + x] = WHITE;
-        mask[y * width + x] = 0;
-      } else {
-        data[y * width + x] = WHITE;
-        mask[y * width + x] = 1;
-      }
-    }
-  }
-  return { width, height, data, mask };
-}
+import { fromGrid, type Sprite } from "@mockintosh/sdk";
 
 const ICON_SPOTIFY = fromGrid(32, 32, [
   "........######..................",

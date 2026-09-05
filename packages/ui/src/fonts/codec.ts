@@ -1,13 +1,5 @@
 import type { DeckerFont } from "./font";
-
-function decodeBase64(data: string): Uint8Array {
-  if (typeof atob === "function") {
-    return new Uint8Array(Array.from(atob(data), (ch) => ch.charCodeAt(0)));
-  }
-  // Node.js fallback
-  const buffer = Buffer.from(data, "base64");
-  return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-}
+import { decodeBase64 } from "../base64";
 
 export function decodeDeckerFont(dataBlock: string, name: string = "unnamed"): DeckerFont {
   if (!dataBlock.startsWith("%%FNT0") && !dataBlock.startsWith("%%FNT1")) {

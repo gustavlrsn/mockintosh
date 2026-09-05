@@ -1,5 +1,6 @@
 import { For, createSignal, type JSX } from "solid-js";
 import { Button, TextInput } from "@mockintosh/ui";
+import { useApp } from "@mockintosh/sdk";
 import { registerApp } from "../src/os/apps";
 import { useWindow } from "../src/os/windowContext";
 
@@ -10,6 +11,7 @@ interface Msg {
 
 export function ChatGippity(_props: Record<string, unknown>): JSX.Element {
   const win = useWindow();
+  const fetch = useApp().fetch!; // present: the app requires "network"
   const [messages, setMessages] = createSignal<Msg[]>([]);
   const [draft, setDraft] = createSignal("");
   const [busy, setBusy] = createSignal(false);
@@ -26,7 +28,7 @@ export function ChatGippity(_props: Record<string, unknown>): JSX.Element {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: [...messages(), { role: "user", content: text }] }),
       });
-      const data = await resp.json();
+      const data = (await resp.json()) as { content?: unknown; message?: unknown };
       const reply = data.content ?? data.message ?? JSON.stringify(data);
       setMessages((m) => [...m, { role: "assistant", content: String(reply) }]);
     } catch {
@@ -62,6 +64,7 @@ export function ChatGippity(_props: Record<string, unknown>): JSX.Element {
 
 registerApp({
   id: "chatgippity",
+  requires: ["network"],
   title: "ChatGippity",
   icon: "icon/computer",
   defaultSize: { width: 320, height: 220 },

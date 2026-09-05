@@ -1,9 +1,9 @@
 /**
  * BitBlt — the core 1-bpp raster engine.
  *
- * Implements all 16 QuickDraw transfer modes operating on flat pixel buffers
- * (1 byte per pixel, `0`=white, `1`=black).  Matches the behaviour described
- * in `reference/QuickDraw/BitBlt.a`.
+ * Implements all 16 QuickDraw transfer modes operating on packed 1-bit
+ * bitmaps (see `packedBits.ts`).  Matches the behaviour described in
+ * `reference/QuickDraw/BitBlt.a`.
  *
  * Internal helper functions (`drawRectToPort`, `drawHSpan`, `drawPixelToPort`)
  * are used by all shape-drawing modules.  `BitBlt` itself is the low-level
@@ -12,6 +12,7 @@
 
 import { BitMap, Pattern, Rect, GrafPort, RgnHandle } from "./types";
 import { globals } from "./globals";
+import { alignPatternRow, blitRowBits, fillRowBits, getBit, setBit } from "./packedBits";
 
 /**
  * Sample a single pixel from an 8-byte packed pattern at screen position
@@ -166,22 +167,53 @@ export function BitBlt(
     dstRect.bottom - dstRect.top
   );
   const usePattern = mode >= 8;
+  if (width <= 0 || height <= 0) return;
+
+  // Rows are independent of each other except for a self-copy that moves
+  // pixels down, where a row must not be overwritten before it is read.
+  const downward = srcBits.baseAddr === dstBits.baseAddr && dstTop > srcTop;
+  for (let i = 0; i < height; i++) {
+    const row = downward ? height - 1 - i : i;
+    const sy = srcTop + row;
+    const dy = dstTop + row;
+    if (usePattern) {
+      fillRowBits(dstBits, dy, dstLeft, dstLeft + width, alignPatternRow(pat[dy & 7], dstBits), mode);
+    } else {
+      blitRowBits(srcBits, sy, srcLeft, dstBits, dy, dstLeft, width, mode);
+    }
+  }
+}
+
+/**
+ * Reference per-pixel form of {@link BitBlt}; what the byte-wide version
+ * must agree with. Kept for tests and for readers of `BitBlt.a`.
+ */
+export function BitBltSlow(
+  srcBits: BitMap,
+  dstBits: BitMap,
+  srcRect: Rect,
+  dstRect: Rect,
+  mode: number,
+  pat: Pattern
+): void {
+  const srcLeft = srcRect.left;
+  const srcTop = srcRect.top;
+  const dstLeft = dstRect.left;
+  const dstTop = dstRect.top;
+  const width = Math.min(srcRect.right - srcRect.left, dstRect.right - dstRect.left);
+  const height = Math.min(srcRect.bottom - srcRect.top, dstRect.bottom - dstRect.top);
+  const usePattern = mode >= 8;
 
   for (let row = 0; row < height; row++) {
     const sy = srcTop + row;
     const dy = dstTop + row;
-    const sRow = (sy - srcBits.bounds.top) * srcBits.rowBytes;
-    const dRow = (dy - dstBits.bounds.top) * dstBits.rowBytes;
     for (let col = 0; col < width; col++) {
       const sx = srcLeft + col;
       const dx = dstLeft + col;
 
-      const src = usePattern
-        ? samplePattern(pat, dx, dy)
-        : srcBits.baseAddr[sRow + (sx - srcBits.bounds.left)];
-      const dst = dstBits.baseAddr[dRow + (dx - dstBits.bounds.left)];
-      dstBits.baseAddr[dRow + (dx - dstBits.bounds.left)] =
-        applyMode(mode, src, dst) & 1;
+      const src = usePattern ? samplePattern(pat, dx, dy) : getBit(srcBits, sx, sy);
+      const dst = getBit(dstBits, dx, dy);
+      setBit(dstBits, dx, dy, applyMode(mode, src, dst));
     }
   }
 }
@@ -202,10 +234,8 @@ export function drawPixelToPort(x: number, y: number, port: GrafPort): void {
   if (y >= Math.min(vis.bottom, clip.bottom, pr.bottom, bnd.bottom)) return;
 
   const patPx = samplePattern(port.pnPat, x, y);
-  const mode = port.pnMode;
-  const idx = (y - bnd.top) * port.portBits.rowBytes + (x - bnd.left);
-  const dst = port.portBits.baseAddr[idx];
-  port.portBits.baseAddr[idx] = applyMode(mode, patPx, dst) & 1;
+  const bits = port.portBits;
+  setBit(bits, x, y, applyMode(port.pnMode, patPx, getBit(bits, x, y)));
 }
 
 /**
@@ -234,23 +264,24 @@ export function drawRectToPort(
   const cl = intersectClip(left, top, right, bottom, port);
   if (!cl) return;
 
-  const pixels = port.portBits.baseAddr;
-  const rowBytes = port.portBits.rowBytes;
-  const bnd = port.portBits.bounds;
+  const bits = port.portBits;
   const hasComplexClip =
     (port.visRgn.rgn.scanlines && port.visRgn.rgn.scanlines.length > 0) ||
     (port.clipRgn.rgn.scanlines && port.clipRgn.rgn.scanlines.length > 0);
 
+  if (!hasComplexClip) {
+    for (let y = cl.top; y < cl.bottom; y++) {
+      fillRowBits(bits, y, cl.left, cl.right, alignPatternRow(pat[y & 7], bits), mode);
+    }
+    return;
+  }
+
   for (let y = cl.top; y < cl.bottom; y++) {
-    const row = (y - bnd.top) * rowBytes;
     for (let x = cl.left; x < cl.right; x++) {
-      if (hasComplexClip) {
-        if (!pointInRegion(port.visRgn, x, y)) continue;
-        if (!pointInRegion(port.clipRgn, x, y)) continue;
-      }
+      if (!pointInRegion(port.visRgn, x, y)) continue;
+      if (!pointInRegion(port.clipRgn, x, y)) continue;
       const src = samplePattern(pat, x, y);
-      const idx = row + (x - bnd.left);
-      pixels[idx] = applyMode(mode, src, pixels[idx]) & 1;
+      setBit(bits, x, y, applyMode(mode, src, getBit(bits, x, y)));
     }
   }
 }
@@ -290,8 +321,7 @@ export function bmSetPixel(
     h >= bm.bounds.right
   )
     return;
-  const idx = (v - bm.bounds.top) * bm.rowBytes + (h - bm.bounds.left);
-  if (idx >= 0 && idx < bm.baseAddr.length) bm.baseAddr[idx] = color & 1;
+  setBit(bm, h, v, color);
 }
 
 /**
@@ -306,7 +336,5 @@ export function bmGetPixel(bm: BitMap, h: number, v: number): number {
     h >= bm.bounds.right
   )
     return 0;
-  const idx = (v - bm.bounds.top) * bm.rowBytes + (h - bm.bounds.left);
-  if (idx < 0 || idx >= bm.baseAddr.length) return 0;
-  return bm.baseAddr[idx] & 1;
+  return getBit(bm, h, v);
 }

@@ -8,9 +8,10 @@
  * update-region tracking.
  */
 
-import { BitMap, Rect, RgnHandle, GrafPort, Pattern, cloneRect } from "./types";
+import { BitMap, Rect, RgnHandle, GrafPort, Pattern, cloneRect, makeRect } from "./types";
 import { globals } from "./globals";
 import { BitBlt, drawRectToPort, pointInRegion } from "./bitblt";
+import { getBit, setBit } from "./packedBits";
 import { srcCopy } from "./constants";
 import { SetRectRgn } from "./regions";
 
@@ -93,12 +94,32 @@ export function CopyBits(
     ((port.visRgn.rgn.scanlines && port.visRgn.rgn.scanlines.length > 0) ||
       (port.clipRgn.rgn.scanlines && port.clipRgn.rgn.scanlines.length > 0));
 
+  // Unscaled, unmasked, rectangular clip: move whole bytes. The source span
+  // that corresponds to the clipped destination must lie inside the source.
+  if (xScale === 1 && yScale === 1 && !hasMask && !hasComplexClip) {
+    const sLeft = srcRect.left + (clipLeft - dstRect.left);
+    const sTop = srcRect.top + (clipTop - dstRect.top);
+    const w = clipRight - clipLeft;
+    const h = clipBottom - clipTop;
+    const sb = srcBits.bounds;
+    if (sLeft >= sb.left && sLeft + w <= sb.right && sTop >= sb.top && sTop + h <= sb.bottom) {
+      BitBlt(
+        srcBits,
+        dstBits,
+        makeRect(sTop, sLeft, sTop + h, sLeft + w),
+        makeRect(clipTop, clipLeft, clipBottom, clipRight),
+        mode,
+        globals.black
+      );
+      return;
+    }
+  }
+
   for (let dy = clipTop; dy < clipBottom; dy++) {
     if (hasMask && maskRgn && !pointInRegion(maskRgn, 0, dy)) continue;
 
     const sy = (srcRect.top + (dy - dstRect.top) * yScale) | 0;
-    const sRow = (sy - srcBits.bounds.top) * srcBits.rowBytes;
-    const dRow = (dy - dstBits.bounds.top) * dstBits.rowBytes;
+    const syInside = sy >= srcBits.bounds.top && sy < srcBits.bounds.bottom;
 
     for (let dx = clipLeft; dx < clipRight; dx++) {
       if (hasMask && maskRgn && !pointInRegion(maskRgn, dx, dy)) continue;
@@ -109,13 +130,10 @@ export function CopyBits(
 
       const sx = (srcRect.left + (dx - dstRect.left) * xScale) | 0;
       const srcPx =
-        sx >= srcBits.bounds.left &&
-        sx < srcBits.bounds.right &&
-        sRow + (sx - srcBits.bounds.left) < srcBits.baseAddr.length
-          ? srcBits.baseAddr[sRow + (sx - srcBits.bounds.left)]
+        syInside && sx >= srcBits.bounds.left && sx < srcBits.bounds.right
+          ? getBit(srcBits, sx, sy)
           : 0;
-      const dIdx = dRow + (dx - dstBits.bounds.left);
-      const dstPx = dstBits.baseAddr[dIdx];
+      const dstPx = getBit(dstBits, dx, dy);
 
       // Modes 4–7 invert the source before the boolean operation
       // (matching the EOR D7,D0 step in the original 68k BitBlt.a).
@@ -138,7 +156,7 @@ export function CopyBits(
           result = s;
       }
 
-      dstBits.baseAddr[dIdx] = result & 1;
+      setBit(dstBits, dx, dy, result);
     }
   }
 }
@@ -169,9 +187,6 @@ export function ScrollRect(
   if (!port) return;
 
   const bm = port.portBits;
-  const sw = dstRect.right - dstRect.left;
-  const sh = dstRect.bottom - dstRect.top;
-  const srcR: Rect = cloneRect(dstRect);
   const dstR: Rect = {
     top: dstRect.top + dv,
     left: dstRect.left + dh,
@@ -184,33 +199,18 @@ export function ScrollRect(
   const cdTop = Math.max(dstR.top, dstRect.top);
   const cdRight = Math.min(dstR.right, dstRect.right);
   const cdBottom = Math.min(dstR.bottom, dstRect.bottom);
-  const csLeft = cdLeft - dh;
-  const csTop = cdTop - dv;
-  const csRight = cdRight - dh;
-  const csBottom = cdBottom - dv;
 
   if (cdLeft < cdRight && cdTop < cdBottom) {
-    const bndTop = bm.bounds.top;
-    const bndLeft = bm.bounds.left;
-    if (dv > 0) {
-      for (let y = cdBottom - 1; y >= cdTop; y--) {
-        const sy = y - dv;
-        bm.baseAddr.copyWithin(
-          (y - bndTop) * bm.rowBytes + (cdLeft - bndLeft),
-          (sy - bndTop) * bm.rowBytes + (csLeft - bndLeft),
-          (sy - bndTop) * bm.rowBytes + (csRight - bndLeft)
-        );
-      }
-    } else {
-      for (let y = cdTop; y < cdBottom; y++) {
-        const sy = y - dv;
-        bm.baseAddr.copyWithin(
-          (y - bndTop) * bm.rowBytes + (cdLeft - bndLeft),
-          (sy - bndTop) * bm.rowBytes + (csLeft - bndLeft),
-          (sy - bndTop) * bm.rowBytes + (csRight - bndLeft)
-        );
-      }
-    }
+    // A self-copy; BitBlt orders the rows so none is overwritten before it
+    // is read, and blitRowBits snapshots a row that shifts onto itself.
+    BitBlt(
+      bm,
+      bm,
+      makeRect(cdTop - dv, cdLeft - dh, cdBottom - dv, cdRight - dh),
+      makeRect(cdTop, cdLeft, cdBottom, cdRight),
+      srcCopy,
+      globals.black
+    );
   }
 
   // Erase the revealed (update) region using bkPat

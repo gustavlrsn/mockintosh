@@ -128,19 +128,15 @@ export function cloneRect(r: Rect): Rect {
 // -------------------------------------------------------------------------
 
 /**
- * A 1-bit-per-pixel off-screen or on-screen bitmap.
- *
- * In the original Mac toolbox this was a packed bitmap (1 bit per pixel,
- * padded to 2-byte row boundaries).  Here we use **1 byte per pixel** for
- * simplicity — `0` = white, `1` = black.
- *
- * `rowBytes` is the number of pixel columns in the buffer (i.e. the stride),
- * not a byte count.
+ * A 1-bit-per-pixel off-screen or on-screen bitmap, packed exactly as on the
+ * original Macintosh: 8 pixels per byte, most-significant bit leftmost,
+ * `1` = black. Access pixels through `getBit` / `setBit` in `packedBits.ts`;
+ * allocate with `newBitMap`.
  */
 export interface BitMap {
-  /** Flat pixel buffer — 1 byte per pixel, `0`=white, `1`=black. */
+  /** Packed pixel rows, `rowBytes` bytes apart. */
   baseAddr: Uint8Array;
-  /** Row stride in pixels (not bytes). */
+  /** Row stride in **bytes** (≥ ceil(width / 8)). */
   rowBytes: number;
   /** Coordinate space of this bitmap (origin may be non-zero). */
   bounds: Rect;

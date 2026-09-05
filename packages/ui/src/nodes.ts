@@ -2,6 +2,9 @@
 // Layout style (Yoga-compatible subset)
 // -------------------------------------------------------------------------
 
+import type { GrafPort } from "@mockintosh/quickdraw";
+import type { Sprite } from "./sprite";
+
 export interface LayoutStyle {
   width?: number | `${number}%`;
   height?: number | `${number}%`;
@@ -180,10 +183,13 @@ export interface HitRect {
 // Intrinsic element prop types
 // -------------------------------------------------------------------------
 
+/** A 1-bit pixel value: `0` = white, `1` = black. The screen has no other colours. */
+export type Ink = 0 | 1;
+
 export interface BoxProps extends LayoutStyle, EventHandlers {
-  /** Solid color (0=white, 1=black, 2+ palette) or dither pattern name */
-  background?: number | PatternName;
-  borderColor?: number;
+  /** Solid ink or dither pattern name */
+  background?: Ink | PatternName;
+  borderColor?: Ink;
   /** default: "solid" */
   borderStyle?: "solid" | "dotted" | "dashed";
   borderRadius?: number;
@@ -205,10 +211,9 @@ export type TextVerticalAlign = "top" | "middle" | "bottom";
 
 export interface TextProps extends LayoutStyle, EventHandlers {
   font?: string;
-  /** 0=white, 1=black */
-  color?: number;
-  /** Solid background color behind text (0=white, 1=black) */
-  background?: number;
+  color?: Ink;
+  /** Solid background behind the text */
+  background?: Ink;
   /**
    * Horizontal alignment of each line within this node's content box
    * (CSS `text-align`). Distinct from `alignSelf`, which positions the node
@@ -227,16 +232,8 @@ export interface TextProps extends LayoutStyle, EventHandlers {
   children?: string;
 }
 
-export interface ImageSource {
-  width: number;
-  height: number;
-  /** 1 byte per pixel: 0=white, 1=black */
-  data: Uint8Array;
-  mask?: Uint8Array;
-}
-
 export interface ImageProps extends LayoutStyle, EventHandlers {
-  src: ImageSource;
+  src: Sprite;
   mode?: "normal" | "inverted" | "outline";
 }
 
@@ -248,10 +245,32 @@ export interface RasterPaintRect {
 }
 
 /**
- * Immediate-mode paint callback. `port` is the current QuickDraw GrafPort;
- * typed loosely so nodes.ts does not import the QD package.
+ * What a `<raster>` gets handed each frame. Pixel access goes through this
+ * surface so apps never depend on how the framebuffer is laid out in memory
+ * (it is packed 1 bpp — see `packedBits.ts` in QuickDraw).
+ *
+ * `setPixel` / `blitPixels` / `fill` take raster-local coordinates and clip
+ * to the raster. For anything more, `port` is the current QuickDraw port
+ * (already clipped to `rect`); offset QuickDraw coordinates by `rect.x` /
+ * `rect.y`.
  */
-export type RasterPaintFn = (port: unknown, rect: RasterPaintRect) => void;
+export interface RasterSurface {
+  readonly port: GrafPort;
+  /** The raster's box in port coordinates. */
+  readonly rect: RasterPaintRect;
+  /** Set one pixel; out-of-range writes are ignored. */
+  setPixel(x: number, y: number, ink: Ink): void;
+  /**
+   * Copy a 1-byte-per-pixel buffer (`0` = white, non-zero = black, rows
+   * `width` apart) into the raster with its top-left at local `(x, y)`.
+   */
+  blitPixels(pixels: Uint8Array, width: number, height: number, x?: number, y?: number): void;
+  /** Paint the whole raster one ink. */
+  fill(ink: Ink): void;
+}
+
+/** Immediate-mode paint callback for `<raster onPaint>`. */
+export type RasterPaintFn = (surface: RasterSurface) => void;
 
 export interface RasterProps extends LayoutStyle, EventHandlers {
   onPaint?: RasterPaintFn;

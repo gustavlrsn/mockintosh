@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import { FileSystem, InMemoryBackend, MIME } from "@mockintosh/fs";
 import { bootstrapFileSystem, STARTUP_VOLUME_NAME } from "./fsBootstrap";
 import { createAppStorage } from "./appStorage";
-import { loadSystemPreferences, systemPreferences, updateSystemPreferences } from "./systemPreferences";
-import { getColorMode } from "../../lib/canvas/ColorSystem";
 
 async function bootedFS() {
   const fs = await FileSystem.open({ backend: new InMemoryBackend(), persistDelayMs: 0 });
@@ -34,30 +32,6 @@ describe("bootstrapFileSystem", () => {
     expect(fs.locate("trash")?.name).toBe("Bin");
     expect(fs.locate("system")).toBeDefined();
     expect(fs.locate("preferences")).toBeDefined();
-  });
-});
-
-describe("systemPreferences", () => {
-  it("applies and persists to System Folder/Preferences, and reloads from there", async () => {
-    const backend = new InMemoryBackend();
-    const fs = await FileSystem.open({ backend, persistDelayMs: 0 });
-    await bootstrapFileSystem(fs);
-
-    await loadSystemPreferences(fs); // nothing stored yet → defaults
-    const initial = systemPreferences.colorMode;
-    const flipped = initial === "colors" ? "monochrome" : "colors";
-
-    await updateSystemPreferences(fs, { colorMode: flipped });
-    expect(systemPreferences.colorMode).toBe(flipped);
-    expect(getColorMode()).toBe(flipped);
-    const prefs = fs.locate("preferences")!;
-    expect(fs.child(prefs.id, "System Preferences")).toMatchObject({ kind: "file", type: MIME.json });
-
-    await fs.flush();
-    const reopened = await FileSystem.open({ backend, persistDelayMs: 0 });
-    await loadSystemPreferences(reopened);
-    expect(systemPreferences.colorMode).toBe(flipped);
-    expect(getColorMode()).toBe(flipped);
   });
 });
 

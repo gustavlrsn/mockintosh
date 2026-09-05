@@ -22,20 +22,22 @@ import { measureText } from "./fonts/bridge";
 import { createPointerDispatcher, type PointerDispatcher, type PointerType } from "./pointer";
 import type { CanvasNode, Modifiers } from "./nodes";
 import type { FocusManager } from "./focus";
-import type { GrafPort } from "@mockintosh/quickdraw";
+import { bitMapHeight, bitMapWidth, type BitMap, type GrafPort } from "@mockintosh/quickdraw";
 import type { JSX } from "solid-js";
 import { createComponent as solidCreateComponent } from "solid-js";
+import { UIServicesContext, type UIServices } from "./services";
 
 export interface UIConfig {
-  pixels: Uint8Array;
-  width: number;
-  height: number;
+  /** The packed 1-bit framebuffer to draw into; the tree fills its bounds. */
+  screen: BitMap;
   /**
    * Called whenever the Solid tree changes (property update, node insert/remove,
    * text change). The host should schedule a repaint when this fires.
    * Defaults to a no-op if not provided.
    */
   scheduleRender?: () => void;
+  /** Host services components may use (clipboard, …). All optional. */
+  services?: UIServices;
 }
 
 export interface UIInstance {
@@ -47,7 +49,7 @@ export interface UIInstance {
 
   /**
    * Run one frame: compute layout → draw.
-   * The host calls this every dirty frame and flushes `pixels` to screen.
+   * The host calls this every dirty frame and presents `screen` on the display.
    */
   frame(): void;
 
@@ -78,7 +80,7 @@ export interface UIInstance {
 
   readonly root: CanvasNode;
   readonly focusManager: FocusManager;
-  /** The GrafPort that drawTree paints into — same pixels as the host buffer. */
+  /** The GrafPort that drawTree paints into — its portBits is `config.screen`. */
   readonly port: GrafPort;
 }
 
@@ -90,14 +92,17 @@ const DEFAULT_MODIFIERS: Modifiers = {
 };
 
 export function createUI(config: UIConfig): UIInstance {
-  const { pixels, width, height } = config;
+  const { screen } = config;
+  const services: UIServices = config.services ?? {};
+  const width = bitMapWidth(screen);
+  const height = bitMapHeight(screen);
   const scheduleRender = config.scheduleRender ?? (() => {});
 
   _setRepaintHook(scheduleRender);
 
   installFontBridge();
 
-  const drawCtx = createDrawContext(pixels, width, height);
+  const drawCtx = createDrawContext(screen);
 
   const root = createNode("_root");
   root.style.width = width;
@@ -123,13 +128,18 @@ export function createUI(config: UIConfig): UIInstance {
 
       const cleanup = render(
         () =>
-          solidCreateComponent(MeasureContext.Provider, {
-            value: measureApi,
+          solidCreateComponent(UIServicesContext.Provider, {
+            value: services,
             get children() {
-              return solidCreateComponent(FocusContext.Provider, {
-                value: focusContextValue,
+              return solidCreateComponent(MeasureContext.Provider, {
+                value: measureApi,
                 get children() {
-                  return component();
+                  return solidCreateComponent(FocusContext.Provider, {
+                    value: focusContextValue,
+                    get children() {
+                      return component();
+                    },
+                  });
                 },
               });
             },

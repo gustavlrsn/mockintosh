@@ -69,8 +69,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: [
+      "packages/quickdraw/tests/**/*.test.ts",
       "packages/ui/tests/**/*.test.ts",
       "packages/fs/tests/**/*.test.ts",
+      "packages/print/tests/**/*.test.ts",
       "src/os/**/*.test.ts",
     ],
   },

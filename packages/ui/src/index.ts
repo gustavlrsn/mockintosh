@@ -3,6 +3,14 @@
 // -------------------------------------------------------------------------
 export { createUI } from "./ui";
 export type { UIInstance, UIConfig } from "./ui";
+export { useUIServices } from "./services";
+export type { UIServices, UIClipboard } from "./services";
+
+// -------------------------------------------------------------------------
+// Sprites — the 1-bit image asset format consumed by <image>
+// -------------------------------------------------------------------------
+export { BLACK, WHITE, defineSprite, fromGrid } from "./sprite";
+export type { Sprite } from "./sprite";
 
 // -------------------------------------------------------------------------
 // Types
@@ -11,6 +19,7 @@ export type {
   LayoutStyle,
   LayoutRect,
   PatternName,
+  Ink,
   BoxProps,
   TextProps,
   TextAlign,
@@ -19,7 +28,7 @@ export type {
   RasterProps,
   RasterPaintFn,
   RasterPaintRect,
-  ImageSource,
+  RasterSurface,
   CanvasNode,
   EventHandlers,
   MouseEventHandlers,
@@ -33,7 +42,7 @@ export type {
 
 export { createPointerDispatcher, hitTest } from "./pointer";
 export type { PointerType, PointerDispatcher } from "./pointer";
-export { collectHitRects, createDrawContext, drawTree } from "./draw";
+export { collectHitRects, createDrawContext, drawTree, patternBits } from "./draw";
 
 // -------------------------------------------------------------------------
 // Layout
@@ -63,7 +72,7 @@ export { useMeasure } from "./measure";
 // Font registration (for custom fonts beyond the built-in body/menu/mono)
 // -------------------------------------------------------------------------
 export { registerFont, listFonts, getFont, requireFont } from "./fonts/registry";
-export { measureText } from "./fonts/bridge";
+export { measureText, fontLineHeight, drawString } from "./fonts/bridge";
 export { COMMAND_KEY, CHECK_MARK, BULLET } from "./fonts/extraGlyphs";
 
 // -------------------------------------------------------------------------

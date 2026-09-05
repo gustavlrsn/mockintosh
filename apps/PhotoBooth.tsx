@@ -1,6 +1,5 @@
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { Button } from "@mockintosh/ui";
-import type { GrafPort } from "@mockintosh/quickdraw";
+import { Button, type Ink, type RasterSurface } from "@mockintosh/ui";
 import { registerApp } from "../src/os/apps";
 import { useOS } from "../src/os/context";
 import { useWindow } from "../src/os/windowContext";
@@ -23,24 +22,10 @@ interface Photo {
   timestamp: number;
 }
 
-function paint1bit(
-  portUnknown: unknown,
-  rect: { x: number; y: number; width: number; height: number },
-  pixels: Uint8Array | null,
-  srcW: number,
-  srcH: number,
-  fill: number
-): void {
-  const port = portUnknown as GrafPort;
-  const { baseAddr, rowBytes, bounds } = port.portBits;
-  const w = Math.min(srcW, rect.width);
-  const h = Math.min(srcH, rect.height);
-  for (let y = 0; y < h; y++) {
-    const dstRow = (rect.y + y - bounds.top) * rowBytes - bounds.left;
-    for (let x = 0; x < w; x++) {
-      baseAddr[dstRow + rect.x + x] = pixels ? pixels[y * srcW + x] : fill;
-    }
-  }
+/** Show a PREVIEW-sized 1-byte-per-pixel frame, or a flat `fill` when there is none. */
+function paint1bit(surface: RasterSurface, pixels: Uint8Array | null, fill: Ink): void {
+  if (pixels) surface.blitPixels(pixels, PREVIEW, PREVIEW);
+  else surface.fill(fill);
 }
 
 export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
@@ -208,18 +193,18 @@ export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
         <raster
           width={PREVIEW}
           height={PREVIEW}
-          onPaint={(port, rect) => {
+          onPaint={(surface) => {
             void frame();
             if (flash()) {
-              paint1bit(port, rect, null, PREVIEW, PREVIEW, 0);
+              paint1bit(surface, null, 0);
               return;
             }
             const photo = viewing();
             if (photo) {
-              paint1bit(port, rect, photo.pixels, PREVIEW, PREVIEW, 0);
+              paint1bit(surface, photo.pixels, 0);
               return;
             }
-            paint1bit(port, rect, ditherRef.current?.pixels ?? null, PREVIEW, PREVIEW, 0);
+            paint1bit(surface, ditherRef.current?.pixels ?? null, 0);
           }}
         />
         <Show when={loading()}>
@@ -305,6 +290,7 @@ export function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
 
 registerApp({
   id: "photobooth",
+  requires: ["camera"],
   title: "Photo Booth",
   icon: "icon/photobooth-smr-32",
   defaultSize: { width: PREVIEW, height: PREVIEW + BAR_H },

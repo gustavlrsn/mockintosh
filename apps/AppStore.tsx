@@ -1,10 +1,10 @@
 import { For, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { Button } from "@mockintosh/ui";
+import { useApp, type AppManifest } from "@mockintosh/sdk";
 import { registerApp } from "../src/os/apps";
 import { useOS } from "../src/os/context";
 import { useWindow } from "../src/os/windowContext";
-import { installManifest, installedAppIds } from "../src/os/installedApps";
-import type { AppManifest } from "../lib/canvas/AppLoader";
+import { installedAppIds } from "../src/os/installedApps";
 
 interface RegistryEntry {
   id: string;
@@ -29,6 +29,7 @@ function sdkMajor(sdk: string): number {
 export function AppStore(_props: Record<string, unknown>): JSX.Element {
   const os = useOS();
   const win = useWindow();
+  const fetch = useApp().fetch!; // present: the app requires "network"
   const [entries, setEntries] = createSignal<RegistryEntry[]>([]);
   // Reactive: installing (or trashing a .app in the Finder) updates the list.
   const installed = createMemo(() => new Set(installedAppIds(os.fs)));
@@ -39,7 +40,7 @@ export function AppStore(_props: Record<string, unknown>): JSX.Element {
     fetch(REGISTRY_URL)
       .then((r) => r.json())
       .then((data) => {
-        const apps = ((data.apps ?? []) as RegistryEntry[]).filter(
+        const apps = ((data as { apps?: RegistryEntry[] }).apps ?? []).filter(
           (e) => sdkMajor(e.sdk) >= 2
         );
         setEntries(apps);
@@ -49,6 +50,11 @@ export function AppStore(_props: Record<string, unknown>): JSX.Element {
   });
 
   async function install(e: RegistryEntry): Promise<void> {
+    const installer = os.installer;
+    if (!installer) {
+      setStatus("This Macintosh cannot install apps.");
+      return;
+    }
     if (!e.entry) {
       setStatus("This catalog entry has no bundle URL.");
       return;
@@ -66,7 +72,7 @@ export function AppStore(_props: Record<string, unknown>): JSX.Element {
         permissions: e.permissions ?? [],
         entry: e.entry,
       };
-      await installManifest(os.fs, manifest);
+      await installer.install(manifest);
       setStatus(`Installed ${e.title}.`);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Install failed.");
@@ -110,6 +116,7 @@ export function AppStore(_props: Record<string, unknown>): JSX.Element {
 
 registerApp({
   id: "appstore",
+  requires: ["network"],
   title: "App Store",
   icon: "icon/appstore-smr-32x32",
   defaultSize: { width: 320, height: 280 },

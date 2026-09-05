@@ -1,0 +1,23 @@
+{
+  "//": "Platform-independence check: the OS core, the toolbox, and the @mockintosh packages must compile with no DOM types. Only src/platform/<name>/ and app code may use browser APIs.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["es2022"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": [
+    "src/os/**/*.ts",
+    "src/os/**/*.tsx",
+    "src/platform/types.ts",
+    "src/platform/core-env.d.ts",
+    "packages/quickdraw/src/**/*.ts",
+    "packages/ui/src/**/*.ts",
+    "packages/ui/src/**/*.tsx",
+    "packages/fs/src/**/*.ts",
+    "packages/sdk/src/**/*.ts",
+    "packages/print/src/**/*.ts",
+    "packages/markdown/src/**/*.ts"
+  ],
+  "exclude": ["**/*.test.ts", "node_modules", "dist"]
+}

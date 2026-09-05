@@ -3,7 +3,7 @@ import { computeLayout } from "../src/layout";
 import { createDrawContext, drawTree } from "../src/draw";
 import { createNode } from "../src/nodes";
 import type { MeasureFunc } from "../src/layout";
-import type { GrafPort } from "@mockintosh/quickdraw";
+import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw";
 
 const noMeasure: MeasureFunc = () => ({ width: 0, height: 0 });
 const W = 16;
@@ -11,36 +11,60 @@ const H = 16;
 
 describe("raster onPaint", () => {
   it("invokes onPaint with the laid-out rect and writes pixels", () => {
-    const pixels = new Uint8Array(W * H);
-    const ctx = createDrawContext(pixels, W, H);
+    const screen = newBitMap(W, H);
+    const ctx = createDrawContext(screen);
     const root = createNode("_root");
     root.style = { width: W, height: H };
     const raster = createNode("raster");
     raster.style = { position: "absolute", left: 2, top: 3, width: 4, height: 5 };
-    raster.props.onPaint = (_port: unknown, rect) => {
-      expect(rect).toEqual({ x: 2, y: 3, width: 4, height: 5 });
-      const port = _port as GrafPort;
-      const { baseAddr, rowBytes } = port.portBits;
-      for (let y = rect.y; y < rect.y + rect.height; y++) {
-        for (let x = rect.x; x < rect.x + rect.width; x++) {
-          baseAddr[y * rowBytes + x] = 1;
-        }
-      }
+    raster.props.onPaint = (surface) => {
+      expect(surface.rect).toEqual({ x: 2, y: 3, width: 4, height: 5 });
+      surface.fill(1);
+      // Out-of-range writes are clipped, not wrapped into neighbouring rows.
+      surface.setPixel(-1, 0, 1);
+      surface.setPixel(4, 0, 1);
     };
     raster.parent = root;
     root.children = [raster];
     computeLayout(root, W, H, noMeasure);
     drawTree(root, ctx);
+    const pixels = pixelsFromBitMap(screen);
     expect(pixels[3 * W + 2]).toBe(1);
     expect(pixels[7 * W + 5]).toBe(1);
     expect(pixels[0]).toBe(0);
+    expect(pixels[3 * W + 1]).toBe(0);
+    expect(pixels[3 * W + 6]).toBe(0);
+  });
+
+  it("blitPixels copies a 1-byte-per-pixel buffer, clipped to the raster", () => {
+    const screen = newBitMap(W, H);
+    const ctx = createDrawContext(screen);
+    const root = createNode("_root");
+    root.style = { width: W, height: H };
+    const raster = createNode("raster");
+    raster.style = { position: "absolute", left: 4, top: 4, width: 4, height: 4 };
+    raster.props.onPaint = (surface) => {
+      // 3×3 checker placed at (2, 2): its lower-right spills past the raster.
+      const src = new Uint8Array([1, 0, 1, 0, 1, 0, 1, 0, 1]);
+      surface.blitPixels(src, 3, 3, 2, 2);
+    };
+    raster.parent = root;
+    root.children = [raster];
+    computeLayout(root, W, H, noMeasure);
+    drawTree(root, ctx);
+    const pixels = pixelsFromBitMap(screen);
+    expect(pixels[6 * W + 6]).toBe(1);
+    expect(pixels[6 * W + 7]).toBe(0);
+    expect(pixels[7 * W + 7]).toBe(1);
+    expect(pixels[8 * W + 8]).toBe(0); // clipped
+    expect(pixels[6 * W + 8]).toBe(0); // clipped
   });
 });
 
 describe("border protection", () => {
   it("overflow=hidden clips children to the padding box, so the border survives", () => {
-    const pixels = new Uint8Array(W * H);
-    const ctx = createDrawContext(pixels, W, H);
+    const screen = newBitMap(W, H);
+    const ctx = createDrawContext(screen);
     const root = createNode("_root");
     root.style = { width: W, height: H };
     const frame = createNode("box");
@@ -57,6 +81,7 @@ describe("border protection", () => {
     root.children = [frame];
     computeLayout(root, W, H, noMeasure);
     drawTree(root, ctx);
+    const pixels = pixelsFromBitMap(screen);
     // Border pixels intact
     expect(pixels[0]).toBe(1);           // top-left corner
     expect(pixels[5]).toBe(1);           // top edge
@@ -67,8 +92,8 @@ describe("border protection", () => {
   });
 
   it("a child at left=0 in a bordered box does not cover the border", () => {
-    const pixels = new Uint8Array(W * H);
-    const ctx = createDrawContext(pixels, W, H);
+    const screen = newBitMap(W, H);
+    const ctx = createDrawContext(screen);
     const root = createNode("_root");
     root.style = { width: W, height: H };
     const frame = createNode("box");
@@ -83,27 +108,31 @@ describe("border protection", () => {
     root.children = [frame];
     computeLayout(root, W, H, noMeasure);
     drawTree(root, ctx);
+    const pixels = pixelsFromBitMap(screen);
     expect(pixels[0]).toBe(1);
     expect(pixels[1 * W + 0]).toBe(1);
     expect(pixels[1 * W + 1]).toBe(0);
   });
 });
 
-describe("palette color fill", () => {
-  it("writes palette index 3 into the buffer", () => {
-    const pixels = new Uint8Array(W * H);
-    const ctx = createDrawContext(pixels, W, H);
+describe("ink fill", () => {
+  it("paints a black box as 1s and leaves the rest white", () => {
+    const screen = newBitMap(W, H);
+    const ctx = createDrawContext(screen);
     const root = createNode("_root");
     root.style = { width: W, height: H };
     const box = createNode("box");
     box.style = { width: 4, height: 4 };
-    box.props.background = 3;
+    box.props.background = 1;
     box.parent = root;
     root.children = [box];
     computeLayout(root, W, H, noMeasure);
     drawTree(root, ctx);
-    expect(pixels[0]).toBe(3);
-    expect(pixels[3 * W + 3]).toBe(3);
+    const pixels = pixelsFromBitMap(screen);
+    expect(pixels[0]).toBe(1);
+    expect(pixels[3 * W + 3]).toBe(1);
     expect(pixels[5]).toBe(0);
+    // Strictly 1-bit: nothing but 0 and 1 ever lands in the buffer.
+    expect(pixels.every((p) => p === 0 || p === 1)).toBe(true);
   });
 });

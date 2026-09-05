@@ -3,7 +3,7 @@ import { readdir, writeFile } from "fs/promises";
 import { join, basename, extname } from "path";
 
 const PUBLIC = join(import.meta.dirname!, "..", "public");
-const OUT_DIR = join(import.meta.dirname!, "..", "lib", "canvas", "sprites");
+const OUT_DIR = join(import.meta.dirname!, "..", "src", "os", "sprites");
 
 interface SpriteGroup {
   dir: string;
@@ -13,7 +13,6 @@ interface SpriteGroup {
 
 const GROUPS: SpriteGroup[] = [
   { dir: join(PUBLIC, "icons"), prefix: "icon", outFile: "icons.ts" },
-  { dir: join(PUBLIC, "cursors"), prefix: "cursor", outFile: "cursors.ts" },
 ];
 
 const ROOT_SPRITES = ["eaten_apple.png", "user2.png", "microdesktop-disk.png"];
@@ -77,8 +76,7 @@ async function convertGroup(group: SpriteGroup): Promise<string> {
     .sort();
 
   const lines: string[] = [
-    `import { Sprite } from "../BitCanvas";`,
-    `import { defineSprite } from "../../toolbox/ResourceManager";`,
+    `import { defineSprite, type Sprite } from "@mockintosh/ui";`,
     ``,
   ];
 
@@ -111,8 +109,7 @@ async function convertGroup(group: SpriteGroup): Promise<string> {
 
 async function convertRootSprites(): Promise<string> {
   const lines: string[] = [
-    `import { Sprite } from "../BitCanvas";`,
-    `import { defineSprite } from "../../toolbox/ResourceManager";`,
+    `import { defineSprite, type Sprite } from "@mockintosh/ui";`,
     ``,
   ];
 
@@ -145,8 +142,7 @@ async function convertRootSprites(): Promise<string> {
 
 async function convertChromeSprites(): Promise<string> {
   const lines: string[] = [
-    `import { Sprite } from "../BitCanvas";`,
-    `import { defineSprite } from "../../toolbox/ResourceManager";`,
+    `import { defineSprite, type Sprite } from "@mockintosh/ui";`,
     ``,
   ];
 
