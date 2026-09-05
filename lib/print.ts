@@ -1,5 +1,6 @@
-import EscPosEncoder from "esc-pos-encoder";
-import PixelFontCanvas from "@/lib/PixelFontCanvas";
+import ReceiptPrinterEncoder from "@point-of-sale/receipt-printer-encoder";
+import { BitCanvas } from "./canvas/BitCanvas";
+import { drawBitmapText } from "./canvas/fontAdapter";
 declare global {
   interface Window {
     device: USBDevice; // Replace 'any' with the correct type for your 'device' property
@@ -353,17 +354,24 @@ export const printClickHandler = async (
   const ctx = canvasImage.getContext("2d");
 
   ctx?.putImageData(scaledImageData, 0, 0);
-  PixelFontCanvas.drawText(canvasImage, `${caption}`, {
-    font: "Redaction35-Regular",
-    x: 0,
-    y: scaledImageData.height + 44,
-    scale: 2,
-    width: newWidth,
-    align: "center",
-    tint: "black",
-  });
+  if (ctx && caption) {
+    const overlayCanvas = document.createElement("canvas");
+    overlayCanvas.width = newWidth;
+    overlayCanvas.height = newHeight;
+    const overlayCtx = overlayCanvas.getContext("2d");
+    if (overlayCtx) {
+      const bitCanvas = new BitCanvas(newWidth, newHeight);
+      drawBitmapText(bitCanvas, `${caption}`, 0, scaledImageData.height + 44, {
+        font: "menu",
+        width: newWidth,
+        align: "center",
+      });
+      bitCanvas.flush(overlayCtx);
+      ctx.drawImage(overlayCanvas, 0, 0);
+    }
+  }
 
-  const encoder = new EscPosEncoder({
+  const encoder = new ReceiptPrinterEncoder({
     imageMode: "raster",
   });
 
@@ -393,7 +401,7 @@ export const printPanorama = async (imageData) => {
 
   ctx?.putImageData(imageData, 0, 0);
 
-  const encoda = new EscPosEncoder({
+  const encoda = new ReceiptPrinterEncoder({
     imageMode: "raster",
   });
 
@@ -420,7 +428,7 @@ export const printPortrait = async (imageData) => {
 
   ctx?.putImageData(imageData, 0, 0);
 
-  const encoda = new EscPosEncoder({
+  const encoda = new ReceiptPrinterEncoder({
     imageMode: "raster",
   });
 
@@ -450,7 +458,7 @@ export const printFourPortrait = async (imageData) => {
   ctx?.putImageData(imageData, 0, 288);
   ctx?.putImageData(imageData, 288, 288);
 
-  const encoda = new EscPosEncoder({
+  const encoda = new ReceiptPrinterEncoder({
     imageMode: "raster",
   });
 
@@ -469,7 +477,7 @@ export const adjustPaper = async (adjustment) => {
   const rest = dots % 255;
   const fullRounds = Math.floor(dots / 255);
 
-  const encoder = new EscPosEncoder({
+  const encoder = new ReceiptPrinterEncoder({
     imageMode: "raster",
   });
 

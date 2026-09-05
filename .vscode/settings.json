@@ -1,0 +1,6 @@
+{
+  "interactiveGitLog.repositoryPath": "/Users/gustav/code/mockintosh",
+  "files.readonlyInclude": {
+    "reference/**": true
+  }
+}

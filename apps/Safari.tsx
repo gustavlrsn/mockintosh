@@ -1,0 +1,77 @@
+import { createSignal, type JSX } from "solid-js";
+import { Button, TextInput } from "@mockintosh/ui";
+import { registerApp } from "../src/os/apps";
+import { useWindow } from "../src/os/windowContext";
+
+type Mode = "markdown" | "stream" | "textweb";
+
+export function Safari(props: Record<string, unknown>): JSX.Element {
+  const win = useWindow();
+  const [url, setUrl] = createSignal((props.url as string) ?? "https://example.com");
+  const [body, setBody] = createSignal("Enter a URL and press Go.");
+  const [mode, setMode] = createSignal<Mode>((props.mode as Mode) || "markdown");
+  const [busy, setBusy] = createSignal(false);
+
+  async function go(): Promise<void> {
+    const target = url().trim();
+    if (!target) return;
+    setBusy(true);
+    try {
+      const resp = await fetch("/api/browse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: target, mode: mode() }),
+      });
+      const text = await resp.text();
+      setBody(text.slice(0, 8000) || "(empty)");
+    } catch {
+      setBody("Failed to load page.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <box width={win.width()} height={win.height()} flexDirection="column" background={0}>
+      <box height={20} flexDirection="row" gap={4} padding={2} alignItems="center">
+        <TextInput value={url()} onChange={setUrl} onSubmit={() => void go()} width={win.width() - 80} />
+        <Button label={busy() ? "…" : "Go"} onClick={() => void go()} disabled={busy()} />
+      </box>
+      <box height={16} flexDirection="row" gap={4} padding={2}>
+        <Button label="MD" onClick={() => setMode("markdown")} />
+        <Button label="Stream" onClick={() => setMode("stream")} />
+        <Button label="Textweb" onClick={() => setMode("textweb")} />
+        <text font="body">{mode()}</text>
+      </box>
+      <box overflow="scroll" flexGrow={1} padding={6}>
+        <text font="body" wrap>
+          {body()}
+        </text>
+      </box>
+    </box>
+  );
+}
+
+registerApp({
+  id: "safari",
+  title: "Safari",
+  icon: "icon/safari",
+  defaultSize: { width: 400, height: 240 },
+  scrollable: true,
+  Component: Safari,
+});
+
+registerApp({
+  id: "safari-stream",
+  title: "Safari Stream",
+  icon: "icon/safari",
+  defaultSize: { width: 400, height: 240 },
+  Component: (p) => <Safari {...p} mode="stream" />,
+});
+
+registerApp({
+  id: "safari-textweb",
+  title: "Safari Textweb",
+  icon: "icon/safari",
+  defaultSize: { width: 400, height: 240 },
+  Component: (p) => <Safari {...p} mode="textweb" />,
+});

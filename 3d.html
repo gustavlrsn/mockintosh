@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mockintosh — 3D</title>
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #ffffff; min-height: 100vh; overflow: hidden; }
+      #root { position: absolute; left: -9999px; top: -9999px; }
+      #three-root { width: 100vw; height: 100vh; }
+      canvas { display: block; }
+      .controls {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        z-index: 10;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .ctrl-btn {
+        height: 40px;
+        border: none;
+        border-radius: 20px;
+        background: #fff;
+        color: #111;
+        font-size: 13px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        transition: background 0.2s, color 0.2s;
+        padding: 0 14px;
+        font-family: system-ui, sans-serif;
+      }
+      .ctrl-btn:hover { background: #eee; }
+      #power-btn { width: 40px; padding: 0; border-radius: 50%; color: #0a0; font-size: 20px; }
+      #power-btn.off { color: #999; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div class="controls">
+      <button id="power-btn" class="ctrl-btn" title="Power">&#x23FB;</button>
+    </div>
+    <div id="three-root"></div>
+    <script type="module" src="/src/3d/main.ts"></script>
+  </body>
+</html>

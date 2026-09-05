@@ -1,0 +1,64 @@
+import type { JSX } from "solid-js";
+import { Button, Checkbox, TextInput, createSignal } from "@mockintosh/ui";
+import { registerApp } from "../src/os/apps";
+import { useWindow } from "../src/os/windowContext";
+import type { GrafPort } from "@mockintosh/quickdraw";
+
+export function Testing(_props: Record<string, unknown>): JSX.Element {
+  const win = useWindow();
+  const [count, setCount] = createSignal(0);
+  const [checked, setChecked] = createSignal(false);
+  const [name, setName] = createSignal("System 7");
+
+  return (
+    <box
+      width={win.width()}
+      height={win.height()}
+      padding={10}
+      flexDirection="column"
+      gap={8}
+      overflow="scroll"
+      background={0}
+    >
+      <text font="menu">@mockintosh/ui gallery</text>
+      <text font="body">{`Signals: ${count()}  ${checked() ? "on" : "off"}  ${name()}`}</text>
+      <box flexDirection="row" gap={8}>
+        <Button label="Increment" onClick={() => setCount((c) => c + 1)} />
+        <Button label="Reset" onClick={() => setCount(0)} />
+      </box>
+      <Checkbox label="Enable dither" checked={checked()} onChange={setChecked} />
+      <TextInput value={name()} onChange={setName} width={160} />
+      <box flexDirection="row" gap={4}>
+        <box width={16} height={16} background={1} />
+        <box width={16} height={16} background={2} borderColor={1} borderWidth={1} />
+        <box width={16} height={16} background={4} borderColor={1} borderWidth={1} />
+        <box width={16} height={16} background={7} borderColor={1} borderWidth={1} />
+      </box>
+      <raster
+        width={80}
+        height={24}
+        onPaint={(portUnknown, rect) => {
+          const port = portUnknown as GrafPort;
+          const { baseAddr, rowBytes, bounds } = port.portBits;
+          for (let y = 0; y < rect.height; y++) {
+            for (let x = 0; x < rect.width; x++) {
+              const gx = rect.x + x;
+              const gy = rect.y + y;
+              baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] =
+                (x + y + count()) % 4 === 0 ? 1 : 0;
+            }
+          }
+        }}
+      />
+    </box>
+  );
+}
+
+registerApp({
+  id: "testing",
+  title: "Testing",
+  icon: "icon/computer",
+  defaultSize: { width: 280, height: 220 },
+  scrollable: true,
+  Component: Testing,
+});

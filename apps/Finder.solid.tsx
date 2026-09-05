@@ -1,0 +1,1468 @@
+/**
+ * Finder.solid.tsx — Solid port of the Finder desktop and folder windows.
+ *
+ * Exports:
+ *   FinderDesktop         — desktop icon area
+ *   FinderFolderContent   — icon grid inside a folder window
+ *   FinderDragGhost       — drag ghost (render as last child of OSRoot)
+ *   buildFinderMenus      — Finder menubar for the desktop or a folder
+ *   handleGlobalMouseUp   — icon drag release (drop into folder windows / desktop)
+ *
+ * Importing this module registers the Finder app (`FINDER_APP_ID`).
+ */
+
+import { JSX, For, Show, createSignal, createMemo, createEffect, onCleanup, type Accessor } from "solid-js";
+import { measureText, TextInput, type MouseEventHandlers } from "@mockintosh/ui";
+import { useOS } from "../src/os/context";
+import {
+  openOSWindow,
+  updateOSWindow,
+  setAppMenus,
+  getFsVersion,
+  notifyFsChanged,
+  getWindows,
+  FINDER_APP_ID,
+  type OSWindow,
+} from "../src/os/state";
+import { registerApp } from "../src/os/apps";
+import { useWindow } from "../src/os/windowContext";
+import { FileManager, getIconForNode, ROOT_ID } from "../lib/toolbox/FileManager";
+import type { MenubarDefinition } from "@mockintosh/sdk";
+import { windowContentRect, windowTotalHeight } from "../src/os/windowGeometry";
+
+// ---------------------------------------------------------------------------
+// Layout constants
+// ---------------------------------------------------------------------------
+const ICON_SIZE           = 32;
+const DESKTOP_PADDING_TOP = 8;
+const DESKTOP_ICON_CELL_W = 64;
+const DESKTOP_ICON_CELL_H = 64;
+const FOLDER_ICON_CELL_W  = 80;
+const FOLDER_ICON_CELL_H  = 56;
+const FOLDER_PADDING      = 16;
+const DRAG_THRESHOLD      = 4;
+const LABEL_PAD           = 2;
+const FONT                = "body" as const;
+const RENAME_DELAY_MS     = 350;
+
+/**
+ * Map x within the icon cell to a caret index in `title`, using the same label
+ * geometry and per-glyph hit logic as {@link TextInput}.
+ */
+function labelClickToCharIndex(title: string, lxInCell: number, cellW: number): number {
+  const textW = measureText(title, FONT);
+  const labelW = Math.min(textW + LABEL_PAD * 2, cellW);
+  const labelLeft = Math.max(0, Math.floor((cellW - labelW) / 2));
+  const px = lxInCell - labelLeft - LABEL_PAD;
+  if (px <= 0) return 0;
+  let accumulated = 0;
+  for (let i = 0; i < title.length; i++) {
+    const cw = measureText(title[i], FONT);
+    if (px < accumulated + cw / 2) return i;
+    accumulated += cw;
+  }
+  return title.length;
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface FinderIcon {
+  title: string;
+  img: string;
+  nodeId: string;
+  isDirectory: boolean;
+  isVolume?: boolean;
+  position?: { x: number; y: number };
+  zOrder: number;
+}
+
+interface PositionedIcon {
+  icon: FinderIcon;
+  pos: { x: number; y: number };
+}
+
+type SpriteRef = { width: number; height: number; data: Uint8Array; mask?: Uint8Array } | undefined;
+
+type HitMask = { data: Uint8Array; width: number; height: number };
+
+interface MarqueeState {
+  anchorX: number;
+  anchorY: number;
+  currentX: number;
+  currentY: number;
+}
+
+/**
+ * Rubber-band selection on an empty background. The marquee exists only
+ * while a drag is in progress — a plain press/release never shows one — and
+ * a plain click (no drag) clears the selection.
+ */
+interface MarqueeController {
+  marquee: Accessor<MarqueeState | null>;
+  handlers: Pick<
+    MouseEventHandlers,
+    "onMouseDown" | "onDragStart" | "onDrag" | "onDragEnd" | "onClick"
+  >;
+}
+
+function createMarquee(opts: {
+  onSelect: (m: MarqueeState) => void;
+  onPlainClick: () => void;
+}): MarqueeController {
+  const [marquee, setMarquee] = createSignal<MarqueeState | null>(null);
+  let anchorX = 0;
+  let anchorY = 0;
+  let dragged = false;
+
+  return {
+    marquee,
+    handlers: {
+      onMouseDown: (lx, ly) => {
+        anchorX = lx;
+        anchorY = ly;
+        dragged = false;
+      },
+      onDragStart: (lx, ly) => {
+        dragged = true;
+        setMarquee({ anchorX, anchorY, currentX: lx, currentY: ly });
+      },
+      onDrag: (lx, ly) => {
+        setMarquee({ anchorX, anchorY, currentX: lx, currentY: ly });
+      },
+      onDragEnd: () => {
+        const m = marquee();
+        if (m) opts.onSelect(m);
+        setMarquee(null);
+      },
+      onClick: () => {
+        if (!dragged) opts.onPlainClick();
+        dragged = false;
+      },
+    },
+  };
+}
+
+function marqueeRect(m: MarqueeState): { x: number; y: number; w: number; h: number } {
+  return {
+    x: Math.min(m.anchorX, m.currentX),
+    y: Math.min(m.anchorY, m.currentY),
+    w: Math.abs(m.currentX - m.anchorX),
+    h: Math.abs(m.currentY - m.anchorY),
+  };
+}
+
+function rectsIntersect(
+  ax: number, ay: number, aw: number, ah: number,
+  bx: number, by: number, bw: number, bh: number,
+): boolean {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+// ---------------------------------------------------------------------------
+// Drag state (module-level — shared across all Finder component instances)
+// ---------------------------------------------------------------------------
+
+interface PendingDragCompanion {
+  nodeId: string;
+  img: string;
+  title: string;
+  cellW: number;
+  /** Position relative to the primary icon's cell position. */
+  offsetX: number;
+  offsetY: number;
+  sprite: SpriteRef;
+}
+
+interface PendingDragInfo {
+  nodeId: string;
+  sourceDirectoryId: string;   // FS directory the item lives in
+  img: string;
+  title: string;
+  cellW: number;
+  /** Mouse offset from the icon cell's top-left corner (screen space). */
+  mouseOffsetX: number;
+  mouseOffsetY: number;
+  /** Position of the first onDrag call (for threshold detection). */
+  firstDragX: number;
+  firstDragY: number;
+  thresholdMet: boolean;
+  companions: PendingDragCompanion[];
+}
+
+interface ActiveDragCompanion {
+  nodeId: string;
+  offsetX: number;
+  offsetY: number;
+  outlineData: Uint8Array;
+  outlineW: number;
+  outlineH: number;
+}
+
+interface ActiveDragState {
+  nodeId: string;
+  sourceDirectoryId: string;
+  img: string;
+  title: string;
+  cellW: number;
+  /** Screen position of the icon cell's top-left corner. */
+  ghostX: number;
+  ghostY: number;
+  /** Pre-computed mask outline — drawn as the drag ghost. */
+  outlineData: Uint8Array;
+  outlineW: number;
+  outlineH: number;
+  companions: ActiveDragCompanion[];
+}
+
+let pendingDragInfo: PendingDragInfo | null = null;
+
+export const [finderDrag, setFinderDrag] = createSignal<ActiveDragState | null>(null);
+
+/** nodeId of the folder icon currently highlighted as a drop target. */
+const [dropTargetId, setDropTargetId] = createSignal<string | null>(null);
+
+// ---------------------------------------------------------------------------
+// Ghost outline computation
+// ---------------------------------------------------------------------------
+
+/**
+ * Given a sprite mask (or data if no mask), compute a new Uint8Array where
+ * only the edge pixels (opaque pixel with at least one transparent neighbour)
+ * are set to 1. Used for the drag ghost outline.
+ */
+function computeMaskOutline(mask: Uint8Array, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!mask[i]) continue;
+      // Treat out-of-bounds neighbours as transparent so silhouette pixels
+      // that touch the image edge are correctly included in the outline.
+      const hasTransparentNeighbour =
+        (x === 0     || !mask[i - 1]) ||
+        (x === w - 1 || !mask[i + 1]) ||
+        (y === 0     || !mask[i - w]) ||
+        (y === h - 1 || !mask[i + w]);
+      if (hasTransparentNeighbour) out[i] = 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * Build a single continuous outline that covers both the icon silhouette and
+ * the label rectangle.  Where the two shapes share an edge (icon bottom ↔
+ * label top), the outline is suppressed so the ghost looks like one piece.
+ */
+function buildGhostOutline(
+  sprite: SpriteRef,
+  cellW: number,
+  iconOffsetX: number,
+  labelLeft: number,
+  labelW: number,
+  labelH: number,
+): { data: Uint8Array; w: number; h: number } {
+  const totalH = ICON_SIZE + labelH;
+  const combined = new Uint8Array(cellW * totalH);
+
+  if (sprite) {
+    const src = sprite.mask ?? sprite.data;
+    const sw = Math.min(sprite.width, ICON_SIZE);
+    const sh = Math.min(sprite.height, ICON_SIZE);
+    for (let sy = 0; sy < sh; sy++) {
+      for (let sx = 0; sx < sw; sx++) {
+        if (src[sy * sprite.width + sx]) {
+          const dx = iconOffsetX + sx;
+          if (dx >= 0 && dx < cellW) combined[sy * cellW + dx] = 1;
+        }
+      }
+    }
+  } else {
+    for (let sy = 0; sy < ICON_SIZE; sy++) {
+      for (let sx = 0; sx < ICON_SIZE; sx++) {
+        const dx = iconOffsetX + sx;
+        if (dx >= 0 && dx < cellW) combined[sy * cellW + dx] = 1;
+      }
+    }
+  }
+
+  for (let ly = 0; ly < labelH; ly++) {
+    for (let lx = 0; lx < labelW; lx++) {
+      const dx = labelLeft + lx;
+      const dy = ICON_SIZE + ly;
+      if (dx >= 0 && dx < cellW) combined[dy * cellW + dx] = 1;
+    }
+  }
+
+  return {
+    data: computeMaskOutline(combined, cellW, totalH),
+    w: cellW,
+    h: totalH,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// FileSystem helpers
+// ---------------------------------------------------------------------------
+
+function getTrashId(fs: FileManager): string | undefined {
+  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
+  if (!hd) return undefined;
+  return fs.findByName(hd.id, "Trash")?.id;
+}
+
+function getDesktopFolderId(fs: FileManager): string | undefined {
+  const hd = fs.findByName(ROOT_ID, "Mockintosh HD");
+  if (!hd) return undefined;
+  return fs.findByName(hd.id, "Desktop Folder")?.id;
+}
+
+// ---------------------------------------------------------------------------
+// Folder window construction — one definition for every way a folder opens
+// ---------------------------------------------------------------------------
+
+export interface FolderWindowSpec {
+  title: string;
+  directoryId: string;
+  x: number;
+  y: number;
+  /** Outer frame width. */
+  width: number;
+  /** Content viewport height. */
+  height: number;
+  openedFromRect?: { x: number; y: number; width: number; height: number };
+}
+
+function folderItemCountLabel(count: number): string {
+  return `${count} item${count !== 1 ? "s" : ""}`;
+}
+
+/** Build the OSWindow record for a Finder folder window. */
+export function buildFolderWindow(fs: FileManager, spec: FolderWindowSpec): OSWindow {
+  const count = fs.readDir(spec.directoryId).length;
+  return {
+    id: `folder-${spec.directoryId}-${Date.now()}`,
+    appId: FINDER_APP_ID,
+    title: spec.title,
+    x: spec.x,
+    y: spec.y,
+    width: spec.width,
+    height: spec.height,
+    kind: "finder-folder",
+    props: { directoryId: spec.directoryId },
+    scrollY: 0,
+    scrollX: 0,
+    contentHeight: 300,
+    contentWidth: spec.width,
+    scrollable: true,
+    resizable: true,
+    infoBar: [folderItemCountLabel(count)],
+    openedFromRect: spec.openedFromRect,
+  };
+}
+
+/** Outer frame rect of a window — the target of the zoom-open animation. */
+export function windowOuterRect(win: OSWindow): { x: number; y: number; width: number; height: number } {
+  return { x: win.x, y: win.y, width: win.width, height: windowTotalHeight(win) };
+}
+
+function buildFolderIcons(fs: FileManager, directoryId: string): FinderIcon[] {
+  return fs.readDir(directoryId).map((n) => ({
+    title: n.name,
+    img: getIconForNode(n),
+    nodeId: n.id,
+    isDirectory: n.kind === "directory",
+    position: n.position,
+    zOrder: n.zOrder ?? 0,
+  }));
+}
+
+function buildDesktopIcons(fs: FileManager): FinderIcon[] {
+  const icons: FinderIcon[] = [];
+  const volumes = fs.readDir(ROOT_ID);
+
+  for (const vol of volumes) {
+    icons.push({
+      title: vol.name,
+      img: getIconForNode(vol),
+      nodeId: vol.id,
+      isDirectory: true,
+      isVolume: true,
+      position: vol.position,
+      zOrder: vol.zOrder ?? 0,
+    });
+  }
+
+  for (const vol of volumes) {
+    if (vol.kind !== "directory") continue;
+    const df = fs.findByName(vol.id, "Desktop Folder");
+    if (!df) continue;
+    for (const node of fs.readDir(df.id)) {
+      icons.push({
+        title: node.name,
+        img: getIconForNode(node),
+        nodeId: node.id,
+        isDirectory: node.kind === "directory",
+        position: node.position,
+        zOrder: node.zOrder ?? 0,
+      });
+    }
+  }
+
+  // Trash (if not already included)
+  const trashId = getTrashId(fs);
+  if (trashId && !icons.some((ic) => ic.nodeId === trashId)) {
+    for (const vol of volumes) {
+      if (vol.kind !== "directory") continue;
+      const trash = fs.findByName(vol.id, "Trash");
+      if (trash) {
+        icons.push({
+          title: trash.name,
+          img: getIconForNode(trash),
+          nodeId: trash.id,
+          isDirectory: true,
+          position: trash.position,
+          zOrder: trash.zOrder ?? 0,
+        });
+        break;
+      }
+    }
+  }
+
+  return icons;
+}
+
+function desktopIconPos(
+  icon: FinderIcon,
+  index: number,
+  screenW: number,
+  menubarH: number,
+  screenH: number
+): { x: number; y: number } {
+  if (icon.position) return icon.position;
+  const desktopH = screenH - menubarH;
+  const maxRows = Math.max(1, Math.floor((desktopH - DESKTOP_PADDING_TOP) / DESKTOP_ICON_CELL_H));
+  const col = Math.floor(index / maxRows);
+  const row = index % maxRows;
+  return {
+    x: screenW - (col + 1) * DESKTOP_ICON_CELL_W,
+    y: row * DESKTOP_ICON_CELL_H + DESKTOP_PADDING_TOP,
+  };
+}
+
+function folderIconPos(icon: FinderIcon, index: number, cols: number): { x: number; y: number } {
+  if (icon.position) return icon.position;
+  const col = index % cols;
+  const row = Math.floor(index / cols);
+  return {
+    x: FOLDER_PADDING + col * FOLDER_ICON_CELL_W,
+    y: FOLDER_PADDING + row * FOLDER_ICON_CELL_H,
+  };
+}
+
+function computeFolderContentHeight(icons: FinderIcon[], cols: number): number {
+  let maxY = 0;
+  for (let i = 0; i < icons.length; i++) {
+    const pos = folderIconPos(icons[i], i, cols);
+    const bottom = pos.y + FOLDER_ICON_CELL_H;
+    if (bottom > maxY) maxY = bottom;
+  }
+  return maxY + FOLDER_PADDING;
+}
+
+// ---------------------------------------------------------------------------
+// Icon hit mask — visible sprite pixels only (label has its own hit region)
+// ---------------------------------------------------------------------------
+
+function buildIconCellHitMask(
+  sprite: SpriteRef,
+  cellW: number,
+  iconOffsetX: number,
+  labelLeft: number,
+  labelW: number,
+): HitMask {
+  const labelH = 14;
+  const totalH = ICON_SIZE + labelH + 4;
+  const mask = new Uint8Array(cellW * totalH);
+
+  if (sprite) {
+    const src = sprite.mask ?? sprite.data;
+    const sw = Math.min(sprite.width, ICON_SIZE);
+    const sh = Math.min(sprite.height, ICON_SIZE);
+    for (let sy = 0; sy < sh; sy++) {
+      for (let sx = 0; sx < sw; sx++) {
+        if (src[sy * sprite.width + sx]) {
+          const dx = iconOffsetX + sx;
+          if (dx >= 0 && dx < cellW) {
+            mask[sy * cellW + dx] = 1;
+          }
+        }
+      }
+    }
+  } else {
+    for (let sy = 0; sy < ICON_SIZE; sy++) {
+      for (let sx = 0; sx < ICON_SIZE; sx++) {
+        const dx = iconOffsetX + sx;
+        if (dx >= 0 && dx < cellW) {
+          mask[sy * cellW + dx] = 1;
+        }
+      }
+    }
+  }
+
+  for (let ly = 0; ly < labelH; ly++) {
+    for (let lx = 0; lx < labelW; lx++) {
+      const dx = labelLeft + lx;
+      const dy = ICON_SIZE + ly;
+      if (dx >= 0 && dx < cellW && dy < totalH) {
+        mask[dy * cellW + dx] = 1;
+      }
+    }
+  }
+
+  return { data: mask, width: cellW, height: totalH };
+}
+
+// ---------------------------------------------------------------------------
+// Drag helpers
+// ---------------------------------------------------------------------------
+
+function buildOutlineForItem(
+  sprite: SpriteRef, title: string, cellW: number,
+): { data: Uint8Array; w: number; h: number } {
+  const iconOffsetX = Math.floor((cellW - ICON_SIZE) / 2);
+  const textW = measureText(title, FONT);
+  const labelW = Math.min(textW + LABEL_PAD * 2, cellW);
+  const labelLeft = Math.max(0, Math.floor((cellW - labelW) / 2));
+  return buildGhostOutline(sprite, cellW, iconOffsetX, labelLeft, labelW, 14);
+}
+
+function activateDrag(
+  info: PendingDragInfo,
+  sprite: SpriteRef,
+  ghostX: number,
+  ghostY: number
+): void {
+  const { data, w, h } = buildOutlineForItem(sprite, info.title, info.cellW);
+
+  const companions: ActiveDragCompanion[] = info.companions.map(c => {
+    const outline = buildOutlineForItem(c.sprite, c.title, c.cellW);
+    return {
+      nodeId: c.nodeId,
+      offsetX: c.offsetX,
+      offsetY: c.offsetY,
+      outlineData: outline.data,
+      outlineW: outline.w,
+      outlineH: outline.h,
+    };
+  });
+
+  setFinderDrag({
+    nodeId:             info.nodeId,
+    sourceDirectoryId:  info.sourceDirectoryId,
+    img:                info.img,
+    title:              info.title,
+    cellW:              info.cellW,
+    ghostX,
+    ghostY,
+    outlineData:        data,
+    outlineW:           w,
+    outlineH:           h,
+    companions,
+  });
+}
+
+function updateDragPosition(gx: number, gy: number): void {
+  const info = pendingDragInfo;
+  if (!info) return;
+  setFinderDrag((prev) => {
+    if (!prev) return prev;
+    return {
+      ...prev,
+      ghostX: gx - info.mouseOffsetX,
+      ghostY: gy - info.mouseOffsetY,
+    };
+  });
+}
+
+/** Called from an icon's onDragEnd: resolves the drop target for an icon drag. */
+export function handleGlobalMouseUp(
+  x: number,
+  y: number,
+  menubarH: number,
+  fs: FileManager
+): void {
+  const drag = finderDrag();
+  pendingDragInfo = null;
+  setDropTargetId(null);
+
+  if (!drag) return;
+
+  // Check if the release was inside an open folder window's content area.
+  for (const win of [...getWindows()].reverse()) {
+    if (win.kind !== "finder-folder") continue;
+    const dirId = win.props?.directoryId as string;
+    if (dirId === drag.nodeId) continue; // can't drop into itself
+
+    const content = windowContentRect(win);
+    const cx1 = content.x;
+    const cx2 = content.x + content.width;
+    const cy1 = content.y;
+    const cy2 = content.y + content.height;
+
+    if (x >= cx1 && x < cx2 && y >= cy1 && y < cy2) {
+      const dropX = drag.ghostX - content.x + win.scrollX;
+      const dropY = drag.ghostY - content.y + win.scrollY;
+      if (drag.sourceDirectoryId !== dirId) {
+        fs.move(drag.nodeId, dirId);
+      }
+      fs.setPosition(drag.nodeId, { x: Math.max(0, dropX), y: Math.max(0, dropY) });
+      fs.bumpZOrder(drag.nodeId);
+      for (const c of drag.companions) {
+        if (drag.sourceDirectoryId !== dirId) fs.move(c.nodeId, dirId);
+        fs.setPosition(c.nodeId, { x: Math.max(0, dropX + c.offsetX), y: Math.max(0, dropY + c.offsetY) });
+        fs.bumpZOrder(c.nodeId);
+      }
+      setFinderDrag(null);
+      notifyFsChanged();
+      return;
+    }
+  }
+
+  // Default: drop onto the desktop
+  const desktopFolderId = getDesktopFolderId(fs);
+  const isVolume = drag.sourceDirectoryId === ROOT_ID;
+  if (!isVolume && desktopFolderId && drag.sourceDirectoryId !== desktopFolderId) {
+    fs.move(drag.nodeId, desktopFolderId);
+  }
+  fs.setPosition(drag.nodeId, { x: Math.max(0, drag.ghostX), y: Math.max(0, drag.ghostY - menubarH) });
+  fs.bumpZOrder(drag.nodeId);
+  for (const c of drag.companions) {
+    if (!isVolume && desktopFolderId && drag.sourceDirectoryId !== desktopFolderId) {
+      fs.move(c.nodeId, desktopFolderId);
+    }
+    fs.setPosition(c.nodeId, { x: Math.max(0, drag.ghostX + c.offsetX), y: Math.max(0, drag.ghostY - menubarH + c.offsetY) });
+    fs.bumpZOrder(c.nodeId);
+  }
+  setFinderDrag(null);
+  notifyFsChanged();
+}
+
+// ---------------------------------------------------------------------------
+// FinderDesktop
+// ---------------------------------------------------------------------------
+
+export function FinderDesktop(): JSX.Element {
+  const os = useOS();
+
+  // The desktop owns the Finder's app-level menus (shown when no window, or a
+  // window without its own menus, is active). Folder windows override per window.
+  createEffect(() => {
+    getFsVersion();
+    setAppMenus(FINDER_APP_ID, buildFinderMenus(os.fs));
+  });
+
+  const [selectedSet, setSelectedSet] = createSignal<Set<string>>(new Set());
+  const [renamingNodeId, setRenamingNodeId] = createSignal<string | null>(null);
+  const [renameCaretIndex, setRenameCaretIndex] = createSignal(0);
+  const { marquee, handlers: marqueeHandlers } = createMarquee({
+    onSelect: (m) => updateMarqueeSelection(m),
+    onPlainClick: () => {
+      setRenamingNodeId(null);
+      setSelectedSet(new Set<string>());
+    },
+  });
+
+  createEffect(() => {
+    const sel = selectedSet();
+    const rn = renamingNodeId();
+    if (rn && (sel.size !== 1 || !sel.has(rn))) {
+      setRenamingNodeId(null);
+    }
+  });
+
+  const icons = createMemo(() => {
+    getFsVersion();
+    return buildDesktopIcons(os.fs);
+  });
+
+  const orderedIcons = createMemo((): PositionedIcon[] => {
+    const list = icons();
+    const { width: sw, height: sh } = os.resolution;
+    const mh = os.menubarHeight;
+    return list
+      .map((icon, i) => ({ icon, pos: desktopIconPos(icon, i, sw, mh, sh) }))
+      .sort((a, b) => a.icon.zOrder - b.icon.zOrder);
+  });
+
+  const desktopIconOffsetX = Math.floor((DESKTOP_ICON_CELL_W - ICON_SIZE) / 2);
+
+  function updateMarqueeSelection(m: MarqueeState) {
+    const mr = marqueeRect(m);
+    const sel = new Set<string>();
+    for (const item of orderedIcons()) {
+      if (rectsIntersect(mr.x, mr.y, mr.w, mr.h,
+          item.pos.x + desktopIconOffsetX, item.pos.y, ICON_SIZE, ICON_SIZE)) {
+        sel.add(item.icon.nodeId);
+      }
+    }
+    setSelectedSet(sel);
+  }
+
+  function getCompanions(primaryNodeId: string): PendingDragCompanion[] {
+    const sel = selectedSet();
+    if (sel.size <= 1) return [];
+    const primaryItem = orderedIcons().find(i => i.icon.nodeId === primaryNodeId);
+    if (!primaryItem) return [];
+    return orderedIcons()
+      .filter(i => sel.has(i.icon.nodeId) && i.icon.nodeId !== primaryNodeId)
+      .map(i => ({
+        nodeId: i.icon.nodeId,
+        img: i.icon.img,
+        title: i.icon.title,
+        cellW: DESKTOP_ICON_CELL_W,
+        offsetX: i.pos.x - primaryItem.pos.x,
+        offsetY: i.pos.y - primaryItem.pos.y,
+        sprite: os.sprites.get(i.icon.img),
+      }));
+  }
+
+  function openFolderWindow(icon: FinderIcon, iconScreenX: number, iconScreenY: number) {
+    const x = 60;
+    const y = os.menubarHeight + 50;
+    const iconRect = {
+      x: iconScreenX,
+      y: iconScreenY,
+      width: DESKTOP_ICON_CELL_W,
+      height: ICON_SIZE + 18,
+    };
+    const win = buildFolderWindow(os.fs, {
+      title: icon.title,
+      directoryId: icon.nodeId,
+      x,
+      y,
+      width: Math.min(400, os.resolution.width - x - 20),
+      height: Math.min(200, os.resolution.height - y - 40),
+      openedFromRect: iconRect,
+    });
+
+    os.playWindowOpenAnimation(iconRect, windowOuterRect(win), () => {
+      openOSWindow(win);
+    });
+  }
+
+  return (
+    <>
+      {/* Desktop drop zone — lowest priority (first child) */}
+      <box
+        position="absolute"
+        left={0}
+        top={0}
+        width={os.resolution.width}
+        height={os.resolution.height - os.menubarHeight}
+        {...marqueeHandlers}
+      />
+
+      {/* Desktop icons — sorted by zOrder so recently moved icons render on top */}
+      <For each={orderedIcons()}>
+        {(item) => {
+          const sprite: SpriteRef = os.sprites.get(item.icon.img);
+
+          return (
+            <IconCell
+              icon={item.icon}
+              x={item.pos.x}
+              y={item.pos.y}
+              cellW={DESKTOP_ICON_CELL_W}
+              sprite={sprite}
+              isSelected={() => selectedSet().has(item.icon.nodeId)}
+              isDropTarget={() => dropTargetId() === item.icon.nodeId}
+              sourceDirectoryId={item.icon.isVolume ? ROOT_ID : (getDesktopFolderId(os.fs) ?? ROOT_ID)}
+              onClick={() => setSelectedSet(new Set([item.icon.nodeId]))}
+              onDoubleClick={() => {
+                setSelectedSet(new Set([item.icon.nodeId]));
+                if (item.icon.isDirectory) {
+                  openFolderWindow(item.icon, item.pos.x, item.pos.y + os.menubarHeight);
+                } else {
+                  os.openFSNode(item.icon.nodeId, {
+                    x: item.pos.x,
+                    y: item.pos.y + os.menubarHeight,
+                    width: DESKTOP_ICON_CELL_W,
+                    height: ICON_SIZE + 18,
+                  });
+                }
+              }}
+              getCompanions={() => getCompanions(item.icon.nodeId)}
+              isRenaming={() => renamingNodeId() === item.icon.nodeId}
+              renameCaretIndex={
+                renamingNodeId() === item.icon.nodeId ? renameCaretIndex() : undefined
+              }
+              onStartRename={(caretIndex) => {
+                if (selectedSet().size === 1 && selectedSet().has(item.icon.nodeId)) {
+                  setRenameCaretIndex(caretIndex);
+                  setRenamingNodeId(item.icon.nodeId);
+                }
+              }}
+              onCommitRename={(newName) => {
+                setRenamingNodeId(null);
+                os.fs.rename(item.icon.nodeId, newName);
+                notifyFsChanged();
+              }}
+              onCancelRename={() => setRenamingNodeId(null)}
+            />
+          );
+        }}
+      </For>
+
+      {/* Marquee selection rectangle */}
+      <Show when={marquee()}>
+        {(m) => {
+          const mr = () => marqueeRect(m());
+          return (
+            <box
+              position="absolute"
+              left={mr().x}
+              top={mr().y}
+              width={Math.max(1, mr().w)}
+              height={Math.max(1, mr().h)}
+              borderColor={1}
+              borderWidth={1}
+            />
+          );
+        }}
+      </Show>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FinderFolderContent
+// ---------------------------------------------------------------------------
+
+export function FinderFolderContent(props: { directoryId: string }): JSX.Element {
+  const os = useOS();
+  const windowApi = useWindow();
+  const win = windowApi.win;
+  const [selectedSet, setSelectedSet] = createSignal<Set<string>>(new Set());
+  const [renamingNodeId, setRenamingNodeId] = createSignal<string | null>(null);
+  const [renameCaretIndex, setRenameCaretIndex] = createSignal(0);
+  const { marquee, handlers: marqueeHandlers } = createMarquee({
+    onSelect: (m) => updateMarqueeSelection(m),
+    onPlainClick: () => {
+      setRenamingNodeId(null);
+      setSelectedSet(new Set<string>());
+    },
+  });
+
+  createEffect(() => {
+    const sel = selectedSet();
+    const rn = renamingNodeId();
+    if (rn && (sel.size !== 1 || !sel.has(rn))) {
+      setRenamingNodeId(null);
+    }
+  });
+
+  const directoryId = () => props.directoryId;
+
+  const icons = createMemo(() => {
+    getFsVersion();
+    const id = directoryId();
+    return id ? buildFolderIcons(os.fs, id) : [];
+  });
+
+  const contentW = () => windowContentRect(win).width;
+  const cols = createMemo(() =>
+    Math.max(1, Math.floor((contentW() - FOLDER_PADDING) / FOLDER_ICON_CELL_W))
+  );
+
+  const orderedIcons = createMemo((): PositionedIcon[] => {
+    const list = icons();
+    const c = cols();
+    return list
+      .map((icon, i) => ({ icon, pos: folderIconPos(icon, i, c) }))
+      .sort((a, b) => a.icon.zOrder - b.icon.zOrder);
+  });
+
+  createEffect(() => {
+    const h = computeFolderContentHeight(icons(), cols());
+    if (h !== win.contentHeight) {
+      updateOSWindow(win.id, { contentHeight: h });
+    }
+  });
+
+  const folderIconOffsetX = Math.floor((FOLDER_ICON_CELL_W - ICON_SIZE) / 2);
+
+  function updateMarqueeSelection(m: MarqueeState) {
+    const mr = marqueeRect(m);
+    const sel = new Set<string>();
+    for (const item of orderedIcons()) {
+      if (rectsIntersect(mr.x, mr.y, mr.w, mr.h,
+          item.pos.x + folderIconOffsetX, item.pos.y, ICON_SIZE, ICON_SIZE)) {
+        sel.add(item.icon.nodeId);
+      }
+    }
+    setSelectedSet(sel);
+  }
+
+  function getCompanions(primaryNodeId: string): PendingDragCompanion[] {
+    const sel = selectedSet();
+    if (sel.size <= 1) return [];
+    const primaryItem = orderedIcons().find(i => i.icon.nodeId === primaryNodeId);
+    if (!primaryItem) return [];
+    return orderedIcons()
+      .filter(i => sel.has(i.icon.nodeId) && i.icon.nodeId !== primaryNodeId)
+      .map(i => ({
+        nodeId: i.icon.nodeId,
+        img: i.icon.img,
+        title: i.icon.title,
+        cellW: FOLDER_ICON_CELL_W,
+        offsetX: i.pos.x - primaryItem.pos.x,
+        offsetY: i.pos.y - primaryItem.pos.y,
+        sprite: os.sprites.get(i.icon.img),
+      }));
+  }
+
+  function openNested(icon: FinderIcon, iconScreenX: number, iconScreenY: number) {
+    const iconRect = { x: iconScreenX, y: iconScreenY, width: FOLDER_ICON_CELL_W, height: ICON_SIZE + 18 };
+    const child = buildFolderWindow(os.fs, {
+      title: icon.title,
+      directoryId: icon.nodeId,
+      x: win.x + 20,
+      y: win.y + 20,
+      width: win.width,
+      height: win.height,
+      openedFromRect: iconRect,
+    });
+
+    os.playWindowOpenAnimation(iconRect, windowOuterRect(child), () => {
+      openOSWindow(child);
+    });
+  }
+
+  const itemCount = () => `${icons().length} item${icons().length !== 1 ? "s" : ""}`;
+  const dirId = () => directoryId();
+
+  // The item count is window chrome (info bar), not content — the OS draws it
+  // above the scrollbar and it never scrolls.
+  createEffect(() => {
+    updateOSWindow(win.id, { infoBar: [itemCount()] });
+  });
+
+  // This window's menus reflect its folder (Clean Up) and the trash state.
+  createEffect(() => {
+    getFsVersion();
+    windowApi.setMenus(buildFinderMenus(os.fs, dirId()));
+  });
+
+  function handleScroll(dy: number): void {
+    const inset = win.contentTopInset ?? 0;
+    const maxY = Math.max(0, win.contentHeight - (win.height - inset));
+    updateOSWindow(win.id, { scrollY: Math.max(0, Math.min(maxY, win.scrollY + dy)) });
+  }
+
+  return (
+    <>
+      {/* Content drop zone (below icons in z-order = lower priority) */}
+      <box
+        position="absolute"
+        left={0}
+        top={0}
+        width={contentW()}
+        height={win.height}
+        {...marqueeHandlers}
+        onScroll={handleScroll}
+      />
+
+      {/* Icon grid — sorted by zOrder so recently moved icons render on top */}
+      <For each={orderedIcons()}>
+        {(item) => {
+          const sprite: SpriteRef = os.sprites.get(item.icon.img);
+
+          return (
+            <IconCell
+              icon={item.icon}
+              x={item.pos.x}
+              y={item.pos.y}
+              cellW={FOLDER_ICON_CELL_W}
+              sprite={sprite}
+              isSelected={() => selectedSet().has(item.icon.nodeId)}
+              isDropTarget={() => dropTargetId() === item.icon.nodeId}
+              sourceDirectoryId={dirId() ?? ROOT_ID}
+              onClick={() => setSelectedSet(new Set([item.icon.nodeId]))}
+              onDoubleClick={() => {
+                setSelectedSet(new Set([item.icon.nodeId]));
+                const content = windowContentRect(win);
+                const screenX = content.x + item.pos.x;
+                const screenY = content.y + item.pos.y - win.scrollY;
+                if (item.icon.isDirectory) {
+                  openNested(item.icon, screenX, screenY);
+                } else {
+                  os.openFSNode(item.icon.nodeId, {
+                    x: screenX,
+                    y: screenY,
+                    width: FOLDER_ICON_CELL_W,
+                    height: ICON_SIZE + 18,
+                  });
+                }
+              }}
+              onScroll={handleScroll}
+              getCompanions={() => getCompanions(item.icon.nodeId)}
+              isRenaming={() => renamingNodeId() === item.icon.nodeId}
+              renameCaretIndex={
+                renamingNodeId() === item.icon.nodeId ? renameCaretIndex() : undefined
+              }
+              onStartRename={(caretIndex) => {
+                if (selectedSet().size === 1 && selectedSet().has(item.icon.nodeId)) {
+                  setRenameCaretIndex(caretIndex);
+                  setRenamingNodeId(item.icon.nodeId);
+                }
+              }}
+              onCommitRename={(newName) => {
+                setRenamingNodeId(null);
+                os.fs.rename(item.icon.nodeId, newName);
+                notifyFsChanged();
+              }}
+              onCancelRename={() => setRenamingNodeId(null)}
+            />
+          );
+        }}
+      </For>
+
+      {/* Marquee selection rectangle */}
+      <Show when={marquee()}>
+        {(m) => {
+          const mr = () => marqueeRect(m());
+          return (
+            <box
+              position="absolute"
+              left={mr().x}
+              top={mr().y}
+              width={Math.max(1, mr().w)}
+              height={Math.max(1, mr().h)}
+              borderColor={1}
+              borderWidth={1}
+            />
+          );
+        }}
+      </Show>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// IconCell
+// ---------------------------------------------------------------------------
+
+interface IconCellProps {
+  icon: FinderIcon;
+  x: number;
+  y: number;
+  cellW: number;
+  sprite: SpriteRef;
+  isSelected: () => boolean;
+  isDropTarget: () => boolean;
+  /** FS directory ID this icon lives in. */
+  sourceDirectoryId: string;
+  onClick: () => void;
+  onDoubleClick: () => void;
+  /** Forwarded from the parent scrollable container so the wheel scrolls even
+   *  when hovering directly over an icon (which would otherwise block it). */
+  onScroll?: (dy: number) => void;
+  /** Returns companion items for multi-icon drag when this icon is part of a multi-selection. */
+  getCompanions?: () => PendingDragCompanion[];
+  isRenaming: () => boolean;
+  /** Caret index derived from the label click that opened rename (only read while renaming). */
+  renameCaretIndex?: number;
+  onStartRename: (caretIndex: number) => void;
+  onCommitRename: (newName: string) => void;
+  onCancelRename: () => void;
+}
+
+function IconCell(props: IconCellProps): JSX.Element {
+  const os = useOS();
+  const iconOffsetX = Math.floor((props.cellW - ICON_SIZE) / 2);
+  const labelH = 14;
+
+  const textW = measureText(props.icon.title, FONT);
+  const labelW = Math.min(textW + LABEL_PAD * 2, props.cellW);
+  const labelLeft = Math.max(0, Math.floor((props.cellW - labelW) / 2));
+
+  const hitMask = buildIconCellHitMask(props.sprite, props.cellW, iconOffsetX, labelLeft, labelW);
+
+  const isHighlighted = () => props.isSelected() || props.isDropTarget();
+
+  let wasSelectedBeforeMouseDown = false;
+  let mouseDownLY = 0;
+  let lastLabelMouseDownX = 0;
+  let renameTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearRenameTimer(): void {
+    if (renameTimer) { clearTimeout(renameTimer); renameTimer = null; }
+  }
+
+  function isPartOfActiveDrag(nodeId: string): boolean {
+    const drag = finderDrag();
+    if (!drag) return false;
+    if (drag.nodeId === nodeId) return true;
+    return drag.companions.some(c => c.nodeId === nodeId);
+  }
+
+  function handleDrag(gx: number, gy: number): void {
+    clearRenameTimer();
+    const info = pendingDragInfo;
+    if (!info || info.nodeId !== props.icon.nodeId) return;
+
+    if (!info.thresholdMet) {
+      if (info.firstDragX === -Infinity) {
+        info.firstDragX = gx;
+        info.firstDragY = gy;
+        return;
+      }
+      const dx = Math.abs(gx - info.firstDragX);
+      const dy = Math.abs(gy - info.firstDragY);
+      if (dx < DRAG_THRESHOLD && dy < DRAG_THRESHOLD) return;
+      info.thresholdMet = true;
+      activateDrag(
+        info,
+        props.sprite,
+        gx - info.mouseOffsetX,
+        gy - info.mouseOffsetY,
+      );
+    } else {
+      updateDragPosition(gx, gy);
+    }
+  }
+
+  return (
+    <box
+      position="absolute"
+      left={props.x}
+      top={props.y}
+      width={props.cellW}
+      height={ICON_SIZE + labelH + 4}
+      hitMask={props.isRenaming() ? undefined : hitMask}
+      onMouseDown={(lx, ly) => {
+        if (props.isRenaming()) return;
+        wasSelectedBeforeMouseDown = props.isSelected();
+        mouseDownLY = ly;
+        if (ly >= ICON_SIZE) lastLabelMouseDownX = lx;
+        if (!props.isSelected()) props.onClick();
+        os.fs.bumpZOrder(props.icon.nodeId);
+        pendingDragInfo = {
+          nodeId:             props.icon.nodeId,
+          sourceDirectoryId:  props.sourceDirectoryId,
+          img:                props.icon.img,
+          title:              props.icon.title,
+          cellW:              props.cellW,
+          mouseOffsetX:       lx,
+          mouseOffsetY:       ly,
+          firstDragX:         -Infinity,
+          firstDragY:         -Infinity,
+          thresholdMet:       false,
+          companions:         props.getCompanions?.() ?? [],
+        };
+      }}
+      onMouseUp={(lx, ly) => {
+        const drag = finderDrag();
+        pendingDragInfo = null;
+        if (drag) {
+          const validTarget =
+            props.icon.isDirectory &&
+            !isPartOfActiveDrag(props.icon.nodeId) &&
+            props.icon.nodeId !== drag.sourceDirectoryId;
+          if (validTarget) {
+            os.fs.move(drag.nodeId, props.icon.nodeId);
+            os.fs.setPosition(drag.nodeId, undefined);
+            os.fs.bumpZOrder(drag.nodeId);
+            for (const c of drag.companions) {
+              os.fs.move(c.nodeId, props.icon.nodeId);
+              os.fs.setPosition(c.nodeId, undefined);
+              os.fs.bumpZOrder(c.nodeId);
+            }
+            setFinderDrag(null);
+            setDropTargetId(null);
+            notifyFsChanged();
+          }
+        }
+      }}
+      onClick={() => {
+        if (props.isRenaming()) return;
+        if (!finderDrag()) {
+          const isLabelClick = mouseDownLY >= ICON_SIZE;
+          if (wasSelectedBeforeMouseDown && isLabelClick) {
+            clearRenameTimer();
+            renameTimer = setTimeout(() => {
+              renameTimer = null;
+              if (!finderDrag() && props.isSelected()) {
+                const idx = labelClickToCharIndex(
+                  props.icon.title,
+                  lastLabelMouseDownX,
+                  props.cellW,
+                );
+                props.onStartRename(idx);
+              }
+            }, RENAME_DELAY_MS);
+          }
+          props.onClick();
+          os.fs.bumpZOrder(props.icon.nodeId);
+          notifyFsChanged();
+        }
+      }}
+      onDoubleClick={() => {
+        clearRenameTimer();
+        if (!finderDrag()) props.onDoubleClick();
+      }}
+      onDrag={(_lx, _ly, gx, gy) => handleDrag(gx, gy)}
+      onDragEnd={(_lx, _ly, gx, gy) => {
+        handleGlobalMouseUp(gx, gy, os.menubarHeight, os.fs);
+      }}
+      onScroll={props.onScroll}
+      onMouseEnter={() => {
+        if (finderDrag() && props.icon.isDirectory && !isPartOfActiveDrag(props.icon.nodeId)) {
+          setDropTargetId(props.icon.nodeId);
+        }
+      }}
+      onMouseLeave={() => {
+        if (dropTargetId() === props.icon.nodeId) setDropTargetId(null);
+      }}
+    >
+      {/* Icon image */}
+      <Show
+        when={props.sprite}
+        fallback={
+          <box
+            position="absolute"
+            left={iconOffsetX}
+            top={0}
+            width={ICON_SIZE}
+            height={ICON_SIZE}
+            background={isHighlighted() ? 1 : 0}
+            borderColor={1}
+            borderWidth={1}
+          />
+        }
+      >
+        {(s) => (
+          <image
+            position="absolute"
+            left={iconOffsetX}
+            top={0}
+            width={ICON_SIZE}
+            height={ICON_SIZE}
+            src={{ width: s().width, height: s().height, data: s().data, mask: s().mask }}
+            mode={isHighlighted() ? "inverted" : "normal"}
+          />
+        )}
+      </Show>
+
+      {/* Label — static text or inline rename input */}
+      <Show
+        when={props.isRenaming()}
+        fallback={
+          <text
+            position="absolute"
+            left={labelLeft}
+            top={ICON_SIZE}
+            padding={LABEL_PAD}
+            font={FONT}
+            color={isHighlighted() ? 0 : 1}
+            background={isHighlighted() ? 1 : 0}
+          >
+            {props.icon.title}
+          </text>
+        }
+      >
+        {(_) => {
+          const [renameValue, setRenameValue] = createSignal(props.icon.title);
+          const renameInputW = createMemo(() => {
+            const tw = measureText(renameValue(), FONT);
+            const minTw = measureText("n", FONT);
+            return Math.min(Math.max(tw, minTw) + LABEL_PAD * 2, props.cellW);
+          });
+          const renameInputLeft = createMemo(() =>
+            Math.max(0, Math.floor((props.cellW - renameInputW()) / 2)),
+          );
+          let committed = false;
+
+          function commit(): void {
+            if (committed) return;
+            committed = true;
+            const trimmed = renameValue().trim();
+            if (trimmed && trimmed !== props.icon.title) {
+              props.onCommitRename(trimmed);
+            } else {
+              props.onCancelRename();
+            }
+          }
+
+          onCleanup(commit);
+
+          return (
+            <box position="absolute" left={renameInputLeft()} top={ICON_SIZE} width={renameInputW()}>
+              <TextInput
+                value={renameValue()}
+                onChange={setRenameValue}
+                onSubmit={() => commit()}
+                onCancel={() => { committed = true; props.onCancelRename(); }}
+                onBlur={() => commit()}
+                font={FONT}
+                width={renameInputW()}
+                height={labelH}
+                padding={LABEL_PAD}
+                borderless
+                autoFocus
+                initialCaretIndex={props.renameCaretIndex}
+              />
+            </box>
+          );
+        }}
+      </Show>
+    </box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FinderDragGhost — rendered at OSRoot level, drawn above everything
+// ---------------------------------------------------------------------------
+
+export function FinderDragGhost(): JSX.Element {
+  return (
+    <Show when={finderDrag()}>
+      {(drag) => {
+        const outlineSrc = () => {
+          const d = drag();
+          return d.outlineData.length > 0
+            ? { width: d.outlineW, height: d.outlineH, data: d.outlineData, mask: d.outlineData }
+            : undefined;
+        };
+
+        return (
+          <>
+            <Show when={outlineSrc()}>
+              {(src) => (
+                <image
+                  position="absolute"
+                  left={drag().ghostX}
+                  top={drag().ghostY}
+                  width={src().width}
+                  height={src().height}
+                  src={src()}
+                />
+              )}
+            </Show>
+            <For each={drag().companions}>
+              {(c) => {
+                const cSrc = () =>
+                  c.outlineData.length > 0
+                    ? { width: c.outlineW, height: c.outlineH, data: c.outlineData, mask: c.outlineData }
+                    : undefined;
+                return (
+                  <Show when={cSrc()}>
+                    {(src) => (
+                      <image
+                        position="absolute"
+                        left={drag().ghostX + c.offsetX}
+                        top={drag().ghostY + c.offsetY}
+                        width={src().width}
+                        height={src().height}
+                        src={src()}
+                      />
+                    )}
+                  </Show>
+                );
+              }}
+            </For>
+          </>
+        );
+      }}
+    </Show>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Finder menus
+// ---------------------------------------------------------------------------
+
+/**
+ * Finder menubar for the desktop (`activeDirId` undefined) or a folder window.
+ * Pure: callers install the result via `setAppMenus` / `useWindow().setMenus`
+ * and rebuild it when the file system changes.
+ */
+export function buildFinderMenus(fs: FileManager, activeDirId?: string): MenubarDefinition[] {
+  const trashId = getTrashId(fs);
+  const trashEmpty = !trashId || fs.readDir(trashId).length === 0;
+
+  return [
+    {
+      label: "File",
+      items: [
+        { label: "New Folder", disabled: true },
+        { type: "separator" },
+        { label: "Open",  shortcut: "O", disabled: true },
+        { label: "Close", disabled: true },
+      ],
+    },
+    {
+      label: "Edit",
+      items: [
+        { label: "Undo",       shortcut: "Z", disabled: true },
+        { type: "separator" },
+        { label: "Cut",        shortcut: "X", disabled: true },
+        { label: "Copy",       shortcut: "C", disabled: true },
+        { label: "Paste",      shortcut: "V", disabled: true },
+        { label: "Clear",      disabled: true },
+        { label: "Select All", shortcut: "A", disabled: true },
+      ],
+    },
+    {
+      label: "View",
+      items: [
+        { label: "By Icon", disabled: true },
+        { label: "By Name", disabled: true },
+        { label: "By Date", disabled: true },
+        { label: "By Size", disabled: true },
+        { label: "By Kind", disabled: true },
+      ],
+    },
+    {
+      label: "Special",
+      items: [
+        { label: "Clean Up",   disabled: !activeDirId },
+        {
+          label: "Empty Trash",
+          disabled: trashEmpty,
+          onClick: async () => {
+            if (!trashId) return;
+            for (const child of fs.readDir(trashId)) await fs.remove(child.id);
+            notifyFsChanged(); // menus rebuild reactively
+          },
+        },
+        { type: "separator" },
+        { label: "Eject Disk",  disabled: true },
+        { label: "Erase Disk…", disabled: true },
+        { type: "separator" },
+        { label: "Restart",   disabled: true },
+        { label: "Shut Down", disabled: true },
+      ],
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// App registration — the Finder is an app like any other: folder windows are
+// its windows, and it is the active app when nothing else is.
+// ---------------------------------------------------------------------------
+
+registerApp<{ directoryId: string }>({
+  id: FINDER_APP_ID,
+  title: "Finder",
+  icon: "icon/folder",
+  defaultSize: { width: 400, height: 200 },
+  windowKind: "finder-folder",
+  scrollable: true,
+  resizable: true,
+  singleInstance: false,
+  Component: FinderFolderContent,
+});

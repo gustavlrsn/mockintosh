@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mockintosh</title>
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #000; min-height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+      canvas { image-rendering: pixelated; cursor: none; }
+      video { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="importmap">
+      {
+        "imports": {
+          "solid-js": "/node_modules/solid-js/dist/solid.js",
+          "solid-js/store": "/node_modules/solid-js/store/dist/store.js",
+          "@mockintosh/ui": "/packages/ui/src/index.ts",
+          "@mockintosh/ui/renderer": "/packages/ui/src/renderer.ts",
+          "@mockintosh/sdk": "/packages/sdk/src/index.ts"
+        }
+      }
+    </script>
+    <script type="module" src="/src/solidMain.ts"></script>
+  </body>
+</html>

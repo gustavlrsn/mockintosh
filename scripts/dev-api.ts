@@ -1,0 +1,172 @@
+import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { WebSocketServer } from "ws";
+import { handleStreamSession } from "../api/stream.js";
+import { handleTextwebSession } from "../api/textweb-session.js";
+
+const PORT = 3001;
+
+function loadEnvLocal() {
+  try {
+    const envPath = resolve(import.meta.dirname!, "..", ".env.local");
+    const content = readFileSync(envPath, "utf-8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx === -1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      const value = trimmed.slice(eqIdx + 1).trim();
+      if (!process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    console.warn(
+      "No .env.local found — LLM_API_KEY must be set in environment"
+    );
+  }
+}
+
+loadEnvLocal();
+
+async function readBody(req: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString();
+}
+
+async function nodeToWebRequest(
+  req: IncomingMessage,
+  body: string
+): Promise<Request> {
+  const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  return new Request(url.toString(), {
+    method: req.method,
+    headers: req.headers as Record<string, string>,
+    body: req.method !== "GET" && req.method !== "HEAD" ? body : undefined,
+  });
+}
+
+async function webToNodeResponse(webRes: Response, res: ServerResponse) {
+  res.writeHead(webRes.status, Object.fromEntries(webRes.headers.entries()));
+
+  if (!webRes.body) {
+    res.end();
+    return;
+  }
+
+  const reader = webRes.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(value);
+    }
+  } finally {
+    res.end();
+  }
+}
+
+const { default: chatHandler } = await import("../api/chat.js");
+const { default: generateImageHandler } = await import(
+  "../api/generate-image.js"
+);
+const { default: spotifyDeviceRequestHandler } = await import(
+  "../api/spotify/device-request.js"
+);
+const { default: spotifyDevicePollHandler } = await import(
+  "../api/spotify/device-poll.js"
+);
+const { default: browseHandler } = await import("../api/browse.js");
+
+const routes: Record<string, (req: Request) => Promise<Response>> = {
+  "/api/chat": chatHandler,
+  "/api/generate-image": generateImageHandler,
+  "/api/spotify/device-request": spotifyDeviceRequestHandler,
+  "/api/spotify/device-poll": spotifyDevicePollHandler,
+  "/api/browse": browseHandler,
+};
+
+const server = createServer(async (req, res) => {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    });
+    res.end();
+    return;
+  }
+
+  const path = new URL(req.url ?? "/", `http://localhost:${PORT}`).pathname;
+  const handler = routes[path];
+
+  if (!handler) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Not found" }));
+    return;
+  }
+
+  try {
+    const body = await readBody(req);
+    const webReq = await nodeToWebRequest(req, body);
+    const webRes = await handler(webReq);
+    await webToNodeResponse(webRes, res);
+  } catch (err) {
+    console.error("Handler error:", err);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Internal server error" }));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// WebSocket server — handles /api/stream and /api/textweb upgrade requests
+// ---------------------------------------------------------------------------
+
+const wss = new WebSocketServer({ noServer: true });
+
+server.on("upgrade", (req: IncomingMessage, socket, head) => {
+  const path = new URL(
+    req.url ?? "/",
+    `http://localhost:${PORT}`
+  ).pathname;
+
+  if (path === "/api/stream") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      console.log("[stream] WebSocket connected");
+      handleStreamSession(ws).catch((err) => {
+        console.error("[stream] session error:", err);
+      });
+    });
+  } else if (path === "/api/textweb") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      console.log("[textweb] WebSocket connected");
+      handleTextwebSession(ws).catch((err) => {
+        console.error("[textweb] session error:", err);
+      });
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
+server.listen(PORT, () => {
+  const keySet =
+    !!process.env.LLM_API_KEY &&
+    process.env.LLM_API_KEY !== "sk-...your-key-here...";
+  console.log(`API server listening on http://localhost:${PORT}`);
+  console.log(`  LLM_MODEL: ${process.env.LLM_MODEL || "gpt-4o-mini"}`);
+  console.log(
+    `  LLM_API_KEY: ${
+      keySet ? "configured" : "NOT SET — ChatGippity will return errors"
+    }`
+  );
+  console.log(`  Safari Stream:  ws://localhost:${PORT}/api/stream`);
+  console.log(`  Safari Textweb: ws://localhost:${PORT}/api/textweb`);
+  if (!keySet) {
+    console.log("\n  Set your LLM key in .env.local:");
+    console.log("    LLM_API_KEY=sk-...");
+  }
+});

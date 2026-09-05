@@ -1,0 +1,13 @@
+# Mockintosh App Development
+
+When working on a Mockintosh app, follow these guidelines:
+
+- The app renders on a **1-bit canvas** (512×342 total screen, your window is smaller). Every pixel is black (1) or white (0).
+- Use `@mockintosh/sdk` for all types and utilities. Never access DOM APIs directly.
+- Use `props.getSprite()` for sprite lookup, `props.storage` for persistence, `props.fetch` for network (with `"network"` permission).
+- Export a default `App` object and an optional `sprites` record from `src/index.ts`.
+- Sprites use the `"appid/name"` naming convention.
+- The `render()` function is synchronous and imperative — draw directly to `AppContext`.
+- State management uses React-like hooks (`useState`, `useEffect`, `useMemo`, `useRef`) via `AppBuilder`.
+- Read `node_modules/@mockintosh/sdk/docs/APP_DEV_GUIDE.md` for the complete API reference.
+- Look at example apps in `node_modules/@mockintosh/sdk/examples/` for patterns.

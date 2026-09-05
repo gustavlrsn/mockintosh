@@ -7,30 +7,28 @@
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
-    // "moduleResolution": "bundler",
-    "target": "es2017",
+    "target": "es2020",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "jsxImportSource": "solid-js",
     "paths": {
       "@/*": ["./*"]
     },
     "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "node"
+    "moduleResolution": "bundler"
   },
   "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    "lib/print.ts",
-    "lib/ascii-dither.js"
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.js",
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/ui/src/**/*.ts",
+    "packages/ui/src/**/*.tsx",
+    "utils/**/*.ts",
+    "vite-env.d.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "dist", "api", "scripts", "packages/quickdraw"]
 }

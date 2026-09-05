@@ -1,0 +1,59 @@
+import { For, type JSX } from "solid-js";
+import { parseMarkdown, type LayoutNode, type InlineSegment } from "@mockintosh/markdown";
+import { useOS } from "../src/os/context";
+
+function InlineRun(props: { segments: InlineSegment[] }): JSX.Element {
+  return (
+    <text font="body" wrap>
+      {props.segments.map((seg) => seg.text).join("")}
+    </text>
+  );
+}
+
+function Block(props: { node: LayoutNode }): JSX.Element {
+  const os = useOS();
+  const node = props.node;
+  if (node.type === "heading") {
+    return <text font="menu">{node.text}</text>;
+  }
+  if (node.type === "paragraph") {
+    return <InlineRun segments={node.segments} />;
+  }
+  if (node.type === "listItem") {
+    return (
+      <box flexDirection="row" gap={4} paddingLeft={node.indent * 8}>
+        <text font="body">•</text>
+        <InlineRun segments={node.segments} />
+      </box>
+    );
+  }
+  if (node.type === "hr") {
+    return <box height={1} background={1} />;
+  }
+  if (node.type === "image") {
+    const sprite = os.sprites.get(node.src);
+    if (sprite) {
+      return (
+        <image
+          width={sprite.width}
+          height={sprite.height}
+          src={{ width: sprite.width, height: sprite.height, data: sprite.data, mask: sprite.mask }}
+        />
+      );
+    }
+    return <text font="body">{node.alt || node.src}</text>;
+  }
+  if (node.type === "spacer") {
+    return <box height={node.height} />;
+  }
+  return <box height={6} />;
+}
+
+export function MarkdownView(props: { markdown: string }): JSX.Element {
+  const nodes = () => parseMarkdown(props.markdown || "");
+  return (
+    <box flexDirection="column" gap={4} width="100%">
+      <For each={nodes()}>{(n) => <Block node={n} />}</For>
+    </box>
+  );
+}

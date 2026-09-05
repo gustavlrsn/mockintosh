@@ -1,0 +1,37 @@
+---
+description: Core engineering philosophy — prefer robust, well-architected solutions over quick local fixes
+alwaysApply: true
+---
+
+# Engineering Philosophy
+
+This project is in its early stages. Decisions made now compound — good abstractions pay off for months; shortcuts become load-bearing tech debt. Always optimize for the long term.
+
+## Prefer Robust Solutions Over Quick Fixes
+
+- When a problem can be solved by either (a) a local patch or (b) introducing/extending a proper abstraction, **choose the abstraction**.
+- If a fix would need to be repeated in more than one place, that's a signal to extract a shared primitive or utility instead.
+- When touching a subsystem that has ad-hoc patterns, take the opportunity to propose a cleaner structure — don't just match the existing mess.
+
+## Think Architecturally
+
+- Before implementing, consider how the change fits into the overall architecture described in `ARCHITECTURE.md`.
+- Propose changes that respect the existing layering: `@mockintosh/quickdraw` → `@mockintosh/ui` → `src/os` shell → Apps / `@mockintosh/sdk`. Don't leak abstractions across layers.
+- If a feature doesn't have an obvious home in the current architecture, say so and propose where it should live before writing code.
+
+## Err on the Side of Explicitness
+
+- Prefer explicit types and interfaces over ad-hoc object shapes.
+- When adding a new concept (e.g., a new event type, a new UI primitive), define it as a named type/interface even if it's only used in one place today.
+- Avoid `any` — if the type is genuinely unknown, use `unknown` and narrow it.
+
+## Propose, Don't Just Execute
+
+- When there are multiple valid approaches, briefly outline 2–3 options with trade-offs before implementing.
+- If a requested change would conflict with an existing pattern or create inconsistency, flag it rather than silently proceeding.
+- If you spot an adjacent improvement that would make the codebase more robust (within reasonable scope), mention it.
+
+## Naming and Consistency
+
+- Follow the naming conventions already established in the codebase (e.g., `draw*` for rendering functions, `use*` for hooks, `on*` for event handlers).
+- New files should follow the existing directory structure conventions in `ARCHITECTURE.md`.

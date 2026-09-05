@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/3d", "destination": "/3d.html" },
+    { "source": "/api/(.*)", "destination": "/api/$1" }
+  ]
+}

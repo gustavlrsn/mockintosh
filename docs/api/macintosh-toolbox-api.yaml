@@ -1,0 +1,2075 @@
+# Macintosh Toolbox & QuickDraw API Reference
+# Structured API spec for original Mac OS (Inside Macintosh; System 6/7).
+# Machine-readable; single source of truth for Toolbox and QuickDraw APIs.
+
+title: "Macintosh Toolbox & QuickDraw API Reference"
+version: "1.0"
+source: "Inside Macintosh; Original Mac OS System 6/7"
+specVersion: "1.0"
+
+# ---------------------------------------------------------------------------
+# QuickDraw (Basic)
+# ---------------------------------------------------------------------------
+quickdraw:
+  description: |
+    The foundational imaging engine for all Macintosh computers. Performs graphics
+    operations (lines, shapes, text, pictures) directly to the screen. All drawing
+    uses a current GrafPort; applications call SetPort to designate the target.
+
+  types:
+    - name: GrafVerb
+      kind: integer
+      description: "Drawing verb for shape-drawing procedures: 0=frame, 1=paint, 2=erase, 3=invert, 4=fill"
+    - name: Pattern
+      kind: type
+      description: "8-byte packed 1-bit bitmap for fill/pen/background; each byte is one row of 8 pixels"
+    - name: Point
+      kind: record
+      description: "2-D coordinate in QuickDraw local port space; v (vertical) before h (horizontal)"
+      fields:
+        - { name: v, type: Integer, description: "Vertical coordinate (y)" }
+        - { name: h, type: Integer, description: "Horizontal coordinate (x)" }
+    - name: Rect
+      kind: record
+      description: "Axis-aligned rectangle; half-open convention (top/left inside, bottom/right outside)"
+      fields:
+        - { name: top, type: Integer }
+        - { name: left, type: Integer }
+        - { name: bottom, type: Integer }
+        - { name: right, type: Integer }
+    - name: BitMap
+      kind: record
+      description: "1-bit-per-pixel bitmap (screen or offscreen)"
+      fields:
+        - { name: baseAddr, type: Ptr }
+        - { name: rowBytes, type: Integer }
+        - { name: bounds, type: Rect }
+    - name: Cursor
+      kind: record
+      description: "16x16 1-bit cursor sprite (data, mask, hotSpot)"
+      fields:
+        - { name: data, type: Bits16 }
+        - { name: mask, type: Bits16 }
+        - { name: hotSpot, type: Point }
+    - name: PenState
+      kind: record
+      description: "Snapshot of current port pen attributes"
+      fields:
+        - { name: pnLoc, type: Point }
+        - { name: pnSize, type: Point }
+        - { name: pnMode, type: Integer }
+        - { name: pnPat, type: Pattern }
+    - name: Polygon
+      kind: record
+      description: "Closed polygon as ordered list of vertices"
+      fields:
+        - { name: polySize, type: Integer }
+        - { name: polyBBox, type: Rect }
+        - { name: polyPoints, type: "Array of Point" }
+    - name: PolyHandle
+      kind: handle
+      baseType: Polygon
+      description: "Indirect reference to a Polygon"
+    - name: Region
+      kind: record
+      description: "Arbitrary 1-bit mask region (bounding box + scanlines)"
+      fields:
+        - { name: rgnSize, type: Integer }
+        - { name: rgnBBox, type: Rect }
+        - { name: scanlines, type: "Optional array" }
+    - name: RgnHandle
+      kind: handle
+      baseType: Region
+      description: "Handle to a Region"
+    - name: Picture
+      kind: record
+      description: "Recorded sequence of QuickDraw operations (metafile)"
+      fields:
+        - { name: picSize, type: Integer }
+        - { name: picFrame, type: Rect }
+        - { name: _data, type: "Byte stream" }
+    - name: PicHandle
+      kind: handle
+      baseType: Picture
+      description: "Handle to a Picture"
+    - name: FontInfo
+      kind: record
+      description: "Vertical metrics for current font (ascent, descent, widMax, leading)"
+      fields:
+        - { name: ascent, type: Integer }
+        - { name: descent, type: Integer }
+        - { name: widMax, type: Integer }
+        - { name: leading, type: Integer }
+    - name: QDProcs
+      kind: record
+      description: "Bottleneck record — function pointers that intercept drawing primitives"
+      fields:
+        - { name: textProc, type: ProcPtr }
+        - { name: lineProc, type: ProcPtr }
+        - { name: rectProc, type: ProcPtr }
+        - { name: rRectProc, type: ProcPtr }
+        - { name: ovalProc, type: ProcPtr }
+        - { name: arcProc, type: ProcPtr }
+        - { name: polyProc, type: ProcPtr }
+        - { name: rgnProc, type: ProcPtr }
+        - { name: bitsProc, type: ProcPtr }
+        - { name: commentProc, type: ProcPtr }
+        - { name: txMeasProc, type: ProcPtr }
+        - { name: getPicProc, type: ProcPtr }
+        - { name: putPicProc, type: ProcPtr }
+    - name: GrafPort
+      kind: record
+      description: "Central drawing context; first field of WindowRecord so WindowPtr = GrafPtr"
+      fields:
+        - { name: device, type: Integer }
+        - { name: portBits, type: BitMap }
+        - { name: portRect, type: Rect }
+        - { name: visRgn, type: RgnHandle }
+        - { name: clipRgn, type: RgnHandle }
+        - { name: bkPat, type: Pattern }
+        - { name: fillPat, type: Pattern }
+        - { name: pnLoc, type: Point }
+        - { name: pnSize, type: Point }
+        - { name: pnMode, type: Integer }
+        - { name: pnPat, type: Pattern }
+        - { name: pnVis, type: Integer }
+        - { name: txFont, type: Integer }
+        - { name: txFace, type: Style }
+        - { name: txMode, type: Integer }
+        - { name: txSize, type: Integer }
+        - { name: spExtra, type: Fixed }
+        - { name: fgColor, type: Integer }
+        - { name: bkColor, type: Integer }
+        - { name: colrBit, type: Integer }
+        - { name: patStretch, type: Integer }
+        - { name: picSave, type: PicHandle }
+        - { name: rgnSave, type: RgnHandle }
+        - { name: polySave, type: PolyHandle }
+        - { name: grafProcs, type: QDProcs }
+    - name: GrafPtr
+      kind: type
+      description: "Pointer to GrafPort; same as WindowPtr when referring to window's port"
+    - name: Style
+      kind: integer
+      description: "Bitfield of text style flags (bold, italic, underline, outline, shadow, condense, extend)"
+
+  constants:
+    # Transfer modes
+    - { name: srcCopy, value: 0, description: "Copy source to destination" }
+    - { name: srcOr, value: 1 }
+    - { name: srcXor, value: 2 }
+    - { name: srcBic, value: 3 }
+    - { name: notSrcCopy, value: 4 }
+    - { name: notSrcOr, value: 5 }
+    - { name: notSrcXor, value: 6 }
+    - { name: notSrcBic, value: 7 }
+    - { name: patCopy, value: 8 }
+    - { name: patOr, value: 9 }
+    - { name: patXor, value: 10 }
+    - { name: patBic, value: 11 }
+    - { name: notPatCopy, value: 12 }
+    - { name: notPatOr, value: 13 }
+    - { name: notPatXor, value: 14 }
+    - { name: notPatBic, value: 15 }
+    # Color bits
+    - { name: normalBit, value: 0 }
+    - { name: inverseBit, value: 1 }
+    - { name: redBit, value: 4 }
+    - { name: greenBit, value: 3 }
+    - { name: blueBit, value: 2 }
+    - { name: cyanBit, value: 8 }
+    - { name: magentaBit, value: 7 }
+    - { name: yellowBit, value: 6 }
+    - { name: blackBit, value: 5 }
+    # Colors
+    - { name: blackColor, value: 33 }
+    - { name: whiteColor, value: 30 }
+    - { name: redColor, value: 205 }
+    - { name: greenColor, value: 341 }
+    - { name: blueColor, value: 409 }
+    - { name: cyanColor, value: 273 }
+    - { name: magentaColor, value: 137 }
+    - { name: yellowColor, value: 69 }
+    # Picture comments
+    - { name: picLParen, value: 0 }
+    - { name: picRParen, value: 1 }
+    # GrafVerb
+    - { name: FRAME, value: 0, description: "Outline only" }
+    - { name: PAINT, value: 1, description: "Fill with pen pattern" }
+    - { name: ERASE, value: 2, description: "Fill with background pattern" }
+    - { name: INVERT, value: 3, description: "XOR pixels" }
+    - { name: FILL, value: 4, description: "Fill with explicit pattern" }
+    # Style flags
+    - { name: bold, value: 0x01 }
+    - { name: italic, value: 0x02 }
+    - { name: underline, value: 0x04 }
+    - { name: outline, value: 0x08 }
+    - { name: shadow, value: 0x10 }
+    - { name: condense, value: 0x20 }
+    - { name: extend, value: 0x40 }
+
+  routines:
+    # Initialization & GrafPort
+    - name: InitGraf
+      category: initialization
+      description: "Initialize QuickDraw with screen bitmap"
+      signature: "PROCEDURE InitGraf(screen: QDScreen)"
+      parameters: [{ name: screen, type: QDScreen, direction: in }]
+      returnType: void
+    - name: OpenPort
+      category: port
+      description: "Initialize and open a GrafPort (allocate regions, set defaults)"
+      signature: "PROCEDURE OpenPort(port: GrafPtr)"
+      parameters: [{ name: port, type: GrafPtr, direction: inout }]
+      returnType: void
+    - name: InitPort
+      category: port
+      description: "Initialize port fields without allocating regions"
+      signature: "PROCEDURE InitPort(port: GrafPtr)"
+      parameters: [{ name: port, type: GrafPtr, direction: inout }]
+      returnType: void
+    - name: ClosePort
+      category: port
+      description: "Close port and release its regions"
+      signature: "PROCEDURE ClosePort(port: GrafPtr)"
+      parameters: [{ name: port, type: GrafPtr, direction: in }]
+      returnType: void
+    - name: SetPort
+      category: port
+      description: "Set the current graphics port for all subsequent QuickDraw calls"
+      signature: "PROCEDURE SetPort(port: GrafPtr)"
+      parameters: [{ name: port, type: GrafPtr, direction: in }]
+      returnType: void
+    - name: GetPort
+      category: port
+      description: "Return the current graphics port"
+      signature: "FUNCTION GetPort(): GrafPtr"
+      parameters: []
+      returnType: GrafPtr
+    - name: GrafDevice
+      category: port
+      description: "Set or get the current GrafDevice"
+      signature: "PROCEDURE GrafDevice(device: Integer)"
+      parameters: [{ name: device, type: Integer, direction: in }]
+      returnType: void
+    - name: SetPortBits
+      category: port
+      description: "Replace the current port's backing bitmap"
+      signature: "PROCEDURE SetPortBits(bm: BitMap)"
+      parameters: [{ name: bm, type: BitMap, direction: in }]
+      returnType: void
+    - name: PortSize
+      category: port
+      description: "Set port rectangle size"
+      signature: "PROCEDURE PortSize(width, height: Integer)"
+      parameters:
+        [{ name: width, type: Integer }, { name: height, type: Integer }]
+      returnType: void
+    - name: MovePortTo
+      category: port
+      description: "Move port origin in global coordinates"
+      signature: "PROCEDURE MovePortTo(leftGlobal, topGlobal: Integer)"
+      parameters:
+        [
+          { name: leftGlobal, type: Integer },
+          { name: topGlobal, type: Integer },
+        ]
+      returnType: void
+    - name: SetOrigin
+      category: port
+      description: "Set the port's local coordinate origin"
+      signature: "PROCEDURE SetOrigin(h, v: Integer)"
+      parameters: [{ name: h, type: Integer }, { name: v, type: Integer }]
+      returnType: void
+    - name: SetClip
+      category: port
+      description: "Set the current port's clip region"
+      signature: "PROCEDURE SetClip(rgn: RgnHandle)"
+      parameters: [{ name: rgn, type: RgnHandle, direction: in }]
+      returnType: void
+    - name: GetClip
+      category: port
+      description: "Copy current clip region to destination"
+      signature: "PROCEDURE GetClip(dstRgn: RgnHandle)"
+      parameters: [{ name: dstRgn, type: RgnHandle, direction: out }]
+      returnType: void
+    - name: ClipRect
+      category: port
+      description: "Intersect clip region with the given rectangle"
+      signature: "PROCEDURE ClipRect(r: Rect)"
+      parameters: [{ name: r, type: Rect, direction: in }]
+      returnType: void
+    - name: BackPat
+      category: port
+      description: "Set the background pattern"
+      signature: "PROCEDURE BackPat(pat: Pattern)"
+      parameters: [{ name: pat, type: Pattern, direction: in }]
+      returnType: void
+    - name: newGrafPort
+      category: port
+      description: "Allocate and return a new initialized GrafPort (non-standard helper)"
+      signature: "FUNCTION newGrafPort(): GrafPtr"
+      parameters: []
+      returnType: GrafPtr
+
+    # Cursor
+    - name: InitCursor
+      category: cursor
+      description: "Initialize the cursor to the arrow"
+      signature: "PROCEDURE InitCursor"
+      parameters: []
+      returnType: void
+    - name: SetCursor
+      category: cursor
+      description: "Set the current cursor shape"
+      signature: "PROCEDURE SetCursor(crsr: Cursor)"
+      parameters: [{ name: crsr, type: Cursor, direction: in }]
+      returnType: void
+    - name: HideCursor
+      category: cursor
+      description: "Hide the cursor (decrement visibility count)"
+      signature: "PROCEDURE HideCursor"
+      parameters: []
+      returnType: void
+    - name: ShowCursor
+      category: cursor
+      description: "Show the cursor (increment visibility count)"
+      signature: "PROCEDURE ShowCursor"
+      parameters: []
+      returnType: void
+    - name: ObscureCursor
+      category: cursor
+      description: "Hide cursor until mouse moves"
+      signature: "PROCEDURE ObscureCursor"
+      parameters: []
+      returnType: void
+
+    # Pen and lines
+    - name: HidePen
+      category: pen
+      description: "Hide the pen for subsequent drawing"
+      signature: "PROCEDURE HidePen"
+      parameters: []
+      returnType: void
+    - name: ShowPen
+      category: pen
+      description: "Show the pen"
+      signature: "PROCEDURE ShowPen"
+      parameters: []
+      returnType: void
+    - name: GetPen
+      category: pen
+      description: "Return current pen position in pt"
+      signature: "PROCEDURE GetPen(VAR pt: Point)"
+      parameters: [{ name: pt, type: Point, direction: out }]
+      returnType: void
+    - name: GetPenState
+      category: pen
+      description: "Save current pen state to pnState"
+      signature: "PROCEDURE GetPenState(VAR pnState: PenState)"
+      parameters: [{ name: pnState, type: PenState, direction: out }]
+      returnType: void
+    - name: SetPenState
+      category: pen
+      description: "Restore pen state from pnState"
+      signature: "PROCEDURE SetPenState(pnState: PenState)"
+      parameters: [{ name: pnState, type: PenState, direction: in }]
+      returnType: void
+    - name: PenSize
+      category: pen
+      description: "Set pen width and height in pixels"
+      signature: "PROCEDURE PenSize(width, height: Integer)"
+      parameters:
+        [{ name: width, type: Integer }, { name: height, type: Integer }]
+      returnType: void
+    - name: PenMode
+      category: pen
+      description: "Set transfer mode for pen drawing"
+      signature: "PROCEDURE PenMode(mode: Integer)"
+      parameters: [{ name: mode, type: Integer, direction: in }]
+      returnType: void
+    - name: PenPat
+      category: pen
+      description: "Set pen pattern"
+      signature: "PROCEDURE PenPat(pat: Pattern)"
+      parameters: [{ name: pat, type: Pattern, direction: in }]
+      returnType: void
+    - name: PenNormal
+      category: pen
+      description: "Reset pen to 1x1, patCopy, black"
+      signature: "PROCEDURE PenNormal"
+      parameters: []
+      returnType: void
+    - name: MoveTo
+      category: line
+      description: "Set pen position to (h, v)"
+      signature: "PROCEDURE MoveTo(h, v: Integer)"
+      parameters: [{ name: h, type: Integer }, { name: v, type: Integer }]
+      returnType: void
+    - name: Move
+      category: line
+      description: "Move pen by (dh, dv)"
+      signature: "PROCEDURE Move(dh, dv: Integer)"
+      parameters: [{ name: dh, type: Integer }, { name: dv, type: Integer }]
+      returnType: void
+    - name: LineTo
+      category: line
+      description: "Draw line from current pen position to (h, v)"
+      signature: "PROCEDURE LineTo(h, v: Integer)"
+      parameters: [{ name: h, type: Integer }, { name: v, type: Integer }]
+      returnType: void
+    - name: Line
+      category: line
+      description: "Draw line from current position by (dh, dv)"
+      signature: "PROCEDURE Line(dh, dv: Integer)"
+      parameters: [{ name: dh, type: Integer }, { name: dv, type: Integer }]
+      returnType: void
+    - name: StdLine
+      category: line
+      description: "Bottleneck line procedure"
+      signature: "PROCEDURE StdLine(port: GrafPtr; newPt: Point)"
+      parameters: [{ name: port, type: GrafPtr }, { name: newPt, type: Point }]
+      returnType: void
+
+    # Point and Rect (math)
+    - name: SetPt
+      category: point
+      description: "Set point coordinates"
+      signature: "PROCEDURE SetPt(VAR pt: Point; h, v: Integer)"
+      parameters: []
+      returnType: void
+    - name: EqualPt
+      category: point
+      description: "Return TRUE if two points are equal"
+      signature: "FUNCTION EqualPt(pt1, pt2: Point): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: AddPt
+      category: point
+      description: "Add src to dst (in place)"
+      signature: "PROCEDURE AddPt(src: Point; VAR dst: Point)"
+      parameters: []
+      returnType: void
+    - name: SubPt
+      category: point
+      description: "Subtract src from dst (in place)"
+      signature: "PROCEDURE SubPt(src: Point; VAR dst: Point)"
+      parameters: []
+      returnType: void
+    - name: LocalToGlobal
+      category: point
+      description: "Convert point from local to global coordinates"
+      signature: "PROCEDURE LocalToGlobal(VAR pt: Point)"
+      parameters: []
+      returnType: void
+    - name: GlobalToLocal
+      category: point
+      description: "Convert point from global to local coordinates"
+      signature: "PROCEDURE GlobalToLocal(VAR pt: Point)"
+      parameters: []
+      returnType: void
+    - name: ScalePt
+      category: point
+      description: "Scale point by numer/denom"
+      signature: "PROCEDURE ScalePt(VAR pt: Point; numer, denom: Point; vh: VHSelect)"
+      parameters: []
+      returnType: void
+    - name: MapPt
+      category: point
+      description: "Map point from one rect to another"
+      signature: "PROCEDURE MapPt(VAR pt: Point; fromRect, toRect: Rect)"
+      parameters: []
+      returnType: void
+    - name: SetRect
+      category: rect
+      description: "Set rect to (left, top, right, bottom)"
+      signature: "PROCEDURE SetRect(VAR r: Rect; left, top, right, bottom: Integer)"
+      parameters: []
+      returnType: void
+    - name: EqualRect
+      category: rect
+      description: "Return TRUE if two rects are equal"
+      signature: "FUNCTION EqualRect(rect1, rect2: Rect): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: EmptyRect
+      category: rect
+      description: "Return TRUE if rect has no area"
+      signature: "FUNCTION EmptyRect(r: Rect): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: PtInRect
+      category: rect
+      description: "Return TRUE if point is inside rect"
+      signature: "FUNCTION PtInRect(pt: Point; r: Rect): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: OffsetRect
+      category: rect
+      description: "Move rect by (dh, dv)"
+      signature: "PROCEDURE OffsetRect(VAR r: Rect; dh, dv: Integer)"
+      parameters: []
+      returnType: void
+    - name: InsetRect
+      category: rect
+      description: "Inset rect edges by dh, dv"
+      signature: "PROCEDURE InsetRect(VAR r: Rect; dh, dv: Integer)"
+      parameters: []
+      returnType: void
+    - name: SectRect
+      category: rect
+      description: "Set dst to intersection of src1 and src2; return TRUE if not empty"
+      signature: "FUNCTION SectRect(src1, src2: Rect; VAR dstRect: Rect): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: UnionRect
+      category: rect
+      description: "Set dst to smallest rect containing both src1 and src2"
+      signature: "PROCEDURE UnionRect(src1, src2: Rect; VAR dstRect: Rect)"
+      parameters: []
+      returnType: void
+    - name: MapRect
+      category: rect
+      description: "Map rect from one coordinate system to another"
+      signature: "PROCEDURE MapRect(VAR r: Rect; fromRect, toRect: Rect)"
+      parameters: []
+      returnType: void
+    - name: Pt2Rect
+      category: rect
+      description: "Set dst to smallest rect containing pt1 and pt2"
+      signature: "PROCEDURE Pt2Rect(pt1, pt2: Point; VAR dstRect: Rect)"
+      parameters: []
+      returnType: void
+
+    # Rect drawing
+    - name: StdRect
+      category: drawing
+      description: "Bottleneck rect procedure (verb: FRAME, PAINT, ERASE, INVERT, FILL)"
+      signature: "PROCEDURE StdRect(verb: GrafVerb; r: Rect; fillPat: Pattern)"
+      parameters: []
+      returnType: void
+    - name: FrameRect
+      category: drawing
+      description: "Draw outline of rect with current pen"
+      signature: "PROCEDURE FrameRect(r: Rect)"
+      parameters: [{ name: r, type: Rect, direction: in }]
+      returnType: void
+    - name: PaintRect
+      category: drawing
+      description: "Fill rect with current pen pattern"
+      signature: "PROCEDURE PaintRect(r: Rect)"
+      parameters: [{ name: r, type: Rect, direction: in }]
+      returnType: void
+    - name: EraseRect
+      category: drawing
+      description: "Fill rect with background pattern"
+      signature: "PROCEDURE EraseRect(r: Rect)"
+      parameters: [{ name: r, type: Rect, direction: in }]
+      returnType: void
+    - name: InvertRect
+      category: drawing
+      description: "Invert all pixels in rect"
+      signature: "PROCEDURE InvertRect(r: Rect)"
+      parameters: [{ name: r, type: Rect, direction: in }]
+      returnType: void
+    - name: FillRect
+      category: drawing
+      description: "Fill rect with given pattern"
+      signature: "PROCEDURE FillRect(r: Rect; pat: Pattern)"
+      parameters: [{ name: r, type: Rect }, { name: pat, type: Pattern }]
+      returnType: void
+
+    # RoundRect, Oval, Arc
+    - name: FrameRoundRect
+      category: drawing
+      description: "Draw rounded rectangle outline"
+      signature: "PROCEDURE FrameRoundRect(r: Rect; ovWd, ovHt: Integer)"
+      parameters: []
+      returnType: void
+    - name: PaintRoundRect
+      category: drawing
+      description: "Fill rounded rectangle"
+      signature: "PROCEDURE PaintRoundRect(r: Rect; ovWd, ovHt: Integer)"
+      parameters: []
+      returnType: void
+    - name: EraseRoundRect
+      category: drawing
+      description: "Erase rounded rectangle with background pattern"
+      signature: "PROCEDURE EraseRoundRect(r: Rect; ovWd, ovHt: Integer)"
+      parameters: []
+      returnType: void
+    - name: InvertRoundRect
+      category: drawing
+      description: "Invert pixels in rounded rectangle"
+      signature: "PROCEDURE InvertRoundRect(r: Rect; ovWd, ovHt: Integer)"
+      parameters: []
+      returnType: void
+    - name: FillRoundRect
+      category: drawing
+      description: "Fill rounded rectangle with pattern"
+      signature: "PROCEDURE FillRoundRect(r: Rect; ovWd, ovHt: Integer; pat: Pattern)"
+      parameters: []
+      returnType: void
+    - name: FrameOval
+      category: drawing
+      description: "Draw oval outline in rect"
+      signature: "PROCEDURE FrameOval(r: Rect)"
+      parameters: []
+      returnType: void
+    - name: PaintOval
+      category: drawing
+      description: "Fill oval"
+      signature: "PROCEDURE PaintOval(r: Rect)"
+      parameters: []
+      returnType: void
+    - name: EraseOval
+      category: drawing
+      description: "Erase oval with background pattern"
+      signature: "PROCEDURE EraseOval(r: Rect)"
+      parameters: []
+      returnType: void
+    - name: InvertOval
+      category: drawing
+      description: "Invert oval pixels"
+      signature: "PROCEDURE InvertOval(r: Rect)"
+      parameters: []
+      returnType: void
+    - name: FillOval
+      category: drawing
+      description: "Fill oval with pattern"
+      signature: "PROCEDURE FillOval(r: Rect; pat: Pattern)"
+      parameters: []
+      returnType: void
+    - name: FrameArc
+      category: drawing
+      description: "Draw arc outline"
+      signature: "PROCEDURE FrameArc(r: Rect; startAngle, arcAngle: Integer)"
+      parameters: []
+      returnType: void
+    - name: PaintArc
+      category: drawing
+      description: "Fill arc"
+      signature: "PROCEDURE PaintArc(r: Rect; startAngle, arcAngle: Integer)"
+      parameters: []
+      returnType: void
+    - name: EraseArc
+      category: drawing
+      description: "Erase arc"
+      signature: "PROCEDURE EraseArc(r: Rect; startAngle, arcAngle: Integer)"
+      parameters: []
+      returnType: void
+    - name: InvertArc
+      category: drawing
+      description: "Invert arc"
+      signature: "PROCEDURE InvertArc(r: Rect; startAngle, arcAngle: Integer)"
+      parameters: []
+      returnType: void
+    - name: FillArc
+      category: drawing
+      description: "Fill arc with pattern"
+      signature: "PROCEDURE FillArc(r: Rect; startAngle, arcAngle: Integer; pat: Pattern)"
+      parameters: []
+      returnType: void
+    - name: PtToAngle
+      category: drawing
+      description: "Return angle in degrees from rect center to point"
+      signature: "FUNCTION PtToAngle(r: Rect; pt: Point): Integer"
+      parameters: []
+      returnType: Integer
+
+    # Polygon
+    - name: OpenPoly
+      category: polygon
+      description: "Start recording a new polygon"
+      signature: "FUNCTION OpenPoly(): PolyHandle"
+      parameters: []
+      returnType: PolyHandle
+    - name: ClosePoly
+      category: polygon
+      description: "Finish recording polygon"
+      signature: "PROCEDURE ClosePoly"
+      parameters: []
+      returnType: void
+    - name: KillPoly
+      category: polygon
+      description: "Dispose of polygon"
+      signature: "PROCEDURE KillPoly(poly: PolyHandle)"
+      parameters: []
+      returnType: void
+    - name: OffsetPoly
+      category: polygon
+      description: "Move polygon by (dh, dv)"
+      signature: "PROCEDURE OffsetPoly(poly: PolyHandle; dh, dv: Integer)"
+      parameters: []
+      returnType: void
+    - name: MapPoly
+      category: polygon
+      description: "Map polygon from one rect to another"
+      signature: "PROCEDURE MapPoly(poly: PolyHandle; fromRect, toRect: Rect)"
+      parameters: []
+      returnType: void
+    - name: FramePoly
+      category: polygon
+      description: "Draw polygon outline"
+      signature: "PROCEDURE FramePoly(poly: PolyHandle)"
+      parameters: []
+      returnType: void
+    - name: PaintPoly
+      category: polygon
+      description: "Fill polygon"
+      signature: "PROCEDURE PaintPoly(poly: PolyHandle)"
+      parameters: []
+      returnType: void
+    - name: ErasePoly
+      category: polygon
+      description: "Erase polygon"
+      signature: "PROCEDURE ErasePoly(poly: PolyHandle)"
+      parameters: []
+      returnType: void
+    - name: InvertPoly
+      category: polygon
+      description: "Invert polygon"
+      signature: "PROCEDURE InvertPoly(poly: PolyHandle)"
+      parameters: []
+      returnType: void
+    - name: FillPoly
+      category: polygon
+      description: "Fill polygon with pattern"
+      signature: "PROCEDURE FillPoly(poly: PolyHandle; pat: Pattern)"
+      parameters: []
+      returnType: void
+
+    # Regions
+    - name: NewRgn
+      category: region
+      description: "Create a new empty region"
+      signature: "FUNCTION NewRgn(): RgnHandle"
+      parameters: []
+      returnType: RgnHandle
+    - name: DisposeRgn
+      category: region
+      description: "Dispose of region"
+      signature: "PROCEDURE DisposeRgn(rgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: CopyRgn
+      category: region
+      description: "Copy src to dst"
+      signature: "PROCEDURE CopyRgn(srcRgn, dstRgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: SetEmptyRgn
+      category: region
+      description: "Set region to empty"
+      signature: "PROCEDURE SetEmptyRgn(rgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: SetRectRgn
+      category: region
+      description: "Set region to the given rect"
+      signature: "PROCEDURE SetRectRgn(rgn: RgnHandle; left, top, right, bottom: Integer)"
+      parameters: []
+      returnType: void
+    - name: RectRgn
+      category: region
+      description: "Set region to rect"
+      signature: "PROCEDURE RectRgn(rgn: RgnHandle; r: Rect)"
+      parameters: []
+      returnType: void
+    - name: OpenRgn
+      category: region
+      description: "Start recording a new region"
+      signature: "PROCEDURE OpenRgn"
+      parameters: []
+      returnType: void
+    - name: CloseRgn
+      category: region
+      description: "Finish recording region into dstRgn"
+      signature: "PROCEDURE CloseRgn(dstRgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: OffsetRgn
+      category: region
+      description: "Move region by (dh, dv)"
+      signature: "PROCEDURE OffsetRgn(rgn: RgnHandle; dh, dv: Integer)"
+      parameters: []
+      returnType: void
+    - name: InsetRgn
+      category: region
+      description: "Inset region by (dh, dv)"
+      signature: "PROCEDURE InsetRgn(rgn: RgnHandle; dh, dv: Integer)"
+      parameters: []
+      returnType: void
+    - name: SectRgn
+      category: region
+      description: "Set dst to intersection of srcA and srcB"
+      signature: "PROCEDURE SectRgn(srcA, srcB, dst: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: UnionRgn
+      category: region
+      description: "Set dst to union of srcA and srcB"
+      signature: "PROCEDURE UnionRgn(srcA, srcB, dst: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: DiffRgn
+      category: region
+      description: "Set dst to srcA minus srcB"
+      signature: "PROCEDURE DiffRgn(srcA, srcB, dst: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: XorRgn
+      category: region
+      description: "Set dst to XOR of srcA and srcB"
+      signature: "PROCEDURE XorRgn(srcA, srcB, dst: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: EqualRgn
+      category: region
+      description: "Return TRUE if two regions are equal"
+      signature: "FUNCTION EqualRgn(rgnA, rgnB: RgnHandle): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: EmptyRgn
+      category: region
+      description: "Return TRUE if region is empty"
+      signature: "FUNCTION EmptyRgn(rgn: RgnHandle): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: PtInRgn
+      category: region
+      description: "Return TRUE if point is in region"
+      signature: "FUNCTION PtInRgn(pt: Point; rgn: RgnHandle): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: RectInRgn
+      category: region
+      description: "Return TRUE if rect intersects region"
+      signature: "FUNCTION RectInRgn(r: Rect; rgn: RgnHandle): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: FrameRgn
+      category: region
+      description: "Draw region outline"
+      signature: "PROCEDURE FrameRgn(rgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: PaintRgn
+      category: region
+      description: "Fill region with pen pattern"
+      signature: "PROCEDURE PaintRgn(rgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: EraseRgn
+      category: region
+      description: "Erase region"
+      signature: "PROCEDURE EraseRgn(rgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: InvertRgn
+      category: region
+      description: "Invert region"
+      signature: "PROCEDURE InvertRgn(rgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: FillRgn
+      category: region
+      description: "Fill region with pattern"
+      signature: "PROCEDURE FillRgn(rgn: RgnHandle; pat: Pattern)"
+      parameters: []
+      returnType: void
+
+    # BitMap
+    - name: CopyBits
+      category: bitmap
+      description: "Copy rectangle from source bitmap to destination (with transfer mode)"
+      signature: "PROCEDURE CopyBits(srcBits: BitMap; dstBits: BitMap; srcRect, dstRect: Rect; mode: Integer; maskRgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: ScrollRect
+      category: bitmap
+      description: "Scroll a rectangle's contents"
+      signature: "PROCEDURE ScrollRect(r: Rect; dh, dv: Integer; updateRgn: RgnHandle)"
+      parameters: []
+      returnType: void
+
+    # Picture
+    - name: OpenPicture
+      category: picture
+      description: "Start recording a picture"
+      signature: "FUNCTION OpenPicture(picFrame: Rect): PicHandle"
+      parameters: []
+      returnType: PicHandle
+    - name: ClosePicture
+      category: picture
+      description: "Finish recording picture"
+      signature: "PROCEDURE ClosePicture"
+      parameters: []
+      returnType: void
+    - name: KillPicture
+      category: picture
+      description: "Dispose of picture"
+      signature: "PROCEDURE KillPicture(pic: PicHandle)"
+      parameters: []
+      returnType: void
+    - name: DrawPicture
+      category: picture
+      description: "Replay picture into current port"
+      signature: "PROCEDURE DrawPicture(myPicture: PicHandle; dstRect: Rect)"
+      parameters: []
+      returnType: void
+    - name: PicComment
+      category: picture
+      description: "Add a comment to the current picture"
+      signature: "PROCEDURE PicComment(kind, dataSize: Integer; dataHandle: Handle)"
+      parameters: []
+      returnType: void
+    - name: StdGetPic
+      category: picture
+      description: "Standard get picture data proc"
+      signature: "PROCEDURE StdGetPic(dataPtr: Ptr; byteCount: LongInt)"
+      parameters: []
+      returnType: void
+    - name: StdPutPic
+      category: picture
+      description: "Standard put picture data proc"
+      signature: "PROCEDURE StdPutPic(dataPtr: Ptr; byteCount: LongInt)"
+      parameters: []
+      returnType: void
+
+    # Text
+    - name: TextFont
+      category: text
+      description: "Set font number"
+      signature: "PROCEDURE TextFont(font: Integer)"
+      parameters: []
+      returnType: void
+    - name: TextFace
+      category: text
+      description: "Set text style (bold, italic, etc.)"
+      signature: "PROCEDURE TextFace(face: Style)"
+      parameters: []
+      returnType: void
+    - name: TextMode
+      category: text
+      description: "Set text transfer mode"
+      signature: "PROCEDURE TextMode(mode: Integer)"
+      parameters: []
+      returnType: void
+    - name: TextSize
+      category: text
+      description: "Set font size in points"
+      signature: "PROCEDURE TextSize(size: Integer)"
+      parameters: []
+      returnType: void
+    - name: SpaceExtra
+      category: text
+      description: "Set extra space between words"
+      signature: "PROCEDURE SpaceExtra(extra: Fixed)"
+      parameters: []
+      returnType: void
+    - name: DrawChar
+      category: text
+      description: "Draw a single character at current position"
+      signature: "PROCEDURE DrawChar(ch: Char)"
+      parameters: []
+      returnType: void
+    - name: DrawString
+      category: text
+      description: "Draw Pascal string at current position"
+      signature: "PROCEDURE DrawString(s: Str255)"
+      parameters: []
+      returnType: void
+    - name: DrawText
+      category: text
+      description: "Draw text in a rect with length byte"
+      signature: "PROCEDURE DrawText(textBuf: Ptr; firstByte, byteCount: Integer)"
+      parameters: []
+      returnType: void
+    - name: CharWidth
+      category: text
+      description: "Return width of character in pixels"
+      signature: "FUNCTION CharWidth(ch: Char): Integer"
+      parameters: []
+      returnType: Integer
+    - name: StringWidth
+      category: text
+      description: "Return width of Pascal string in pixels"
+      signature: "FUNCTION StringWidth(s: Str255): Integer"
+      parameters: []
+      returnType: Integer
+    - name: TextWidth
+      category: text
+      description: "Return width of text range in pixels"
+      signature: "FUNCTION TextWidth(textBuf: Ptr; firstByte, byteCount: Integer): Integer"
+      parameters: []
+      returnType: Integer
+    - name: GetFontInfo
+      category: text
+      description: "Fill FontInfo with current font metrics"
+      signature: "PROCEDURE GetFontInfo(VAR info: FontInfo)"
+      parameters: []
+      returnType: void
+    - name: StdText
+      category: text
+      description: "Bottleneck text procedure"
+      signature: "PROCEDURE StdText(count: Integer; textAddr: Ptr; numer, denom: Point)"
+      parameters: []
+      returnType: void
+    - name: StdTxMeas
+      category: text
+      description: "Bottleneck text measurement procedure"
+      signature: "FUNCTION StdTxMeas(count: Integer; textAddr: Ptr; numer, denom: Point; VAR info: FontInfo): Integer"
+      parameters: []
+      returnType: Integer
+
+    # Bottleneck and utilities
+    - name: SetStdProcs
+      category: bottleneck
+      description: "Install standard QuickDraw procedures into a QDProcs record"
+      signature: "PROCEDURE SetStdProcs(procs: QDProcs)"
+      parameters: []
+      returnType: void
+    - name: StdBits
+      category: bottleneck
+      description: "Standard CopyBits bottleneck"
+      signature: "PROCEDURE StdBits(srcBits: BitMap; srcRect: Rect; dstBits: BitMap; dstRect: Rect; mode: Integer; maskRgn: RgnHandle)"
+      parameters: []
+      returnType: void
+    - name: StdComment
+      category: bottleneck
+      description: "Standard picture comment bottleneck"
+      signature: "PROCEDURE StdComment(kind, dataSize: Integer; dataHandle: Handle)"
+      parameters: []
+      returnType: void
+    - name: GetPixel
+      category: utility
+      description: "Return pixel value at (h, v) in current port"
+      signature: "FUNCTION GetPixel(h, v: Integer): Boolean"
+      parameters: []
+      returnType: Boolean
+    - name: Random
+      category: utility
+      description: "Return pseudo-random number"
+      signature: "FUNCTION Random(): Integer"
+      parameters: []
+      returnType: Integer
+    - name: StuffHex
+      category: utility
+      description: "Write hex string into memory"
+      signature: "PROCEDURE StuffHex(thingPtr: Ptr; s: Str255)"
+      parameters: []
+      returnType: void
+    - name: ForeColor
+      category: utility
+      description: "Set foreground color"
+      signature: "PROCEDURE ForeColor(color: LongInt)"
+      parameters: []
+      returnType: void
+    - name: BackColor
+      category: utility
+      description: "Set background color"
+      signature: "PROCEDURE BackColor(color: LongInt)"
+      parameters: []
+      returnType: void
+    - name: ColorBit
+      category: utility
+      description: "Set color bit for separations"
+      signature: "PROCEDURE ColorBit(whichBit: Integer)"
+      parameters: []
+      returnType: void
+
+# ---------------------------------------------------------------------------
+# Toolbox Managers
+# ---------------------------------------------------------------------------
+managers:
+  - id: window-manager
+    name: "Window Manager"
+    description: "Creates, moves, resizes, and manages the layering of windows; maintains the gray region (desktop). Window chrome is drawn by Window Definition Functions using QuickDraw."
+
+    types:
+      - name: WindowRecord
+        kind: record
+        description: "Monochrome window record; first field is GrafPort so WindowPtr = GrafPtr"
+        fields:
+          - { name: port, type: GrafPort }
+          - {
+              name: windowKind,
+              type: Integer,
+              description: "e.g. userKind, dialogKind",
+            }
+          - { name: visible, type: Boolean }
+          - { name: hilited, type: Boolean }
+          - {
+              name: goAwayFlag,
+              type: Boolean,
+              description: "TRUE if close box",
+            }
+          - { name: spareFlag, type: Boolean, description: "TRUE if zoom box" }
+          - {
+              name: strucRgn,
+              type: RgnHandle,
+              description: "Entire window area",
+            }
+          - { name: contRgn, type: RgnHandle, description: "Content region" }
+          - {
+              name: updateRgn,
+              type: RgnHandle,
+              description: "Area needing redraw",
+            }
+          - {
+              name: windowDefProc,
+              type: Handle,
+              description: "Window definition function",
+            }
+          - {
+              name: dataHandle,
+              type: Handle,
+              description: "e.g. WStateData for zoom",
+            }
+          - { name: titleHandle, type: StringHandle }
+          - { name: titleWidth, type: Integer }
+          - { name: controlList, type: ControlHandle }
+          - { name: nextWindow, type: WindowPeek }
+          - {
+              name: windowPic,
+              type: PicHandle,
+              description: "Optional for auto-update",
+            }
+          - { name: refCon, type: LongInt }
+      - name: WindowPtr
+        kind: type
+        description: "Pointer to window; same as GrafPtr (port is first field)"
+      - name: WindowPeek
+        kind: type
+        description: "Pointer to full WindowRecord for accessing fields beyond the port"
+
+    routines:
+      - name: GetNewWindow
+        category: creation
+        description: "Create window from WIND resource"
+        signature: "FUNCTION GetNewWindow(windowID: Integer; wStorage: Ptr; behind: WindowPtr): WindowPtr"
+        parameters:
+          - { name: windowID, type: Integer }
+          - { name: wStorage, type: Ptr }
+          - { name: behind, type: WindowPtr }
+        returnType: WindowPtr
+      - name: NewWindow
+        category: creation
+        description: "Create window with explicit parameters"
+        signature: "FUNCTION NewWindow(wStorage: Ptr; boundsRect: Rect; title: Str255; visible: Boolean; theProc: Integer; behind: WindowPtr; goAwayFlag: Boolean; refCon: LongInt): WindowPtr"
+        parameters: []
+        returnType: WindowPtr
+      - name: GetNewCWindow
+        category: creation
+        description: "Create color window from resource"
+        signature: "FUNCTION GetNewCWindow(windowID: Integer; wStorage: Ptr; behind: WindowPtr): WindowPtr"
+        parameters: []
+        returnType: WindowPtr
+      - name: NewCWindow
+        category: creation
+        description: "Create color window with explicit parameters"
+        signature: "FUNCTION NewCWindow(wStorage: Ptr; boundsRect: Rect; title: Str255; visible: Boolean; procID: Integer; behind: WindowPtr; goAwayFlag: Boolean; refCon: LongInt): WindowPtr"
+        parameters: []
+        returnType: WindowPtr
+      - name: ShowWindow
+        category: visibility
+        description: "Display a window"
+        signature: "PROCEDURE ShowWindow(theWindow: WindowPtr)"
+        parameters: [{ name: theWindow, type: WindowPtr }]
+        returnType: void
+      - name: HideWindow
+        category: visibility
+        description: "Hide a window"
+        signature: "PROCEDURE HideWindow(theWindow: WindowPtr)"
+        parameters: [{ name: theWindow, type: WindowPtr }]
+        returnType: void
+      - name: ShowHide
+        category: visibility
+        description: "Show or hide window according to flag"
+        signature: "PROCEDURE ShowHide(theWindow: WindowPtr; showFlag: Boolean)"
+        parameters: []
+        returnType: void
+      - name: SelectWindow
+        category: activation
+        description: "Make window active, bring to front, highlight"
+        signature: "PROCEDURE SelectWindow(theWindow: WindowPtr)"
+        parameters: [{ name: theWindow, type: WindowPtr }]
+        returnType: void
+      - name: FrontWindow
+        category: activation
+        description: "Return the frontmost (active) window"
+        signature: "FUNCTION FrontWindow(): WindowPtr"
+        parameters: []
+        returnType: WindowPtr
+      - name: BringToFront
+        category: activation
+        description: "Move window to front of list without changing highlight"
+        signature: "PROCEDURE BringToFront(theWindow: WindowPtr)"
+        parameters: []
+        returnType: void
+      - name: SendBehind
+        category: activation
+        description: "Move window behind another"
+        signature: "PROCEDURE SendBehind(theWindow, behindWindow: WindowPtr)"
+        parameters: []
+        returnType: void
+      - name: HiliteWindow
+        category: activation
+        description: "Set or clear window highlight"
+        signature: "PROCEDURE HiliteWindow(theWindow: WindowPtr; fHilite: Boolean)"
+        parameters: []
+        returnType: void
+      - name: DragWindow
+        category: move-resize
+        description: "Track window drag from startPt, constrained by boundsRect"
+        signature: "PROCEDURE DragWindow(theWindow: WindowPtr; startPt: Point; boundsRect: Rect)"
+        parameters: []
+        returnType: void
+      - name: MoveWindow
+        category: move-resize
+        description: "Move window to (hGlobal, vGlobal)"
+        signature: "PROCEDURE MoveWindow(theWindow: WindowPtr; hGlobal, vGlobal: Integer; front: Boolean)"
+        parameters: []
+        returnType: void
+      - name: GrowWindow
+        category: move-resize
+        description: "Track grow box; return new size"
+        signature: "FUNCTION GrowWindow(theWindow: WindowPtr; startPt: Point; sizeRect: Rect): LongInt"
+        parameters: []
+        returnType: LongInt
+      - name: SizeWindow
+        category: move-resize
+        description: "Resize window to w x h"
+        signature: "PROCEDURE SizeWindow(theWindow: WindowPtr; w, h: Integer; fUpdate: Boolean)"
+        parameters: []
+        returnType: void
+      - name: TrackBox
+        category: zoom
+        description: "Track zoom box click; return TRUE if zoom"
+        signature: "FUNCTION TrackBox(theWindow: WindowPtr; thePt: Point; partCode: Integer): Boolean"
+        parameters: []
+        returnType: Boolean
+      - name: ZoomWindow
+        category: zoom
+        description: "Zoom window to user or standard state"
+        signature: "PROCEDURE ZoomWindow(theWindow: WindowPtr; partCode: Integer; front: Boolean)"
+        parameters: []
+        returnType: void
+      - name: TrackGoAway
+        category: close
+        description: "Track close box; return TRUE if close"
+        signature: "FUNCTION TrackGoAway(theWindow: WindowPtr; thePt: Point): Boolean"
+        parameters: []
+        returnType: Boolean
+      - name: CloseWindow
+        category: close
+        description: "Remove window from screen; does not dispose WindowRecord"
+        signature: "PROCEDURE CloseWindow(theWindow: WindowPtr)"
+        parameters: []
+        returnType: void
+      - name: DisposeWindow
+        category: close
+        description: "Close window and release WindowRecord memory"
+        signature: "PROCEDURE DisposeWindow(theWindow: WindowPtr)"
+        parameters: []
+        returnType: void
+      - name: BeginUpdate
+        category: update
+        description: "Begin redrawing; set clip to update region"
+        signature: "PROCEDURE BeginUpdate(theWindow: WindowPtr)"
+        parameters: []
+        returnType: void
+      - name: EndUpdate
+        category: update
+        description: "End redrawing"
+        signature: "PROCEDURE EndUpdate(theWindow: WindowPtr)"
+        parameters: []
+        returnType: void
+      - name: InvalRect
+        category: update
+        description: "Mark rect as needing redraw"
+        signature: "PROCEDURE InvalRect(badRect: Rect)"
+        parameters: []
+        returnType: void
+      - name: InvalRgn
+        category: update
+        description: "Mark region as needing redraw"
+        signature: "PROCEDURE InvalRgn(badRgn: RgnHandle)"
+        parameters: []
+        returnType: void
+      - name: ValidRect
+        category: update
+        description: "Mark rect as valid (no redraw needed)"
+        signature: "PROCEDURE ValidRect(goodRect: Rect)"
+        parameters: []
+        returnType: void
+      - name: ValidRgn
+        category: update
+        description: "Mark region as valid"
+        signature: "PROCEDURE ValidRgn(goodRgn: RgnHandle)"
+        parameters: []
+        returnType: void
+      - name: FindWindow
+        category: misc
+        description: "Identify which part of which window was clicked; return part code"
+        signature: "FUNCTION FindWindow(thePoint: Point; VAR theWindow: WindowPtr): Integer"
+        parameters: []
+        returnType: Integer
+      - name: GetWTitle
+        category: misc
+        description: "Get window title"
+        signature: "PROCEDURE GetWTitle(theWindow: WindowPtr; VAR title: Str255)"
+        parameters: []
+        returnType: void
+      - name: SetWTitle
+        category: misc
+        description: "Set window title"
+        signature: "PROCEDURE SetWTitle(theWindow: WindowPtr; title: Str255)"
+        parameters: []
+        returnType: void
+      - name: GetWRefCon
+        category: misc
+        description: "Get window reference constant"
+        signature: "FUNCTION GetWRefCon(theWindow: WindowPtr): LongInt"
+        parameters: []
+        returnType: LongInt
+      - name: SetWRefCon
+        category: misc
+        description: "Set window reference constant"
+        signature: "PROCEDURE SetWRefCon(theWindow: WindowPtr; data: LongInt)"
+        parameters: []
+        returnType: void
+      - name: GetWVariant
+        category: misc
+        description: "Get window variant"
+        signature: "FUNCTION GetWVariant(theWindow: WindowPtr): Integer"
+        parameters: []
+        returnType: Integer
+      - name: DrawGrowIcon
+        category: misc
+        description: "Draw size box and scroll bar outlines"
+        signature: "PROCEDURE DrawGrowIcon(theWindow: WindowPtr)"
+        parameters: []
+        returnType: void
+
+  - id: control-manager
+    name: "Control Manager"
+    description: "Creates and manipulates onscreen controls (buttons, checkboxes, radio buttons, scroll bars). Draws via QuickDraw (CDEF); applications use DrawControl/UpdateControls."
+
+    types:
+      - name: ControlHandle
+        kind: handle
+        baseType: ControlRecord
+        description: "Handle to a control"
+      - name: ControlRecord
+        kind: record
+        description: "Control definition; kind (pushButton, checkBox, radioButton, etc.), bounds, value, min, max, refCon"
+
+    routines:
+      - name: NewControl
+        category: creation
+        description: "Create control with explicit parameters"
+        signature: "FUNCTION NewControl(theWindow: WindowPtr; boundsRect: Rect; title: Str255; visible: Boolean; value, min, max, procID: Integer; refCon: LongInt): ControlHandle"
+        parameters: []
+        returnType: ControlHandle
+      - name: GetNewControl
+        category: creation
+        description: "Create control from CNTL resource"
+        signature: "FUNCTION GetNewControl(controlID: Integer; owner: WindowPtr): ControlHandle"
+        parameters: []
+        returnType: ControlHandle
+      - name: DrawControls
+        category: drawing
+        description: "Draw all visible controls in a window"
+        signature: "PROCEDURE DrawControls(theWindow: WindowPtr)"
+        parameters: []
+        returnType: void
+      - name: Draw1Control
+        category: drawing
+        description: "Draw a single control if visible"
+        signature: "PROCEDURE Draw1Control(theControl: ControlHandle)"
+        parameters: []
+        returnType: void
+      - name: UpdateControls
+        category: drawing
+        description: "Redraw controls within window's update region"
+        signature: "PROCEDURE UpdateControls(theWindow: WindowPtr; updateRgn: RgnHandle)"
+        parameters: []
+        returnType: void
+      - name: FindControl
+        category: hit-test
+        description: "Find which control (if any) contains the point; return part code"
+        signature: "FUNCTION FindControl(thePoint: Point; theWindow: WindowPtr; VAR theControl: ControlHandle): Integer"
+        parameters: []
+        returnType: Integer
+      - name: TrackControl
+        category: tracking
+        description: "Track mouse in control; optional actionProc"
+        signature: "FUNCTION TrackControl(theControl: ControlHandle; thePoint: Point; actionProc: ProcPtr): Integer"
+        parameters: []
+        returnType: Integer
+      - name: GetControlValue
+        category: state
+        description: "Get control's current value"
+        signature: "FUNCTION GetControlValue(theControl: ControlHandle): Integer"
+        parameters: []
+        returnType: Integer
+      - name: SetControlValue
+        category: state
+        description: "Set control's value"
+        signature: "PROCEDURE SetControlValue(theControl: ControlHandle; theValue: Integer)"
+        parameters: []
+        returnType: void
+      - name: GetControlMaximum
+        category: state
+        description: "Get control maximum"
+        signature: "FUNCTION GetControlMaximum(theControl: ControlHandle): Integer"
+        parameters: []
+        returnType: Integer
+      - name: SetControlMaximum
+        category: state
+        description: "Set control maximum"
+        signature: "PROCEDURE SetControlMaximum(theControl: ControlHandle; maxValue: Integer)"
+        parameters: []
+        returnType: void
+      - name: ShowControl
+        category: visibility
+        description: "Show control and draw it"
+        signature: "PROCEDURE ShowControl(theControl: ControlHandle)"
+        parameters: []
+        returnType: void
+      - name: HideControl
+        category: visibility
+        description: "Hide control and erase it"
+        signature: "PROCEDURE HideControl(theControl: ControlHandle)"
+        parameters: []
+        returnType: void
+      - name: MoveControl
+        category: layout
+        description: "Move control"
+        signature: "PROCEDURE MoveControl(theControl: ControlHandle; h, v: Integer)"
+        parameters: []
+        returnType: void
+      - name: SizeControl
+        category: layout
+        description: "Resize control"
+        signature: "PROCEDURE SizeControl(theControl: ControlHandle; w, h: Integer)"
+        parameters: []
+        returnType: void
+
+  - id: menu-manager
+    name: "Menu Manager"
+    description: "Creates and manages pull-down, pop-up, and hierarchical menus. Draws via MDEF/MBDF using QuickDraw."
+
+    types:
+      - name: MenuHandle
+        kind: handle
+        baseType: MenuInfo
+        description: "Handle to a menu"
+      - name: MenuInfo
+        kind: record
+        description: "Menu structure (title, items, etc.)"
+
+    routines:
+      - name: NewMenu
+        category: creation
+        description: "Create menu with ID and title"
+        signature: "FUNCTION NewMenu(menuID: Integer; menuTitle: Str255): MenuHandle"
+        parameters: []
+        returnType: MenuHandle
+      - name: GetMenu
+        category: creation
+        description: "Load menu from MENU resource"
+        signature: "FUNCTION GetMenu(resourceID: Integer): MenuHandle"
+        parameters: []
+        returnType: MenuHandle
+      - name: GetNewMBar
+        category: creation
+        description: "Create menu bar from MBAR resource"
+        signature: "FUNCTION GetNewMBar(menuBarID: Integer): Handle"
+        parameters: []
+        returnType: Handle
+      - name: DrawMenuBar
+        category: drawing
+        description: "Redraw the menu bar"
+        signature: "PROCEDURE DrawMenuBar"
+        parameters: []
+        returnType: void
+      - name: InsertMenu
+        category: structure
+        description: "Insert menu into menu list before menu ID"
+        signature: "PROCEDURE InsertMenu(theMenu: MenuHandle; beforeID: Integer)"
+        parameters: []
+        returnType: void
+      - name: AppendMenu
+        category: structure
+        description: "Append menu with item data"
+        signature: "PROCEDURE AppendMenu(menu: MenuHandle; data: Str255)"
+        parameters: []
+        returnType: void
+      - name: MenuSelect
+        category: selection
+        description: "Handle menu bar interaction until mouse release; return menu/item in long (high word = menu, low word = item)"
+        signature: "FUNCTION MenuSelect(startPt: Point): LongInt"
+        parameters: []
+        returnType: LongInt
+      - name: MenuKey
+        category: selection
+        description: "Return menu and item for Command-key equivalent"
+        signature: "FUNCTION MenuKey(ch: Char): LongInt"
+        parameters: []
+        returnType: LongInt
+      - name: HiliteMenu
+        category: selection
+        description: "Highlight or unhighlight menu title in bar"
+        signature: "PROCEDURE HiliteMenu(menuID: Integer)"
+        parameters: []
+        returnType: void
+      - name: GetMenuItemText
+        category: state
+        description: "Get text of menu item"
+        signature: "PROCEDURE GetMenuItemText(theMenu: MenuHandle; item: Integer; VAR itemString: Str255)"
+        parameters: []
+        returnType: void
+      - name: CheckItem
+        category: state
+        description: "Set or clear checkmark on item"
+        signature: "PROCEDURE CheckItem(theMenu: MenuHandle; item: Integer; checked: Boolean)"
+        parameters: []
+        returnType: void
+      - name: EnableItem
+        category: state
+        description: "Enable menu item or entire menu"
+        signature: "PROCEDURE EnableItem(theMenu: MenuHandle; item: Integer)"
+        parameters: []
+        returnType: void
+      - name: DisableItem
+        category: state
+        description: "Disable menu item or entire menu"
+        signature: "PROCEDURE DisableItem(theMenu: MenuHandle; item: Integer)"
+        parameters: []
+        returnType: void
+      - name: InsertMenuItem
+        category: structure
+        description: "Insert item into menu"
+        signature: "PROCEDURE InsertMenuItem(theMenu: MenuHandle; itemString: Str255; afterItem: Integer)"
+        parameters: []
+        returnType: void
+
+  - id: dialog-manager
+    name: "Dialog Manager"
+    description: "Creates and manages alert boxes and dialog boxes (specialized windows). Uses Window Manager and Control Manager."
+
+    types:
+      - name: DialogPtr
+        kind: type
+        description: "Pointer to dialog (window)"
+      - name: ModalFilterProcPtr
+        kind: type
+        description: "Filter procedure for ModalDialog"
+
+    routines:
+      - name: GetNewDialog
+        category: creation
+        description: "Create dialog from DLOG resource"
+        signature: "FUNCTION GetNewDialog(dialogID: Integer; dStorage: Ptr; behind: WindowPtr): DialogPtr"
+        parameters: []
+        returnType: DialogPtr
+      - name: NewDialog
+        category: creation
+        description: "Create dialog with explicit parameters"
+        signature: "FUNCTION NewDialog(dStorage: Ptr; boundsRect: Rect; title: Str255; visible: Boolean; procID: Integer; behind: WindowPtr; goAwayFlag: Boolean; refCon: LongInt): DialogPtr"
+        parameters: []
+        returnType: DialogPtr
+      - name: ModalDialog
+        category: modal
+        description: "Run modal loop until user hits a control; return item number in itemHit"
+        signature: "PROCEDURE ModalDialog(filterProc: ModalFilterProcPtr; VAR itemHit: Integer)"
+        parameters: []
+        returnType: void
+      - name: IsDialogEvent
+        category: modal
+        description: "Return TRUE if event is for this dialog"
+        signature: "FUNCTION IsDialogEvent(theEvent: EventRecord): Boolean"
+        parameters: []
+        returnType: Boolean
+      - name: GetDialogItem
+        category: items
+        description: "Get dialog item type, handle, and rect by item number"
+        signature: "PROCEDURE GetDialogItem(theDialog: DialogPtr; itemNo: Integer; VAR itemType: Integer; VAR item: Handle; VAR box: Rect)"
+        parameters: []
+        returnType: void
+      - name: SetDialogItem
+        category: items
+        description: "Set dialog item"
+        signature: "PROCEDURE SetDialogItem(theDialog: DialogPtr; itemNo, itemType: Integer; item: Handle; box: Rect)"
+        parameters: []
+        returnType: void
+      - name: SelIText
+        category: items
+        description: "Select text in dialog edit item"
+        signature: "PROCEDURE SelIText(theDialog: DialogPtr; itemNo, startSel, endSel: Integer)"
+        parameters: []
+        returnType: void
+      - name: Alert
+        category: alerts
+        description: "Display alert; return item hit"
+        signature: "FUNCTION Alert(alertID: Integer; filterProc: ModalFilterProcPtr): Integer"
+        parameters: []
+        returnType: Integer
+      - name: StopAlert
+        category: alerts
+        description: "Display stop alert"
+        signature: "FUNCTION StopAlert(alertID: Integer; filterProc: ModalFilterProcPtr): Integer"
+        parameters: []
+        returnType: Integer
+      - name: NoteAlert
+        category: alerts
+        description: "Display note alert"
+        signature: "FUNCTION NoteAlert(alertID: Integer; filterProc: ModalFilterProcPtr): Integer"
+        parameters: []
+        returnType: Integer
+      - name: CautionAlert
+        category: alerts
+        description: "Display caution alert"
+        signature: "FUNCTION CautionAlert(alertID: Integer; filterProc: ModalFilterProcPtr): Integer"
+        parameters: []
+        returnType: Integer
+      - name: CouldAlert
+        category: alerts
+        description: "Display could-not alert"
+        signature: "FUNCTION CouldAlert(alertID: Integer; filterProc: ModalFilterProcPtr): Integer"
+        parameters: []
+        returnType: Integer
+
+  - id: event-manager
+    name: "Event Manager"
+    description: "Communicates user actions (key, mouse) and app status (update, activate) to the application. Toolbox Event Manager + OS Event Manager (event queue)."
+
+    types:
+      - name: EventRecord
+        kind: record
+        description: "One event from the queue"
+        fields:
+          - {
+              name: what,
+              type: Integer,
+              description: "Event type (mouseDown, keyDown, updateEvt, etc.)",
+            }
+          - {
+              name: message,
+              type: LongInt,
+              description: "Event-specific (e.g. window ptr, key code)",
+            }
+          - { name: when, type: LongInt, description: "Ticks since boot" }
+          - {
+              name: where,
+              type: Point,
+              description: "Mouse position in global coords",
+            }
+          - {
+              name: modifiers,
+              type: Integer,
+              description: "Modifier keys and mouse button state",
+            }
+
+    constants:
+      - { name: mouseDown, value: 1, description: "Mouse button pressed" }
+      - { name: mouseUp, value: 2, description: "Mouse button released" }
+      - { name: keyDown, value: 3, description: "Key pressed" }
+      - { name: keyUp, value: 4, description: "Key released" }
+      - { name: autoKey, value: 5, description: "Auto-key repeat" }
+      - {
+          name: updateEvt,
+          value: 6,
+          description: "Window content needs redraw",
+        }
+      - { name: diskEvt, value: 7, description: "Disk inserted/ejected" }
+      - {
+          name: activateEvt,
+          value: 8,
+          description: "Window activated or deactivated",
+        }
+      - { name: inDesk, value: 0, description: "FindWindow: in desktop" }
+      - { name: inMenuBar, value: 1, description: "FindWindow: in menu bar" }
+      - {
+          name: inSysWindow,
+          value: 2,
+          description: "FindWindow: in system window",
+        }
+      - { name: inContent, value: 3, description: "FindWindow: in content" }
+      - { name: inDrag, value: 4, description: "FindWindow: in drag region" }
+      - { name: inGrow, value: 5, description: "FindWindow: in grow region" }
+      - { name: inGoAway, value: 6, description: "FindWindow: in close box" }
+      - { name: inZoomIn, value: 7, description: "FindWindow: in zoom in" }
+      - { name: inZoomOut, value: 8, description: "FindWindow: in zoom out" }
+
+    routines:
+      - name: GetNextEvent
+        category: event-loop
+        description: "Get next event matching mask; return TRUE if event found"
+        signature: "FUNCTION GetNextEvent(eventMask: Integer; VAR theEvent: EventRecord): Boolean"
+        parameters: []
+        returnType: Boolean
+      - name: WaitNextEvent
+        category: event-loop
+        description: "Wait for event (with sleep); return TRUE if event found"
+        signature: "FUNCTION WaitNextEvent(eventMask: Integer; VAR theEvent: EventRecord; sleep: LongInt; mouseRgn: RgnHandle): Boolean"
+        parameters: []
+        returnType: Boolean
+      - name: EventAvail
+        category: event-loop
+        description: "Check if event of type in mask is available (non-blocking)"
+        signature: "FUNCTION EventAvail(eventMask: Integer; VAR theEvent: EventRecord): Boolean"
+        parameters: []
+        returnType: Boolean
+      - name: GetMouse
+        category: mouse
+        description: "Return current mouse position in global coordinates"
+        signature: "PROCEDURE GetMouse(VAR thePoint: Point)"
+        parameters: []
+        returnType: void
+      - name: Button
+        category: mouse
+        description: "Return TRUE if mouse button is down"
+        signature: "FUNCTION Button(): Boolean"
+        parameters: []
+        returnType: Boolean
+      - name: StillDown
+        category: mouse
+        description: "Return TRUE if button still down (after initial press)"
+        signature: "FUNCTION StillDown(): Boolean"
+        parameters: []
+        returnType: Boolean
+      - name: TickCount
+        category: time
+        description: "Return ticks since system startup"
+        signature: "FUNCTION TickCount(): LongInt"
+        parameters: []
+        returnType: LongInt
+
+  - id: resource-manager
+    name: "Resource Manager"
+    description: "Manages the resource fork of files; read/write structured data (menus, icons, fonts, DITL, etc.) without interpreting formats."
+
+    types: []
+
+    routines:
+      - name: GetResource
+        category: read
+        description: "Search open resource forks for type/ID; load and return handle"
+        signature: "FUNCTION GetResource(resType: ResType; resID: Integer): Handle"
+        parameters: []
+        returnType: Handle
+      - name: Get1Resource
+        category: read
+        description: "Search only current resource fork for type/ID"
+        signature: "FUNCTION Get1Resource(resType: ResType; resID: Integer): Handle"
+        parameters: []
+        returnType: Handle
+      - name: GetNamedResource
+        category: read
+        description: "Search for resource by type and name"
+        signature: "FUNCTION GetNamedResource(resType: ResType; name: Str255): Handle"
+        parameters: []
+        returnType: Handle
+      - name: LoadResource
+        category: read
+        description: "Ensure resource data is loaded from fork into memory"
+        signature: "PROCEDURE LoadResource(theResource: Handle)"
+        parameters: []
+        returnType: void
+      - name: ReleaseResource
+        category: memory
+        description: "Release resource memory; mark as not loaded in map"
+        signature: "PROCEDURE ReleaseResource(theResource: Handle)"
+        parameters: []
+        returnType: void
+      - name: DetachResource
+        category: memory
+        description: "Detach resource from resource map so memory is no longer managed"
+        signature: "PROCEDURE DetachResource(theResource: Handle)"
+        parameters: []
+        returnType: void
+      - name: AddResource
+        category: write
+        description: "Add new resource entry to current resource fork"
+        signature: "PROCEDURE AddResource(theData: Handle; theType: ResType; theID: Integer; name: Str255)"
+        parameters: []
+        returnType: void
+      - name: WriteResource
+        category: write
+        description: "Write resource data from memory to resource fork"
+        signature: "PROCEDURE WriteResource(theResource: Handle)"
+        parameters: []
+        returnType: void
+      - name: ChangedResource
+        category: write
+        description: "Mark resource modified so it is written when file closes"
+        signature: "PROCEDURE ChangedResource(theResource: Handle)"
+        parameters: []
+        returnType: void
+      - name: SetResLoad
+        category: behavior
+        description: "Toggle auto-load of resource data on retrieval"
+        signature: "PROCEDURE SetResLoad(load: Boolean)"
+        parameters: []
+        returnType: void
+      - name: CurResFile
+        category: behavior
+        description: "Return ref num of current resource file"
+        signature: "FUNCTION CurResFile(): Integer"
+        parameters: []
+        returnType: Integer
+      - name: UseResFile
+        category: behavior
+        description: "Set current resource file for subsequent operations"
+        signature: "PROCEDURE UseResFile(refNum: Integer)"
+        parameters: []
+        returnType: void
+      - name: CountResources
+        category: enumeration
+        description: "Return count of resources of type in current file"
+        signature: "FUNCTION CountResources(theType: ResType): Integer"
+        parameters: []
+        returnType: Integer
+      - name: GetIndResource
+        category: enumeration
+        description: "Return handle to resource by type and index"
+        signature: "FUNCTION GetIndResource(theType: ResType; index: Integer): Handle"
+        parameters: []
+        returnType: Handle
+
+  - id: file-manager
+    name: "File Manager"
+    description: "Handles low-level file operations: open, read, write, close on Macintosh volumes. Data fork and resource fork."
+
+    types: []
+
+    routines:
+      - name: FSpOpenDF
+        category: open
+        description: "Open data fork using FSSpec"
+        signature: "FUNCTION FSpOpenDF(fss: FSSpec; permission: Byte): Integer"
+        parameters: []
+        returnType: Integer
+      - name: FSpOpenRF
+        category: open
+        description: "Open resource fork (e.g. for Resource Manager)"
+        signature: "FUNCTION FSpOpenRF(fss: FSSpec; permission: Byte): Integer"
+        parameters: []
+        returnType: Integer
+      - name: FSpCreate
+        category: create
+        description: "Create new file with creator and type"
+        signature: "FUNCTION FSpCreate(fss: FSSpec; creator, fileType: OSType; scriptTag: ScriptCode): OSErr"
+        parameters: []
+        returnType: OSErr
+      - name: FSRead
+        category: read-write
+        description: "Read bytes from open file into buffer"
+        signature: "FUNCTION FSRead(refNum: Integer; VAR count: LongInt; buffPtr: Ptr): OSErr"
+        parameters: []
+        returnType: OSErr
+      - name: FSWrite
+        category: read-write
+        description: "Write bytes from buffer to open file"
+        signature: "FUNCTION FSWrite(refNum: Integer; VAR count: LongInt; buffPtr: Ptr): OSErr"
+        parameters: []
+        returnType: OSErr
+      - name: FSClose
+        category: close
+        description: "Close file and release ref num"
+        signature: "FUNCTION FSClose(refNum: Integer): OSErr"
+        parameters: []
+        returnType: OSErr
+      - name: SetFPos
+        category: position
+        description: "Set file mark for next read/write"
+        signature: "FUNCTION SetFPos(refNum: Integer; posMode: Integer; posOff: LongInt): OSErr"
+        parameters: []
+        returnType: OSErr
+      - name: FSpGetFInfo
+        category: metadata
+        description: "Get Finder info (type, creator, flags)"
+        signature: "FUNCTION FSpGetFInfo(fss: FSSpec; VAR fndrInfo: FInfo): OSErr"
+        parameters: []
+        returnType: OSErr
+      - name: FSpSetFInfo
+        category: metadata
+        description: "Set Finder info"
+        signature: "FUNCTION FSpSetFInfo(fss: FSSpec; fndrInfo: FInfo): OSErr"
+        parameters: []
+        returnType: OSErr
+
+  - id: memory-manager
+    name: "Memory Manager"
+    description: "Controls memory allocation; manages application partition. Handles (relocatable) and pointers (nonrelocatable)."
+
+    types: []
+
+    routines:
+      - name: NewPtr
+        category: allocation
+        description: "Allocate nonrelocatable block; return pointer"
+        signature: "FUNCTION NewPtr(size: LongInt): Ptr"
+        parameters: []
+        returnType: Ptr
+      - name: DisposePtr
+        category: allocation
+        description: "Release nonrelocatable block"
+        signature: "PROCEDURE DisposePtr(ptr: Ptr)"
+        parameters: []
+        returnType: void
+      - name: NewHandle
+        category: allocation
+        description: "Allocate relocatable block; return handle"
+        signature: "FUNCTION NewHandle(size: LongInt): Handle"
+        parameters: []
+        returnType: Handle
+      - name: DisposeHandle
+        category: allocation
+        description: "Release relocatable block and master pointer"
+        signature: "PROCEDURE DisposeHandle(h: Handle)"
+        parameters: []
+        returnType: void
+      - name: HLock
+        category: locking
+        description: "Lock relocatable block so it cannot move"
+        signature: "PROCEDURE HLock(h: Handle)"
+        parameters: []
+        returnType: void
+      - name: HUnlock
+        category: locking
+        description: "Unlock relocatable block"
+        signature: "PROCEDURE HUnlock(h: Handle)"
+        parameters: []
+        returnType: void
+      - name: HPurge
+        category: purge
+        description: "Mark block purgeable"
+        signature: "PROCEDURE HPurge(h: Handle)"
+        parameters: []
+        returnType: void
+      - name: HNoPurge
+        category: purge
+        description: "Mark block unpurgeable"
+        signature: "PROCEDURE HNoPurge(h: Handle)"
+        parameters: []
+        returnType: void
+      - name: GetHandleSize
+        category: info
+        description: "Return size in bytes of relocatable block"
+        signature: "FUNCTION GetHandleSize(h: Handle): LongInt"
+        parameters: []
+        returnType: LongInt
+      - name: GetPtrSize
+        category: info
+        description: "Return size of nonrelocatable block"
+        signature: "FUNCTION GetPtrSize(p: Ptr): LongInt"
+        parameters: []
+        returnType: LongInt
+      - name: MaxMem
+        category: info
+        description: "Return size of largest contiguous free block"
+        signature: "FUNCTION MaxMem(VAR grow: LongInt): LongInt"
+        parameters: []
+        returnType: LongInt
+      - name: MemError
+        category: info
+        description: "Return result code of last Memory Manager operation"
+        signature: "FUNCTION MemError(): OSErr"
+        parameters: []
+        returnType: OSErr
+
+  # --- Optional managers (stubs; expand as needed) ---
+  - id: font-manager
+    name: "Font Manager"
+    description: "Supplies QuickDraw with bitmapped or TrueType font data for rendering characters."
+    types: []
+    routines: []
+
+  - id: process-manager
+    name: "Process Manager"
+    description: "Coordinates scheduling of applications; maintains cooperative multitasking."
+    types: []
+    routines: []
+
+  - id: printing-manager
+    name: "Printing Manager"
+    description: "Device-independent routines for printer drivers; print using standard QuickDraw."
+    types: []
+    routines: []
+
+  - id: help-manager
+    name: "Help Manager"
+    description: "Displays Balloon Help when cursor is over interface elements."
+    types: []
+    routines: []
+
+  - id: palette-manager
+    name: "Palette Manager"
+    description: "Color support on indexed devices; manage palettes per window."
+    types: []
+    routines: []
+
+  - id: color-manager
+    name: "Color Manager"
+    description: "Maps color requests to hardware CLUT for Color QuickDraw."
+    types: []
+    routines: []
+
+  - id: scrap-manager
+    name: "Scrap Manager"
+    description: "Manages the Clipboard for copy and paste (text, pictures)."
+    types: []
+    routines: []
+
+  - id: edition-manager
+    name: "Edition Manager"
+    description: "Publish and subscribe for data sharing between documents and applications."
+    types: []
+    routines: []
+
+  - id: apple-event-manager
+    name: "Apple Event Manager"
+    description: "High-level inter-application communication via Apple Event protocol."
+    types: []
+    routines: []
+
+  - id: script-manager
+    name: "Script Manager"
+    description: "Manages script systems for international text handling."
+    types: []
+    routines: []
+
+  - id: alias-manager
+    name: "Alias Manager"
+    description: "Creates and resolves alias files and records."
+    types: []
+    routines: []
+
+  - id: gestalt-manager
+    name: "Gestalt Manager"
+    description: "Applications determine available hardware and software features."
+    types: []
+    routines: []
+
+  - id: notification-manager
+    name: "Notification Manager"
+    description: "Background applications post notification requests to the user."
+    types: []
+    routines: []
+
+  - id: list-manager
+    name: "List Manager"
+    description: "Scrolling lists of graphic or textual information."
+    types: []
+    routines: []
+
+  - id: desktop-manager
+    name: "Desktop Manager"
+    description: "Maintains desktop database of icons, file types, and application locations."
+    types: []
+    routines: []

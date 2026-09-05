@@ -1,0 +1,430 @@
+import { For, Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
+import { Button } from "@mockintosh/ui";
+import { registerApp } from "../src/os/apps";
+import { useOS } from "../src/os/context";
+import { useWindow } from "../src/os/windowContext";
+import type { GrafPort } from "@mockintosh/quickdraw";
+import {
+  CLIENT_ID,
+  REDIRECT_URI,
+  SCOPES,
+  type DeviceFlowState,
+  type PlayerState,
+  type SpotifyPlaylist,
+  type SpotifyTokens,
+  buildQRMatrix,
+  ditherImageFromUrl,
+  exchangeCodeForTokens,
+  fetchPlaylists,
+  generateCodeChallenge,
+  generateCodeVerifier,
+  loadSpotifySDK,
+  loadTokens,
+  saveTokens,
+  spotifyPost,
+  spotifyPut,
+} from "./spotify/api";
+
+const SIDEBAR_W = 90;
+
+export function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
+  const os = useOS();
+  const win = useWindow();
+  const [tokens, setTokens] = createSignal<SpotifyTokens | null>(loadTokens());
+  const [playlists, setPlaylists] = createSignal<SpotifyPlaylist[]>([]);
+  const [selected, setSelected] = createSignal(-1);
+  const [player, setPlayer] = createSignal<PlayerState | null>(null);
+  const [art, setArt] = createSignal<Uint8Array | null>(null);
+  const [artSize, setArtSize] = createSignal(64);
+  const [volume, setVolume] = createSignal(50);
+  const [error, setError] = createSignal("");
+  const [deviceFlow, setDeviceFlow] = createSignal<DeviceFlowState | null>(null);
+  const [sidebarScroll, setSidebarScroll] = createSignal(0);
+
+  const tokensRef = { current: tokens() };
+  let codeVerifier = "";
+  let deviceId: string | null = null;
+  let sdkPlayer: { connect: () => Promise<void>; disconnect: () => void; setVolume: (v: number) => void; addListener: Function } | null = null;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  const onTokenUpdate = (t: SpotifyTokens) => {
+    tokensRef.current = t;
+    saveTokens(t);
+    setTokens(t);
+  };
+
+  createEffect(() => {
+    tokensRef.current = tokens();
+  });
+
+  createEffect(() => {
+    const t = tokens();
+    if (!t) return;
+    void (async () => {
+      try {
+        await loadSpotifySDK();
+        const Spotify = (window as unknown as { Spotify?: { Player: new (opts: unknown) => typeof sdkPlayer } }).Spotify;
+        if (!Spotify?.Player) return;
+        sdkPlayer = new Spotify.Player({
+          name: "Mockintosh Player",
+          getOAuthToken: (cb: (token: string) => void) => {
+            const tok = tokensRef.current?.access_token;
+            if (tok) cb(tok);
+          },
+          volume: volume() / 100,
+        });
+        sdkPlayer.addListener("ready", ({ device_id }: { device_id: string }) => {
+          deviceId = device_id;
+          void spotifyPut("/me/player", { device_ids: [device_id], play: false }, tokensRef, onTokenUpdate);
+        });
+        sdkPlayer.addListener("player_state_changed", (state: {
+          paused: boolean;
+          position: number;
+          duration: number;
+          track_window?: { current_track?: { name: string; artists: Array<{ name: string }>; album: { name: string; images: Array<{ url: string }> }; duration_ms: number } };
+        } | null) => {
+          if (!state) {
+            setPlayer(null);
+            return;
+          }
+          const track = state.track_window?.current_track;
+          setPlayer({
+            track: track
+              ? {
+                  name: track.name,
+                  artists: track.artists,
+                  album: track.album,
+                  duration_ms: track.duration_ms,
+                }
+              : null,
+            paused: state.paused,
+            position_ms: state.position,
+            duration_ms: state.duration,
+          });
+          const url = track?.album?.images?.[0]?.url;
+          if (url) {
+            const size = Math.max(32, Math.min(win.width() - SIDEBAR_W - 16, win.height() - 60));
+            setArtSize(size);
+            void ditherImageFromUrl(url, size, size).then((px) => {
+              if (px) setArt(px);
+            });
+          }
+        });
+        await sdkPlayer.connect();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "SDK failed");
+      }
+    })();
+    void fetchPlaylists(tokensRef, onTokenUpdate).then((pls) => {
+      if (pls.length) setPlaylists(pls);
+    });
+  });
+
+  createEffect(() => {
+    const handler = async (e: MessageEvent) => {
+      if (e.data?.type !== "spotify-callback") return;
+      if (e.data.error) {
+        setError(String(e.data.error));
+        return;
+      }
+      if (!e.data.code || !codeVerifier) return;
+      try {
+        const next = await exchangeCodeForTokens(e.data.code, codeVerifier);
+        onTokenUpdate(next);
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Auth failed");
+      }
+    };
+    window.addEventListener("message", handler);
+    onCleanup(() => window.removeEventListener("message", handler));
+  });
+
+  createEffect(() => {
+    const flow = deviceFlow();
+    if (!flow || flow.status !== "qr") return;
+    const intervalMs = (flow.interval || 5) * 1000;
+    pollTimer = setInterval(async () => {
+      const current = deviceFlow();
+      if (!current || current.status !== "qr") return;
+      if (Date.now() > current.expiresAt) {
+        setDeviceFlow({ ...current, status: "expired" });
+        return;
+      }
+      try {
+        const resp = await fetch(`/api/spotify/device-poll?poll_id=${encodeURIComponent(current.pollId)}`);
+        const data = await resp.json();
+        if (data.status === "ready") {
+          onTokenUpdate({
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+            expires_at: Date.now() + data.expires_in * 1000,
+          });
+          setDeviceFlow(null);
+        } else if (data.status === "expired" || data.status === "denied") {
+          setDeviceFlow({ ...current, status: data.status });
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, intervalMs);
+    onCleanup(() => {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+    });
+  });
+
+  onCleanup(() => {
+    if (pollTimer) clearInterval(pollTimer);
+    sdkPlayer?.disconnect();
+  });
+
+  function startQr(): void {
+    if (!CLIENT_ID) {
+      setError("No client ID configured");
+      return;
+    }
+    setDeviceFlow({
+      status: "loading",
+      pollId: "",
+      verificationUri: "",
+      userCode: "",
+      interval: 5,
+      expiresAt: 0,
+      qrMatrix: null,
+    });
+    void fetch("/api/spotify/device-request", { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) {
+          setError(String(data.error));
+          setDeviceFlow(null);
+          return;
+        }
+        const uri = data.verification_uri_complete ?? data.verification_uri;
+        setDeviceFlow({
+          status: "qr",
+          pollId: data.poll_id,
+          verificationUri: uri,
+          userCode: data.user_code,
+          interval: data.interval ?? 5,
+          expiresAt: Date.now() + (data.expires_in ?? 300) * 1000,
+          qrMatrix: buildQRMatrix(uri),
+        });
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : "Failed to start login");
+        setDeviceFlow(null);
+      });
+  }
+
+  function startBrowser(): void {
+    if (!CLIENT_ID) {
+      setError("No client ID configured");
+      return;
+    }
+    const verifier = generateCodeVerifier();
+    codeVerifier = verifier;
+    void generateCodeChallenge(verifier).then((challenge) => {
+      const params = new URLSearchParams({
+        response_type: "code",
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        redirect_uri: REDIRECT_URI,
+        code_challenge_method: "S256",
+        code_challenge: challenge,
+      });
+      window.open(
+        `https://accounts.spotify.com/authorize?${params.toString()}`,
+        "spotify-auth",
+        "width=500,height=700"
+      );
+    });
+  }
+
+  const logo = os.sprites.get("icon/spotify");
+
+  return (
+    <box width={win.width()} height={win.height()} background={0} flexDirection="column">
+      <Show when={!CLIENT_ID}>
+        <box padding={8} flexDirection="column" gap={4}>
+          <text font="body">VITE_SPOTIFY_CLIENT_ID not set.</text>
+          <text font="body">Add it to .env.local and restart.</text>
+        </box>
+      </Show>
+      <Show when={CLIENT_ID && !tokens()}>
+        <box width="100%" height="100%" background={1} flexDirection="column" alignItems="center" justifyContent="center" gap={8} padding={8}>
+          <Show when={deviceFlow()?.status === "loading"}>
+            <text font="body" color={0}>Connecting to Spotify...</text>
+          </Show>
+          <Show when={deviceFlow()?.status === "qr" && deviceFlow()?.qrMatrix}>
+            <text font="body" color={0}>Scan with your phone</text>
+            <raster
+              width={120}
+              height={120}
+              onPaint={(portUnknown, rect) => {
+                const matrix = deviceFlow()?.qrMatrix;
+                if (!matrix) return;
+                const port = portUnknown as GrafPort;
+                const { baseAddr, rowBytes, bounds } = port.portBits;
+                const module = Math.max(1, Math.floor(Math.min(rect.width, rect.height) / matrix.length));
+                for (let r = 0; r < matrix.length; r++) {
+                  for (let c = 0; c < matrix[r].length; c++) {
+                    const color = matrix[r][c] ? 1 : 0;
+                    for (let py = 0; py < module; py++) {
+                      for (let px = 0; px < module; px++) {
+                        const gx = rect.x + c * module + px;
+                        const gy = rect.y + r * module + py;
+                        baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] = color;
+                      }
+                    }
+                  }
+                }
+              }}
+            />
+            <text font="menu" color={0}>{deviceFlow()?.userCode ?? ""}</text>
+            <Button label="Cancel" onClick={() => setDeviceFlow(null)} />
+          </Show>
+          <Show when={deviceFlow()?.status === "expired" || deviceFlow()?.status === "denied"}>
+            <text font="body" color={0}>
+              {deviceFlow()?.status === "expired" ? "QR code expired." : "Access denied."}
+            </text>
+            <Button label="Try Again" onClick={() => setDeviceFlow(null)} />
+          </Show>
+          <Show when={!deviceFlow()}>
+            {logo && (
+              <image
+                width={logo.width}
+                height={logo.height}
+                src={{ width: logo.width, height: logo.height, data: logo.data, mask: logo.mask }}
+                mode="inverted"
+              />
+            )}
+            <text font="body" color={0}>To continue, login to Spotify:</text>
+            <Button label="Log in with QR" onClick={startQr} />
+            <Button label="Log in via browser" onClick={startBrowser} />
+          </Show>
+          <Show when={error()}>
+            <text font="body" color={0}>{error()}</text>
+          </Show>
+        </box>
+      </Show>
+      <Show when={CLIENT_ID && tokens()}>
+        <box flexDirection="row" width="100%" height="100%">
+          <box
+            width={SIDEBAR_W}
+            height="100%"
+            flexDirection="column"
+            background={0}
+            borderColor={1}
+            borderWidth={1}
+            overflow="scroll"
+            onScroll={(dy) => setSidebarScroll((s) => Math.max(0, s + dy))}
+          >
+            <text font="body">PLAYLISTS</text>
+            <box height={1} background={1} />
+            <For each={playlists()}>
+              {(pl, i) => (
+                <box
+                  padding={2}
+                  background={selected() === i() ? 1 : 0}
+                  onClick={() => {
+                    setSelected(i());
+                    if (deviceId) {
+                      void spotifyPut("/me/player/play", { context_uri: pl.uri }, tokensRef, onTokenUpdate);
+                    }
+                  }}
+                >
+                  <text font="body" color={selected() === i() ? 0 : 1}>
+                    {pl.name.slice(0, 12)}
+                  </text>
+                </box>
+              )}
+            </For>
+          </box>
+          <box flexGrow={1} flexDirection="column" padding={4} gap={4}>
+            <raster
+              width={artSize()}
+              height={artSize()}
+              onPaint={(portUnknown, rect) => {
+                const px = art();
+                const port = portUnknown as GrafPort;
+                const { baseAddr, rowBytes, bounds } = port.portBits;
+                if (!px) {
+                  for (let y = 0; y < rect.height; y++) {
+                    for (let x = 0; x < rect.width; x++) {
+                      const gx = rect.x + x;
+                      const gy = rect.y + y;
+                      baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] =
+                        (x + y) % 4 === 0 ? 1 : 0;
+                    }
+                  }
+                  return;
+                }
+                const w = Math.min(artSize(), rect.width);
+                const h = Math.min(artSize(), rect.height);
+                for (let y = 0; y < h; y++) {
+                  for (let x = 0; x < w; x++) {
+                    const gx = rect.x + x;
+                    const gy = rect.y + y;
+                    baseAddr[(gy - bounds.top) * rowBytes + (gx - bounds.left)] = px[y * artSize() + x];
+                  }
+                }
+              }}
+            />
+            <text font="body">
+              {player()?.track
+                ? `${player()!.track!.name} - ${player()!.track!.artists.map((a) => a.name).join(", ")}`
+                : "No track playing"}
+            </text>
+            <box flexDirection="row" gap={6} alignItems="center">
+              <Button label="<<" onClick={() => void spotifyPost("/me/player/previous", tokensRef, onTokenUpdate)} />
+              <Button
+                label={player()?.paused ?? true ? ">" : "||"}
+                onClick={() => {
+                  if (player()?.paused ?? true) {
+                    void spotifyPut("/me/player/play", null, tokensRef, onTokenUpdate);
+                  } else {
+                    void spotifyPut("/me/player/pause", null, tokensRef, onTokenUpdate);
+                  }
+                }}
+              />
+              <Button label=">>" onClick={() => void spotifyPost("/me/player/next", tokensRef, onTokenUpdate)} />
+              <text font="body">{`Vol ${volume()}`}</text>
+              <Button
+                label="-"
+                onClick={() => {
+                  const next = Math.max(0, volume() - 10);
+                  setVolume(next);
+                  sdkPlayer?.setVolume(next / 100);
+                  void spotifyPut(`/me/player/volume?volume_percent=${next}`, null, tokensRef, onTokenUpdate);
+                }}
+              />
+              <Button
+                label="+"
+                onClick={() => {
+                  const next = Math.min(100, volume() + 10);
+                  setVolume(next);
+                  sdkPlayer?.setVolume(next / 100);
+                  void spotifyPut(`/me/player/volume?volume_percent=${next}`, null, tokensRef, onTokenUpdate);
+                }}
+              />
+            </box>
+            <Show when={error()}>
+              <text font="body">{error()}</text>
+            </Show>
+          </box>
+        </box>
+      </Show>
+    </box>
+  );
+}
+
+registerApp({
+  id: "spotify",
+  title: "Spotify Player",
+  icon: "icon/spotify",
+  defaultSize: { width: 380, height: 280 },
+  scrollable: false,
+  Component: SpotifyPlayer,
+});

@@ -1,0 +1,127 @@
+import * as THREE from "three";
+
+/**
+ * CRT screen material using MeshPhysicalMaterial with onBeforeCompile injection.
+ *
+ * Uses Three.js's full PBR pipeline (lighting, reflections, clearcoat) and
+ * injects the OS raster as custom emissive output. The dark glass surface
+ * responds to scene lighting while bright pixels glow through.
+ *
+ * The CRT mesh covers the full glass opening. The OS texture occupies a
+ * sub-rectangle defined by rasterMin / rasterMax in UV space. The entire
+ * mesh uses this material (same base color, clearcoat, roughness); only
+ * the raster region gets emissive (OS content). Outside the raster we just
+ * zero out emissive — the surface is still dark reflective glass, so
+ * clearcoat can reflect the bezel at sharp angles. If that reflection is
+ * too prominent, extend the raster (reduce insets) or lower clearcoat.
+ *
+ * This shader does not discard or skip any fragments; it runs for every pixel
+ * of the screen mesh. If the glass refracts to a dark void at sharp angles,
+ * either (1) the screen mesh does not extend that far (extend it in Blender),
+ * or (2) the bezel wins the depth test there, so the refracted sample sees
+ * the bezel instead of the screen. Fix (1) is the usual solution.
+ */
+
+export interface CRTShaderOptions {
+  screenTexture: THREE.Texture;
+  emissiveIntensity?: number;
+  scanlineIntensity?: number;
+  phosphorTint?: THREE.ColorRepresentation;
+  tintStrength?: number;
+  rasterMin?: [number, number];
+  rasterMax?: [number, number];
+}
+
+export function createCRTPhysicalMaterial(
+  options: CRTShaderOptions
+): THREE.MeshPhysicalMaterial {
+  const {
+    screenTexture,
+    emissiveIntensity = 1.5,
+    scanlineIntensity = 0.03,
+    phosphorTint = 0xbff5df,
+    tintStrength = 1.0,
+    rasterMin = [0.0, 0.0],
+    rasterMax = [1.0, 1.0],
+  } = options;
+  const phosphorColor = new THREE.Color(phosphorTint);
+
+  // A 1x1 black texture ensures Three.js includes UV varyings and the
+  // emissive map code path in the compiled shader.
+  const dummyTex = new THREE.DataTexture(
+    new Uint8Array([0, 0, 0, 255]),
+    1,
+    1,
+    THREE.RGBAFormat
+  );
+  dummyTex.needsUpdate = true;
+
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: 0x050508,
+    roughness: 0.15,
+    metalness: 0.0,
+    clearcoat: 0.4,
+    clearcoatRoughness: 0.1,
+    emissive: 0xffffff,
+    emissiveIntensity: 1.0,
+    emissiveMap: dummyTex,
+  });
+
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uScreen = { value: screenTexture };
+    shader.uniforms.uCrtEmissiveIntensity = { value: emissiveIntensity };
+    shader.uniforms.uScanlineIntensity = { value: scanlineIntensity };
+    shader.uniforms.uPhosphorTint = { value: phosphorColor };
+    shader.uniforms.uTintStrength = { value: tintStrength };
+    shader.uniforms.uRasterMin = {
+      value: new THREE.Vector2(rasterMin[0], rasterMin[1]),
+    };
+    shader.uniforms.uRasterMax = {
+      value: new THREE.Vector2(rasterMax[0], rasterMax[1]),
+    };
+
+    (mat as CRTPhysicalMaterial).__crtShader = shader;
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "void main() {",
+      /* glsl */ `
+        uniform sampler2D uScreen;
+        uniform float uCrtEmissiveIntensity;
+        uniform float uScanlineIntensity;
+        uniform vec3 uPhosphorTint;
+        uniform float uTintStrength;
+        uniform vec2 uRasterMin;
+        uniform vec2 uRasterMax;
+        void main() {
+      `
+    );
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <emissivemap_fragment>",
+      /* glsl */ `
+        {
+          vec2 screenUv = vec2(vEmissiveMapUv.x, 1.0 - vEmissiveMapUv.y);
+          vec2 rUv = (screenUv - uRasterMin) / (uRasterMax - uRasterMin);
+          bool inRaster = rUv.x >= 0.0 && rUv.x <= 1.0
+                       && rUv.y >= 0.0 && rUv.y <= 1.0;
+          if (inRaster) {
+            vec4 osTexel = texture2D(uScreen, rUv);
+            float mono = dot(osTexel.rgb, vec3(0.299, 0.587, 0.114));
+            vec3 screenColor = mix(vec3(mono), mono * uPhosphorTint, uTintStrength);
+            float scanline = 1.0 - uScanlineIntensity * mod(floor(rUv.y * 342.0), 2.0);
+            totalEmissiveRadiance =
+              screenColor * scanline * uCrtEmissiveIntensity;
+          } else {
+            totalEmissiveRadiance = vec3(0.0);
+          }
+        }
+      `
+    );
+  };
+
+  return mat;
+}
+
+export type CRTPhysicalMaterial = THREE.MeshPhysicalMaterial & {
+  __crtShader?: { uniforms: Record<string, { value: unknown }> };
+};
