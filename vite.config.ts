@@ -74,6 +74,7 @@ export default defineConfig({
       "packages/fs/tests/**/*.test.ts",
       "packages/print/tests/**/*.test.ts",
       "src/os/**/*.test.ts",
+      "scripts/**/*.test.ts",
     ],
   },
   build: {
