@@ -1,4 +1,4 @@
-import { JSX, Show, createSignal, createMemo } from "solid-js";
+import { For, JSX, Show, createSignal, createMemo } from "solid-js";
 import { useOS } from "../context";
 import {
   getActiveWindowId,
@@ -36,6 +36,9 @@ import {
   windowTotalHeight,
   windowContentWidth,
 } from "../windowGeometry";
+
+/** Offsets of the six title-bar stripe lines within the 11px close-box band. */
+const TITLE_BAR_STRIPE_ROWS = [0, 2, 4, 6, 8, 10];
 
 interface WindowProps {
   win: OSWindow;
@@ -86,7 +89,6 @@ export function Window(props: WindowProps): JSX.Element {
   const zoomX  = createMemo(() => innerW() - 7 - ZOOM_SIZE);
   const zoomY  = Math.floor((TITLE_BAR_H - ZOOM_SIZE) / 2) - FRAME;
   const stripeY = closeY;
-  const stripeH = CLOSE_SIZE;
 
   // Scrollbar thumb geometry
   const scrollbarInset = createMemo(() => props.win.contentTopInset ?? 0);
@@ -231,15 +233,22 @@ export function Window(props: WindowProps): JSX.Element {
 
           {/* Active-window decorations */}
           <Show when={isActive()}>
-            {/* Horizontal stripe fill */}
-            <box
-              position="absolute"
-              left={0}
-              top={stripeY}
-              width={innerW()}
-              height={stripeH}
-              background="hstripe"
-            />
+            {/* Six 1px rules, not a screen-aligned `hstripe` fill: QuickDraw
+                patterns tile in screen space, so an 11px band would show 5
+                or 6 lines depending on window Y. Classic WDEFs drew fixed
+                lines. */}
+            <For each={TITLE_BAR_STRIPE_ROWS}>
+              {(row) => (
+                <box
+                  position="absolute"
+                  left={0}
+                  top={stripeY + row}
+                  width={innerW()}
+                  height={1}
+                  background={1}
+                />
+              )}
+            </For>
 
             {/* Close box — white clearance, then sprite */}
             <Show when={def().closeBox}>

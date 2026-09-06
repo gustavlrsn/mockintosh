@@ -35,6 +35,15 @@ function inkCoverage(frame: Uint8Array, x0: number, y0: number, w: number, h: nu
   return black / (w * h);
 }
 
+/** Solid black rows in the title-bar interior, away from close box and title. */
+function titleBarStripeLines(frame: Uint8Array, winX: number, winY: number): number {
+  let lines = 0;
+  for (let y = winY + 1; y < winY + TITLE_BAR_H - 1; y++) {
+    if (inkCoverage(frame, winX + 24, y, 12, 1) === 1) lines++;
+  }
+  return lines;
+}
+
 describe("bootOS on the headless platform", () => {
   let platform: HeadlessPlatform;
   let os: BootedOS;
@@ -230,6 +239,36 @@ describe("bootOS on the headless platform", () => {
     // inside the plain box those rows are blank content.
     expect(inkCoverage(frame, 301, 80 + TITLE_BAR_H - 1, 98, 1)).toBe(1);
     expect(inkCoverage(frame, 41, 81, 98, TITLE_BAR_H - 1)).toBe(0);
+  });
+
+  it("paints six title-bar stripe lines whether the window sits on an even or odd row", () => {
+    registerApp({
+      id: "test-stripes",
+      title: "X",
+      icon: "icon/computer",
+      defaultSize: { width: 180, height: 50 },
+      Component: () => null,
+      onOpen(app) {
+        app.openWindow({ position: { x: 40, y: 80 }, size: { width: 180, height: 50 }, title: "X" });
+        app.openWindow({ position: { x: 280, y: 81 }, size: { width: 180, height: 50 }, title: "X" });
+      },
+    });
+
+    os.services.openApp("test-stripes");
+    platform.tick();
+
+    const even = getWindows().find((w) => w.appId === "test-stripes" && w.y === 80)!;
+    const odd = getWindows().find((w) => w.appId === "test-stripes" && w.y === 81)!;
+    expect(even).toBeDefined();
+    expect(odd).toBeDefined();
+
+    // The second window is frontmost. Sample a strip just right of the close
+    // box, left of the title, so only the chrome stripes can fill a row.
+    expect(titleBarStripeLines(platform.lastFrame()!, odd.x, odd.y)).toBe(6);
+
+    platform.click(even.x + 50, even.y + 8);
+    platform.tick();
+    expect(titleBarStripeLines(platform.lastFrame()!, even.x, even.y)).toBe(6);
   });
 
   it("a window can go full screen — covering the menubar — and come back, by menu shortcut too", () => {
