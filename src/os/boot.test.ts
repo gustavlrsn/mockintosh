@@ -4,14 +4,27 @@
  * events reach the UI through `bootOS`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { JSX } from "solid-js";
+import { useApp, type AppContext, type AppServices } from "@mockintosh/sdk";
+import { createElement, setProp } from "@mockintosh/ui/renderer";
 import { bootOS, type BootedOS } from "./boot";
 import { createHeadlessPlatform, type HeadlessPlatform } from "../platform/headless";
 import { registerApp } from "./apps";
 import { getWindows } from "./state";
+import { TITLE_BAR_H } from "./windowGeometry";
 
 const WIDTH = 512;
 const HEIGHT = 342;
 const MENUBAR_HEIGHT = 20;
+
+/** `<box width="100%" height="100%" background={1} />` without JSX (this file is `.ts`). */
+function blackBox(): JSX.Element {
+  const node = createElement("box");
+  setProp(node, "width", "100%");
+  setProp(node, "height", "100%");
+  setProp(node, "background", 1);
+  return node as unknown as JSX.Element;
+}
 
 /** Fraction of black pixels in a rectangle of the last presented frame. */
 function inkCoverage(frame: Uint8Array, x0: number, y0: number, w: number, h: number): number {
@@ -123,6 +136,7 @@ describe("bootOS on the headless platform", () => {
     for (let i = 0; i < after.length; i++) if (after[i] !== before[i]) changed++;
     expect(changed).toBeGreaterThan(100); // a new folder icon + label appeared
   });
+
   // Regression: a z-order bump used to remount every IconCell mid-press, so the
   // pointer dispatcher never delivered the click that starts inline rename.
   it("renames a desktop icon after a second click on its selected label", async () => {
@@ -166,6 +180,104 @@ describe("bootOS on the headless platform", () => {
     expect(fs.node(folder!.id)?.name).toBe("Renamed");
   });
 
+  it("lets an app decide what opening it does: `onOpen` may open no window at all", () => {
+    const onOpen = vi.fn();
+    registerApp({
+      id: "test-windowless",
+      title: "Windowless",
+      icon: "icon/computer",
+      defaultSize: { width: 100, height: 100 },
+      Component: () => null,
+      onOpen,
+    });
+    const before = getWindows().length;
+
+    os.services.openApp("test-windowless", { fileId: "f1", title: "Doc" });
+    platform.tick();
+
+    expect(getWindows().length).toBe(before);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [context, props] = onOpen.mock.calls[0] as [AppContext, Record<string, unknown>];
+    expect(props).toEqual({ fileId: "f1", title: "Doc" });
+    expect(typeof context.openWindow).toBe("function");
+    expect(context.fs).toBe(os.services.fs);
+  });
+
+  it("opens windows of the kind an app asks for: a `plain` box has a frame but no title bar", () => {
+    registerApp({
+      id: "test-kinds",
+      title: "Kinds",
+      icon: "icon/computer",
+      defaultSize: { width: 100, height: 60 },
+      Component: () => null,
+      onOpen(app) {
+        app.openWindow({ kind: "plain", position: { x: 40, y: 80 }, size: { width: 100, height: 50 } });
+        app.openWindow({ kind: "document", position: { x: 300, y: 80 }, size: { width: 100, height: 50 } });
+      },
+    });
+
+    os.services.openApp("test-kinds");
+    platform.tick();
+
+    const wins = getWindows().filter((w) => w.appId === "test-kinds");
+    expect(wins.map((w) => w.kind)).toEqual(["plain", "document"]);
+
+    const frame = platform.lastFrame()!;
+    // Both draw their top frame line…
+    expect(inkCoverage(frame, 41, 80, 98, 1)).toBe(1);
+    expect(inkCoverage(frame, 301, 80, 98, 1)).toBe(1);
+    // …but only the document window has a title bar, whose separator sits at TITLE_BAR_H - 1;
+    // inside the plain box those rows are blank content.
+    expect(inkCoverage(frame, 301, 80 + TITLE_BAR_H - 1, 98, 1)).toBe(1);
+    expect(inkCoverage(frame, 41, 81, 98, TITLE_BAR_H - 1)).toBe(0);
+  });
+
+  it("a window can go full screen — covering the menubar — and come back, by menu shortcut too", () => {
+    let services: AppServices | undefined;
+    registerApp({
+      id: "test-fullscreen",
+      title: "Show",
+      icon: "icon/computer",
+      defaultSize: { width: 120, height: 80 },
+      Component: () => {
+        services = useApp();
+        return blackBox();
+      },
+      menus: [
+        {
+          label: "View",
+          items: [{ label: "Menu Bar", shortcut: "M", onClick: () => services!.window.setFullScreen(false) }],
+        },
+      ],
+    });
+
+    os.services.openApp("test-fullscreen");
+    platform.tick();
+    expect(services).toBeDefined();
+    const win = getWindows().find((w) => w.appId === "test-fullscreen")!;
+    const windowed = { x: win.x, y: win.y, width: win.width, height: win.height };
+    expect(services!.window.kind()).toBe("document");
+
+    services!.window.setFullScreen(true);
+    platform.tick();
+    expect(services!.window.kind()).toBe("fullscreen");
+    expect(services!.window.width()).toBe(WIDTH);
+    expect(services!.window.height()).toBe(HEIGHT);
+    // The app's black content is everywhere, menubar row included (only the cursor shows through).
+    expect(inkCoverage(platform.lastFrame()!, 8, 0, WIDTH - 16, MENUBAR_HEIGHT)).toBe(1);
+    expect(inkCoverage(platform.lastFrame()!, 8, 8, WIDTH - 16, HEIGHT - 16)).toBeGreaterThan(0.999);
+
+    // The hidden menubar's shortcuts still work: this is the way back.
+    const meta = { shift: false, ctrl: false, alt: false, meta: true };
+    platform.key({ type: "down", key: "m", modifiers: meta });
+    platform.key({ type: "up", key: "m", modifiers: meta });
+    platform.tick();
+
+    const restored = getWindows().find((w) => w.appId === "test-fullscreen")!;
+    expect(restored.kind).toBe("document");
+    expect({ x: restored.x, y: restored.y, width: restored.width, height: restored.height }).toEqual(windowed);
+    expect(inkCoverage(platform.lastFrame()!, 0, 0, WIDTH, MENUBAR_HEIGHT - 1)).toBeLessThan(0.2);
+  });
 });
 
 /** Layout constants mirrored from Finder.solid — desktop icons without a stored position. */

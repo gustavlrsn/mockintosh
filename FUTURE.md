@@ -1,22 +1,30 @@
 # Future Enhancements
 
-## Special presentation mode
+## Running apps without windows
 
-The Macintosh supports a **special presentation mode** for screen-sized presentations: the application can use the **entire screen**, including the area normally used by the menu bar. The menu bar is hidden so content (e.g. slides, demos) fills the full display. This is distinct from the zoom box’s standard state, which only fills the gray region (desktop minus menu bar) with a border.
+Full screen (the Macintosh "special presentation mode") and `onOpen` are in: an app decides what opening it does, and may open no window. What is *not* modelled yet is an app that keeps running with no window — on the Macintosh an application whose last window closed stays frontmost with its menubar until File → Quit. Here the active app is still derived from the active window, so a windowless launch has no menubar of its own and nothing to quit. The [kernel plan](docs/kernel-plan.md) introduces app-instance ownership in M2 and process accounting in M3 / shell stage S3; `onOpen` is the existing entry-point seam. Keeping a windowless GUI app frontmost until Quit still needs an explicit active-app and lifetime policy.
 
-**Human Interface Guidelines:**
+## Revealing the menubar in full screen (hover at the top edge)
 
-- **User option** — The mode must be optional; the user chooses to enter it, not forced.
-- **Restore menu bar** — The application must provide a visible way to bring the menu bar back: e.g. a keyboard shortcut (Command-key) or an on-screen button labeled “Menu Bar” that the user can click. The method must be clearly visible or easily accessible while the bar is hidden.
-- **Application responsibility** — The app is responsible for the logic of hiding the bar, drawing full-screen content, and letting the user exit; the system (Window Manager) provides the capacity for full-screen drawing (its port covers the whole screen).
+**Status: potential todo — undecided whether this belongs in the OS.** Today a full-screen app is responsible for the way back, as the Macintosh HIG required: ⌘ shortcuts keep working with the menubar hidden, and Photo Booth adds an on-screen "Menu Bar" button. The idea is to make the way back an OS gesture instead: move the pointer to the top edge, pause, and the menubar slides down over the full-screen content (Mac OS X Lion introduced this for full-screen apps; Yosemite made it a general auto-hide preference).
 
-**Implementation sketch for Mockintosh:**
+**How classic Mac apps handled it**, for reference: there was no system gesture. HyperCard hid the bar with `hide menubar` and brought it back with ⌘-Space; slide-show tools (More, Persuasion) left the show on Escape / ⌘-period; kiosk stacks put a "Menu Bar" button on screen, which is what the HIG literally suggests; games (Dark Castle, Shufflepuck Café) zeroed `MBarHeight`, drew everywhere, and you left by quitting.
 
-- **OS support:** (1) API or flag for an app to request “presentation mode” (e.g. `enterPresentationMode()` / `exitPresentationMode()`). (2) When active: hide the menu bar in the render loop and allow the requesting app to draw over the full canvas (0,0 to screen width/height). (3) Reserve a global shortcut (e.g. Escape or ⌘+something) or require the app to call `exitPresentationMode()` from its own UI (e.g. “Menu Bar” button). (4) Only one app can be in presentation mode at a time; exiting restores the menu bar and normal window layout.
-- **App support:** The app enters the mode when the user chooses (e.g. “Present” or “Full screen”), draws its content full-screen, and provides a visible “Menu Bar” button or documents the shortcut so the user can exit.
-- **Rendering:** In the main render loop, if presentation mode is active for app X, skip drawing the menu bar (and possibly the desktop/windows of other apps, or draw them underneath and let the presenting app cover them). The presenting app’s render receives the full canvas or a full-screen AppContext.
+**Why it might belong in the OS:** "the user must always be able to get back" is a system concern, and every full-screen app reinventing a "Menu Bar" button is per-app duplication. **Why it might not:** it is a modern gesture the original never had; the classic Mac had no hidden-bar reveal and no animation beyond the Finder's zoom rects; on hosts without hover (e-paper, touch) it needs a second trigger anyway; and an app-level affordance is at least *visible*, which a hover gesture is not.
 
-Not part of the current Window Manager refactor; add when we have a need (e.g. a slides or video app that wants true full-screen).
+**Sketch, if we do it:**
+
+- `state.ts`: the menubar's hidden state becomes three-valued — `shown | hidden | revealing(px)` — replacing the boolean `isMenubarHidden()`; a `reveal` signal (0…20) drives the bar's `top = -MENUBAR_HEIGHT + reveal`.
+- `boot.ts` `onPointer`: OS policy next to double-click detection — pointer on row 0 for ~250 ms (dwell, so grazing the edge does not flicker) sets the target to shown; pointer below the bar's rows with no menu open sets it back to hidden. A `down` on the top two rows reveals too, for hosts without hover, and is consumed rather than delivered to the app.
+- Frame loop: step `reveal` 1 px per frame toward its target (20 frames ≈ 330 ms at 60 Hz) and `scheduleRepaint` only while it is moving; same speed back up.
+- Stay revealed while a dropdown is open. Hit-testing is the node tree, so a half-revealed bar is already clickable and dropdowns hang from its current position (`MenuDropdown` is a child of the Menubar box) — worth a test.
+- ⌘ shortcuts fire without revealing, as now, and remain the guaranteed path documented in the SDK.
+- Headless test: open a full-screen window, move the pointer to row 0, tick 20 frames, assert the menubar rows are painted; move away, tick, assert they are gone.
+- Photo Booth then drops its "Menu Bar" button (or keeps it as a discoverable hint — decide then).
+
+## Window definition details
+
+`windowKinds.ts` is the WDEF table. Not yet distinguished: `documentProc` vs `zoomDocProc` (every document has a zoom box), `altDBoxProc` (plain box with a heavier shadow), and the "small title" of a `utility` window, which today draws the standard title bar.
 
 ## Paid Apps via Polar.sh
 

@@ -13,7 +13,7 @@
 import { InitGraf, InitCursor, cursorState, globals as qd } from "@mockintosh/quickdraw";
 import { createUI, type Modifiers } from "@mockintosh/ui";
 import { FileSystem } from "@mockintosh/fs";
-import type { MenubarActionItem } from "@mockintosh/sdk";
+import type { AppContext, MenubarActionItem } from "@mockintosh/sdk";
 import type { Platform, PlatformKeyEvent, PlatformPointerEvent } from "../platform/types";
 import { SpriteRegistry, registerBuiltinSprites } from "./sprites";
 import { drawCursor } from "./cursor";
@@ -26,15 +26,17 @@ import {
   setSplashVisible,
   openOSWindow,
   closeOSWindow,
+  closeAllWindows,
   getWindows,
   setWindowOutline,
   bringToFront,
   getMenubarMenus,
   setOpenMenuIndex,
-  type OSWindow,
 } from "./state";
 import type { OSServices } from "./context";
 import { getAllApps, getApp, registerApp } from "./apps";
+import { createAppContext } from "./appContext";
+import { buildAppWindow } from "./appWindow";
 import { DialogApp } from "./components/Dialog.solid";
 import { createAppInstaller } from "./installedApps";
 import {
@@ -50,6 +52,11 @@ const SPLASH_MS = 800;
 /** Two clicks this close in time and space are a double-click (Mac `DoubleTime`). */
 const DOUBLE_CLICK_MS = 500;
 const DOUBLE_CLICK_DIST = 4;
+
+/** What opening an app does unless it says otherwise (`SolidApp.onOpen`): open its main window. */
+function defaultOnOpen(app: AppContext, props: Record<string, unknown>): void {
+  app.openWindow({ props });
+}
 
 export interface BootedOS {
   /** The running OS, for hosts that open apps or dialogs themselves (kiosk mode, tests). */
@@ -139,43 +146,20 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
         bringToFront(existing.id);
         return;
       }
-      const maxW = resolution.width - 6;
-      const maxH = resolution.height - MENUBAR_HEIGHT - 6;
-      const w = Math.min(app.defaultSize.width, maxW);
-      const h = Math.min(app.defaultSize.height, maxH);
-      const n = getWindows().length;
-      let x = Math.min(20 + (n % 6) * 16, resolution.width - w - 3);
-      let y = Math.min(MENUBAR_HEIGHT + 20 + (n % 6) * 16, resolution.height - h - 3);
-      x = Math.max(3, x);
-      y = Math.max(MENUBAR_HEIGHT + 3, y);
-      const id = `${appId}-${Date.now()}`;
-      const win: OSWindow = {
-        id,
-        appId,
-        title: (props.title as string) || app.title,
-        x,
-        y,
-        width: w,
-        height: h,
-        kind: app.windowKind ?? "document",
-        props,
-        scrollY: 0,
-        scrollX: 0,
-        contentHeight: app.scrollable ? Math.max(h, 200) : h,
-        contentWidth: w,
-        scrollable: app.scrollable ?? false,
-        resizable: app.resizable ?? false,
-        minWidth: app.minSize?.width,
-        minHeight: app.minSize?.height,
-        openedFromRect: fromRect,
-        standardBounds: {
-          x: 3,
-          y: MENUBAR_HEIGHT + 3,
-          width: maxW,
-          height: maxH,
-        },
-        userBounds: { x, y, width: w, height: h },
-      };
+      // The app's `main`: it decides which windows to open, if any.
+      const context = createAppContext(osServices, appId, { fromRect });
+      const onOpen = app.onOpen ?? defaultOnOpen;
+      onOpen(context, props);
+    },
+    openWindow(appId, spec = {}, fromRect?) {
+      const app = getApp(appId);
+      if (!app) throw new Error(`Cannot open a window for unknown app: ${appId}`);
+      const win = buildAppWindow(app, spec, {
+        screen: resolution,
+        menubarHeight: MENUBAR_HEIGHT,
+        openWindowCount: getWindows().length,
+      });
+      win.openedFromRect = fromRect;
       const doOpen = () => openOSWindow(win);
       if (fromRect) {
         renderFrame();
@@ -183,6 +167,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
       } else {
         doOpen();
       }
+      return win.id;
     },
     showDialog(options) {
       return new Promise<string | null>((resolve) => {
@@ -432,6 +417,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
       offPointer();
       offKey();
       unmount();
+      closeAllWindows();
     },
   };
 }

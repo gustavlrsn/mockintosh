@@ -5,7 +5,7 @@
 
 import { createContext, useContext, type Accessor } from "solid-js";
 import type { MenubarDefinition } from "@mockintosh/sdk";
-import type { OSWindow } from "./state";
+import type { OSWindow, OSWindowKind } from "./state";
 
 export interface WindowAPI {
   id: string;
@@ -14,11 +14,14 @@ export interface WindowAPI {
   height: Accessor<number>;
   isActive: Accessor<boolean>;
   scrollY: Accessor<number>;
+  kind: Accessor<OSWindowKind>;
   setTitle: (title: string) => void;
   setContentSize: (width: number, height: number) => void;
   setInfoBar: (items: string[] | null) => void;
   setMenus: (menus: MenubarDefinition[]) => void;
   setContentTopInset: (px: number) => void;
+  /** Cover the whole screen with this window, or return it to its windowed form. */
+  setFullScreen: (on: boolean) => void;
   close: () => void;
 }
 

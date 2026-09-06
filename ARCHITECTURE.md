@@ -73,18 +73,25 @@ interface SolidApp<P = Record<string, never>> {
   id: string;
   title: string;
   icon: string;
-  defaultSize: { width: number; height: number };
-  windowKind?: OSWindowKind;
+  defaultSize: { width: number; height: number };   // the main window's
+  windowKind?: WindowKind;                           // the main window's (default "document")
   scrollable?: boolean;
   resizable?: boolean;
   minSize?: { width: number; height: number };
   singleInstance?: boolean;
   menus?: MenubarDefinition[];   // the app's menubar
-  Component: (props: P) => JSX.Element;
+  Component: (props: P) => JSX.Element;              // the main window's content
+  onOpen?(app: AppContext, props: P): void;          // the app's `main`; default: open the main window
 }
 ```
 
-`WindowContent` mounts `registry.get(win.appId).Component`. `useWindow()` exposes `{ id, width, height, isActive, scrollY, setTitle, setContentSize, setInfoBar, setMenus, close }`.
+### Opening an app
+
+`openApp(appId, props, fromRect)` (`boot.ts`) is what the Finder calls for an icon or a document. It checks `requires`, brings an already-open matching window to the front (same `fileId` / `directoryId`, or any window when `singleInstance`), and otherwise runs the app's **`onOpen`** with an `AppContext` — the Macintosh `main` receiving its `'oapp'`/`'odoc'` event. The default `onOpen` opens the main window; an app that supplies its own decides for itself: open in full screen, show a dialog first, open nothing. Whether an app opens a window is the app's business, not the OS's.
+
+Windows are opened through **`AppContext.openWindow(spec)`** (`OSServices.openWindow` underneath, `buildAppWindow` in `appWindow.ts` — this shell's `NewWindow`). A `WindowSpec` names the kind, title, size, position, `scrollable`/`resizable`, and optionally a `Component` other than the app's main one; every field defaults to the `defineApp` declaration, so `openWindow()` is the main window. The first window opened from an icon gets the zoom-rect animation. `OSWindow.Component` holds a window's own component when it has one; `WindowContent` mounts it, else the app's.
+
+`AppContext` (`appContext.ts`) is everything an app can do without a window — sprites, storage, `fs`, `os.openApp/closeWindow/showDialog`, `openWindow`, `fetch`, `print`, `capabilities`, `env`. `AppServices`, what `useApp()` returns inside a window, is `AppContext` plus `window` and `setMenus`. The OS supplies one `AppServices` per window. `useWindow()` (shell-internal) exposes `{ id, width, height, isActive, scrollY, kind, setTitle, setContentSize, setInfoBar, setMenus, setContentTopInset, setFullScreen, close }`.
 
 Finder is registered like any other app (`FINDER_APP_ID`): the desktop is its window-less surface and folder windows are its windows (`kind: "finder-folder"`, `props: { directoryId }`). Apps that need to write pixels directly (video frames, dithered photos) use a `<raster onPaint>` node, which hands them a `RasterSurface` (`setPixel` / `blitPixels` / `fill` in raster-local coordinates, plus the clipped QuickDraw port); the framebuffer's memory layout never reaches app code. There is no other rendering path.
 
@@ -108,7 +115,7 @@ export default defineApp({
 
 Bundles externalize `solid-js`, `solid-js/store`, `@mockintosh/ui`, and `@mockintosh/sdk`. The OS serves those via an import map so one Solid runtime is shared. The `AppInstaller` (`src/os/installedApps.ts`) fetches the bundle through `Platform.loadModule`, validates `Component`, registers the module's `sprites`, and calls `registerApp`; a platform without `loadModule` (an embedded build) has no installer and the App Store says so. The App Store filters catalog entries to `sdk` major ≥ 2.
 
-`useApp()` provides `getSprite`, `storage` (per-app folder), `fs` (the shared file system), `window` (this window's reactive size, `isActive`, `scrollY`, `setTitle`, `close`), `os.openWindow/closeWindow/showDialog`, `setMenus` (this window's menubar), `capabilities`, optional `fetch` and `print`, and `env`. Sprite files (`image/x-mockintosh-sprite`) are read and written with `readSpriteFile` / `writeSpriteFile` from the SDK. Apps that declare `fileTypes` are launched with `FileDocumentProps` when such a file is opened. The OS supplies one `AppServices` per window through the SDK's `AppServicesContext`, so each window's components see their own.
+`useApp()` provides `getSprite`, `storage` (per-app folder), `fs` (the shared file system), `window` (this window's reactive size, `isActive`, `scrollY`, `kind`, `setTitle`, `setFullScreen`, `close`), `openWindow` (another window of this app), `os.openApp/closeWindow/showDialog`, `setMenus` (this window's menubar), `capabilities`, optional `fetch` and `print`, and `env`. Sprite files (`image/x-mockintosh-sprite`) are read and written with `readSpriteFile` / `writeSpriteFile` from the SDK. Apps that declare `fileTypes` are launched with `FileDocumentProps` when such a file is opened. The OS supplies one `AppServices` per window through the SDK's `AppServicesContext`, so each window's components see their own.
 
 The SDK is the single source of the app contract shared with the OS: `SolidApp` (the internal `src/os/apps.ts` type extends it) and the menubar types (`MenubarDefinition`, `MenubarItemDef`, …) live in `packages/sdk/src` and the shell imports them from `@mockintosh/sdk`.
 
@@ -145,7 +152,10 @@ src/
     boot.ts                 bootOS(platform): boot order, frame loop, input → UI, OSServices
     capabilities.ts         Platform capability set; `requires` checks and their wording
     apps.ts                 SolidApp registry (+ apps skipped as unavailable)
-    state.ts                Window store, active app, app menus
+    appContext.ts           The SDK's AppContext as the shell provides it (onOpen, useApp)
+    appWindow.ts            buildAppWindow: WindowSpec + defineApp defaults → OSWindow (NewWindow)
+    state.ts                Window store, active app, app menus, full-screen toggle
+    windowKinds.ts          Window definitions (the WDEF table): chrome, layer, modal per kind
     windowContext.ts        useWindow()
     windowGeometry.ts       Chrome metrics + content-rect helpers (single source of truth)
     layering.ts             Kind-aware z-order
@@ -195,16 +205,21 @@ Activation is owned by the shell, not by content. The window body's `onMouseDown
 
 ## Window kinds and layering
 
-| Kind            | Chrome                                      | Layer                         |
-| --------------- | ------------------------------------------- | ----------------------------- |
-| `"desktop"`     | none                                        | behind everything             |
-| `"document"`    | title, close, zoom, optional scroll / grow  | documents                     |
-| `"dialog"`      | title, close; no zoom                       | documents                     |
-| `"utility"`     | small title                                 | above documents               |
-| `"alert"`       | chromeless / modal                          | front; other windows `inert`  |
-| `"presentation"`| chromeless app surface                      | documents                     |
+A window's `kind` selects a **window definition** (`src/os/windowKinds.ts`) — the table the Macintosh kept in the WDEF a `procID` pointed at. It is the only place a kind's chrome, layer and modality are spelled out; `Window.solid.tsx`, `windowGeometry.ts` and `layering.ts` read it and never test the kind themselves.
 
-`openApp` clamps size/position to the desktop (gray region minus 3 px). Zoom box toggles `standardBounds` vs `userBounds`. Opening from a Finder icon plays the zoom-rect animation.
+| Kind              | Mac `procID`      | Chrome                                              | Layer                        |
+| ----------------- | ----------------- | --------------------------------------------------- | ---------------------------- |
+| `"document"`      | `zoomDocProc`     | title, close, zoom; grow box / scroll bars if asked | 1 documents                  |
+| `"finder-folder"` | —                 | a document the Finder can tell apart                | 1                            |
+| `"dialog"`        | `movableDBoxProc` | title, close; no zoom, no grow                      | 1                            |
+| `"utility"`       | `rDocProc`        | as `dialog`                                         | 2 above documents            |
+| `"plain"`         | `plainDBox`       | 1px frame and shadow; no title bar, not movable     | 1                            |
+| `"alert"`         | `dBoxProc`        | as `plain`; system-modal (other windows `inert`)    | 4 front                      |
+| `"fullscreen"`    | —                 | none; bounds are the screen, menubar hidden         | 3 above utilities            |
+
+`buildAppWindow` clamps size/position to the desktop (gray region minus 3 px). Zoom box toggles `standardBounds` vs `userBounds`. Opening from a Finder icon plays the zoom-rect animation.
+
+**Full screen** is the Macintosh "special presentation mode": the application takes the whole screen, menubar included, and is responsible for offering a way back (HIG). `setWindowFullScreen(id, on)` (`useApp().window.setFullScreen`) switches a window into and out of `fullscreen` *in place* — the content stays mounted, as with the zoom box — remembering its windowed kind and bounds in `OSWindow.windowed`. A window may also be *opened* as `fullscreen`; it has no windowed form to return to. While the frontmost non-modal window covers the screen, `isMenubarHidden()` is true and `OSRoot` does not paint the menubar, but `getMenubarMenus()` is unchanged, so the app's ⌘ shortcuts keep working: that, plus an on-screen "Menu Bar" button, is how Photo Booth gets out.
 
 ## Event flow
 

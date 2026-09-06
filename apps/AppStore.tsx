@@ -104,7 +104,7 @@ function AppStore(_props: Record<string, unknown>): JSX.Element {
                   />
                 }
               >
-                <Button label="Open" onClick={() => app.os.openWindow(e.id)} />
+                <Button label="Open" onClick={() => app.os.openApp(e.id)} />
               </Show>
             </box>
           )}

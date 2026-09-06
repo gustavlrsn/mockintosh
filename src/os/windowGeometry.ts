@@ -3,10 +3,14 @@
  * info bar and scrollbar metrics.
  *
  * Model: `win.x / win.y / win.width` and `windowTotalHeight()` describe the
- * OUTER frame. The body box draws the 1px frame as its border and every other
+ * OUTER frame. The body box draws the frame as its border and every other
  * chrome element is laid out in the frame's interior; `@mockintosh/ui` insets
  * children by the border and clips them to it, so nothing inside a window can
  * ever paint over its frame.
+ *
+ * Which chrome a window has at all — title bar, frame, shadow — is the window
+ * definition's say (`windowKinds.ts`); the helpers here take the window so
+ * callers never look at the kind themselves.
  *
  * Classic Mac scrollbars and the grow box are 16px bands that *include* the
  * frame line they sit against, so their 16px sprites are placed on the last
@@ -14,8 +18,9 @@
  */
 
 import type { OSWindow } from "./state";
+import { windowDefinition } from "./windowKinds";
 
-export const FRAME       = 1;    // window frame line
+export const FRAME       = 1;    // window frame line, for kinds that have one
 export const TITLE_BAR_H = 20;   // outer: top frame + stripes + separator line
 export const INFO_BAR_H  = 20;   // includes its bottom separator line
 export const SB_W        = 16;   // scrollbar band, including the frame line it shares
@@ -34,24 +39,39 @@ export interface ScreenRect {
   height: number;
 }
 
-export function hasInfoBar(win: OSWindow): boolean {
-  return !!win.infoBar && win.infoBar.length > 0;
+/** Frame line width of this window (0 for chromeless kinds). */
+export function windowFrame(win: Pick<OSWindow, "kind">): number {
+  return windowDefinition(win.kind).frame;
 }
 
-/** Outer height of the header (title bar + optional info bar). */
-export function windowHeaderHeight(win: OSWindow): number {
+export function hasTitleBar(win: Pick<OSWindow, "kind">): boolean {
+  return windowDefinition(win.kind).titleBar;
+}
+
+export function hasInfoBar(win: Pick<OSWindow, "kind" | "infoBar">): boolean {
+  return hasTitleBar(win) && !!win.infoBar && win.infoBar.length > 0;
+}
+
+/** Outer height of the header (title bar + optional info bar); 0 without a title bar. */
+export function windowHeaderHeight(win: Pick<OSWindow, "kind" | "infoBar">): number {
+  if (!hasTitleBar(win)) return windowFrame(win);
   return TITLE_BAR_H + (hasInfoBar(win) ? INFO_BAR_H : 0);
 }
 
 /** Outer frame height. */
-export function windowTotalHeight(win: OSWindow): number {
-  return windowHeaderHeight(win) + win.height + (win.scrollable ? SB_W : FRAME);
+export function windowTotalHeight(win: Pick<OSWindow, "kind" | "infoBar" | "height" | "scrollable">): number {
+  return windowHeaderHeight(win) + win.height + (win.scrollable ? SB_W : windowFrame(win));
+}
+
+/** Whether the window shows a grow box: it must be resizable and of a kind that has one. */
+export function hasGrowBox(win: OSWindow): boolean {
+  return win.resizable && windowDefinition(win.kind).growBox;
 }
 
 /** Width available to the window's content component. */
 export function windowContentWidth(win: OSWindow): number {
-  const reserved = win.scrollable || win.resizable ? SB_INNER : 0;
-  return win.width - 2 * FRAME - reserved;
+  const reserved = win.scrollable || hasGrowBox(win) ? SB_INNER : 0;
+  return win.width - 2 * windowFrame(win) - reserved;
 }
 
 /**
@@ -61,7 +81,7 @@ export function windowContentWidth(win: OSWindow): number {
  */
 export function windowContentRect(win: OSWindow): ScreenRect {
   return {
-    x: win.x + FRAME,
+    x: win.x + windowFrame(win),
     y: win.y + windowHeaderHeight(win),
     width: windowContentWidth(win),
     height: win.height,

@@ -12,9 +12,10 @@ import {
 import { getApp } from "../apps";
 import { WindowCtx, type WindowAPI } from "../windowContext";
 import { isBlockedByModal } from "../layering";
-import { getWindows } from "../state";
+import { getWindows, setWindowFullScreen } from "../state";
+import { windowDefinition } from "../windowKinds";
 import { AppServicesContext, type AppServices } from "@mockintosh/sdk";
-import { createAppStorage } from "../appStorage";
+import { createAppContext } from "../appContext";
 import { measureText, type PointerCaptureEvent } from "@mockintosh/ui";
 
 import {
@@ -27,7 +28,10 @@ import {
   CLOSE_SIZE,
   ZOOM_SIZE,
   GROW_SIZE,
+  hasGrowBox,
   hasInfoBar,
+  hasTitleBar,
+  windowFrame,
   windowHeaderHeight,
   windowTotalHeight,
   windowContentWidth,
@@ -52,15 +56,19 @@ export function Window(props: WindowProps): JSX.Element {
   let resizeOffsetX = 0;
   let resizeOffsetY = 0;
 
+  // What this kind of window is made of (title bar, boxes, frame, shadow).
+  const def = createMemo(() => windowDefinition(props.win.kind));
+
   // Outer geometry
+  const frame = createMemo(() => windowFrame(props.win));
   const headerH = createMemo(() => windowHeaderHeight(props.win));
   const totalH = createMemo(() => windowTotalHeight(props.win));
 
-  // Interior geometry (inside the 1px frame) — all children use these.
-  const innerW = createMemo(() => props.win.width - 2 * FRAME);
-  const innerH = createMemo(() => totalH() - 2 * FRAME);
+  // Interior geometry (inside the frame) — all children use these.
+  const innerW = createMemo(() => props.win.width - 2 * frame());
+  const innerH = createMemo(() => totalH() - 2 * frame());
   const titleBarInnerH = TITLE_BAR_H - FRAME;
-  const headerInnerH = createMemo(() => headerH() - FRAME);
+  const headerInnerH = createMemo(() => headerH() - frame());
   const contentW = createMemo(() => windowContentWidth(props.win));
 
   const closeSprite = createMemo(() =>
@@ -121,7 +129,7 @@ export function Window(props: WindowProps): JSX.Element {
     }
     if (isActive()) return;
     bringToFront(props.win.id);
-    if (ev.localY >= TITLE_BAR_H) ev.preventDefault();
+    if (!hasTitleBar(props.win) || ev.localY >= TITLE_BAR_H) ev.preventDefault();
   }
 
   function handleThumbDrag(gx: number, gy: number) {
@@ -142,22 +150,24 @@ export function Window(props: WindowProps): JSX.Element {
       height={totalH() + SHADOW}
     >
       {/* ── Drop shadow (offset by 1px, so the corners stay open) ── */}
-      <box
-        position="absolute"
-        left={SHADOW}
-        top={totalH()}
-        width={props.win.width}
-        height={SHADOW}
-        background={1}
-      />
-      <box
-        position="absolute"
-        left={props.win.width}
-        top={SHADOW}
-        width={SHADOW}
-        height={totalH()}
-        background={1}
-      />
+      <Show when={def().shadow}>
+        <box
+          position="absolute"
+          left={SHADOW}
+          top={totalH()}
+          width={props.win.width}
+          height={SHADOW}
+          background={1}
+        />
+        <box
+          position="absolute"
+          left={props.win.width}
+          top={SHADOW}
+          width={SHADOW}
+          height={totalH()}
+          background={1}
+        />
+      </Show>
 
       {/* ── Window body ─────────────────────────────────────────── */}
       <box
@@ -168,12 +178,13 @@ export function Window(props: WindowProps): JSX.Element {
         height={totalH()}
         background={0}
         borderColor={1}
-        borderWidth={1}
+        borderWidth={frame()}
         overflow="hidden"
         focusScope
         onMouseDownCapture={handleActivationPress}
       >
         {/* ── Title bar ─────────────────────────────────────────── */}
+        <Show when={hasTitleBar(props.win)}>
         <box
           position="absolute"
           left={0}
@@ -231,6 +242,7 @@ export function Window(props: WindowProps): JSX.Element {
             />
 
             {/* Close box — white clearance, then sprite */}
+            <Show when={def().closeBox}>
             <box
               position="absolute"
               left={closeX - 1}
@@ -276,8 +288,10 @@ export function Window(props: WindowProps): JSX.Element {
                 />
               )}
             </Show>
+            </Show>
 
             {/* Zoom box */}
+            <Show when={def().zoomBox}>
             <box
               position="absolute"
               left={zoomX() - 1}
@@ -321,6 +335,7 @@ export function Window(props: WindowProps): JSX.Element {
                 />
               )}
             </Show>
+            </Show>
 
             {/* White clearance behind title text (titleW + 8, as in the original) */}
             <box
@@ -349,6 +364,7 @@ export function Window(props: WindowProps): JSX.Element {
             {props.win.title}
           </text>
         </box>
+        </Show>
 
         {/* ── Info bar ──────────────────────────────────────────── */}
         <Show when={hasInfoBar(props.win)}>
@@ -473,7 +489,7 @@ export function Window(props: WindowProps): JSX.Element {
         </Show>
 
         {/* ── Grow box ──────────────────────────────────────────── */}
-        <Show when={props.win.resizable}>
+        <Show when={hasGrowBox(props.win)}>
           <ChromeButton
             sprite={os.sprites.get("chrome/resize")}
             left={innerW() - SB_INNER}
@@ -499,7 +515,7 @@ export function Window(props: WindowProps): JSX.Element {
               const outline = getWindowOutline();
               if (outline) {
                 const MIN_H = props.win.minHeight ?? 60;
-                const newH = outline.height - headerH() - (props.win.scrollable ? SB_W : FRAME);
+                const newH = outline.height - headerH() - (props.win.scrollable ? SB_W : frame());
                 updateOSWindow(props.win.id, {
                   width: outline.width,
                   height: Math.max(MIN_H, newH),
@@ -600,7 +616,8 @@ function toggleZoom(win: OSWindow): void {
 
 function WindowContent(props: { win: OSWindow }): JSX.Element {
   const os = useOS();
-  const app = () => getApp(props.win.appId);
+  /** The window's own component when it was opened with one, else its app's main component. */
+  const component = () => props.win.Component ?? getApp(props.win.appId)?.Component;
   const modalFront = () => isBlockedByModal(props.win, getWindows());
 
   const api: WindowAPI = {
@@ -610,39 +627,33 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
     height: () => props.win.height,
     isActive: () => getActiveWindowId() === props.win.id,
     scrollY: () => props.win.scrollY,
+    kind: () => props.win.kind,
     setTitle: (title) => updateOSWindow(props.win.id, { title }),
     setContentSize: (width, height) =>
       updateOSWindow(props.win.id, { contentWidth: width, contentHeight: height }),
     setInfoBar: (items) => updateOSWindow(props.win.id, { infoBar: items ?? undefined }),
     setMenus: (menus) => updateOSWindow(props.win.id, { menus }),
     setContentTopInset: (px) => updateOSWindow(props.win.id, { contentTopInset: px }),
+    setFullScreen: (on) => setWindowFullScreen(props.win.id, on, os.resolution),
     close: () => os.closeWindow(props.win.id),
   };
 
-  // SDK-facing services for this window. Provided via context so every
-  // window's components see their own instance.
+  // SDK-facing services for this window: the app context plus the window.
+  // Provided via context so every window's components see their own instance.
   const services: AppServices = {
-    getSprite: (name) => os.sprites.get(name),
-    storage: createAppStorage(os.fs, props.win.appId),
-    fs: os.fs,
+    ...createAppContext(os, props.win.appId),
     window: {
       id: api.id,
       width: api.width,
       height: api.height,
       isActive: api.isActive,
       scrollY: api.scrollY,
+      // The shell's kinds are the SDK's plus `finder-folder`, a document window.
+      kind: () => (props.win.kind === "finder-folder" ? "document" : props.win.kind),
       setTitle: api.setTitle,
+      setFullScreen: api.setFullScreen,
       close: api.close,
     },
-    os: {
-      openWindow: (appId, p) => os.openApp(appId, p),
-      closeWindow: (id) => os.closeWindow(id),
-      showDialog: (opts) => os.showDialog(opts),
-    },
-    env: os.env,
-    capabilities: os.capabilities,
-    fetch: os.fetch,
-    print: os.printer,
     setMenus: api.setMenus,
   };
 
@@ -650,11 +661,8 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
     <WindowCtx.Provider value={api}>
       <AppServicesContext.Provider value={services}>
       <box width="100%" height="100%" inert={modalFront()}>
-        <Show when={app()}>
-          {(() => {
-            const Comp = app()!.Component;
-            return <Comp {...props.win.props} />;
-          })()}
+        <Show when={component()} keyed>
+          {(Comp) => <Comp {...props.win.props} />}
         </Show>
       </box>
       </AppServicesContext.Provider>

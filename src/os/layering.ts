@@ -1,17 +1,8 @@
 import type { OSWindow, OSWindowKind } from "./state";
-
-const LAYER: Record<OSWindowKind, number> = {
-  "finder-desktop": 0,
-  document: 1,
-  "finder-folder": 1,
-  dialog: 1,
-  utility: 2,
-  presentation: 3,
-  alert: 4,
-};
+import { windowDefinition } from "./windowKinds";
 
 export function windowLayer(kind: OSWindowKind): number {
-  return LAYER[kind] ?? 1;
+  return windowDefinition(kind).layer;
 }
 
 export function sortWindowsForPaint(windows: OSWindow[]): OSWindow[] {
@@ -27,7 +18,7 @@ export function sortWindowsForPaint(windows: OSWindow[]): OSWindow[] {
 }
 
 export function isModalKind(kind: OSWindowKind): boolean {
-  return kind === "alert";
+  return windowDefinition(kind).modal;
 }
 
 export function hasModalFront(windows: OSWindow[]): boolean {

@@ -122,7 +122,7 @@ function MyView() {
   const icon = app.getSprite("myapp/icon");
   return (
     <box padding={8}>
-      <Button label="About" onClick={() => app.os.openWindow("about")} />
+      <Button label="About" onClick={() => app.os.openApp("about")} />
     </box>
   );
 }
@@ -131,8 +131,9 @@ function MyView() {
 - `getSprite(name)` — OS sprites plus your exported `sprites`
 - `storage.read/write/remove/list` — per-app key-value storage (see [Storage](#storage))
 - `fs` — the shared file system (see [Files](#files))
-- `window` — the window this component is in (see [Window chrome](#window-chrome))
-- `os.openWindow / closeWindow / showDialog`
+- `window` — the window this component is in (see [Windows](#windows))
+- `openWindow(spec?)` — open another window of your app (see [Windows](#windows))
+- `os.openApp / closeWindow / showDialog`
 - `setMenus(menus)` — this window's menubar (see [Menus](#menus))
 - `fetch` — network access, when this Macintosh has it (see [Capabilities](#capabilities))
 - `print` — the system printer, when the platform has one (see [Printing](#printing))
@@ -319,15 +320,72 @@ export default defineApp({
 
 Item types (`MenubarItemDef`): an action `{ label, shortcut?, disabled?, onClick? }`, a `{ type: "separator" }`, or a `{ type: "radiogroup", value, onValueChange, items }`. The Apple menu is the OS's; you can't add to it.
 
-## Window chrome
+## Windows
 
-Third-party apps live inside a standard document window. Set `scrollable`, `resizable`, and `minSize` on `defineApp`.
+By default, opening your app opens one window — its *main window* — with `Component` inside, sized by `defaultSize`, of kind `windowKind` (a `document` unless you say otherwise), with `scrollable`, `resizable` and `minSize` as declared on `defineApp`.
 
-`useApp().window` is the window your component is mounted in. `width()` and `height()` are the content size (reactive accessors — read them in JSX or effects), `isActive()` is whether it is frontmost, `scrollY()` the content scroll offset; `setTitle(title)` renames it and `close()` closes it. A component that fills its window is:
+`useApp().window` is the window your component is mounted in. `width()` and `height()` are the content size (reactive accessors — read them in JSX or effects), `isActive()` is whether it is frontmost, `scrollY()` the content scroll offset, `kind()` its current kind; `setTitle(title)` renames it, `setFullScreen(on)` takes it full screen and back, and `close()` closes it. A component that fills its window is:
 
 ```tsx
 const { window: win } = useApp();
 return <box width={win.width()} height={win.height()} flexDirection="column">…</box>;
+```
+
+### Window kinds
+
+Like the Macintosh's `NewWindow`, you choose what kind of window you get:
+
+| Kind         | Looks like                                                                 |
+|--------------|----------------------------------------------------------------------------|
+| `document`   | title bar with close and zoom boxes; grow box / scroll bars when `resizable` / `scrollable` |
+| `dialog`     | title bar with a close box, fixed size                                     |
+| `utility`    | like `dialog`, but floats above document windows (tool palettes)           |
+| `plain`      | a bare 1px frame, no title bar, cannot be moved                            |
+| `alert`      | `plain` and system-modal: nothing else takes input until it closes         |
+| `fullscreen` | no chrome at all — the whole screen, menubar included (see below)          |
+
+### Deciding what opening does: `onOpen`
+
+Opening a window is your decision, not the OS's. `onOpen` is your app's `main`: the OS calls it when the user opens your app (`props` is `{}`) or one of your documents (`props` is `FileDocumentProps`). Without it, the OS opens the main window. With it, you open whatever you like through `app.openWindow(spec)` — or nothing:
+
+```tsx
+export default defineApp({
+  id: "slides",
+  title: "Slides",
+  icon: "slides/icon",
+  defaultSize: { width: 300, height: 200 },
+  Component: Editor,
+  onOpen(app, props) {
+    if (props.fileId) {
+      app.openWindow({ kind: "fullscreen", Component: Show, props });   // present it
+    } else {
+      app.openWindow({ props });                                         // the main window
+    }
+  },
+});
+```
+
+`onOpen` receives an `AppContext`: everything `useApp()` has except `window` and `setMenus`, since there is no window yet. It runs outside any component — open windows and dialogs there; keep signals and effects inside components.
+
+`openWindow(spec)` takes a `WindowSpec` whose every field is optional and defaults to your `defineApp`: `kind`, `title`, `size` (content pixels), `position`, `scrollable`, `resizable`, `minSize`, `Component` (a different component for this window — a preferences dialog, a palette) and `props`. It returns the window id, which `os.closeWindow` accepts. `openWindow()` with no argument is the main window.
+
+### Full screen
+
+A `fullscreen` window is the Macintosh "special presentation mode": your content covers the whole 512×342 screen and the menubar is not drawn. Two ways in — open a window as `kind: "fullscreen"`, or switch an existing window with `window.setFullScreen(true)`, which keeps your component mounted (camera streams, state, all of it) and remembers the windowed kind and bounds for `setFullScreen(false)`. A window that was *opened* full screen has nothing to go back to; close it instead.
+
+The user must be able to leave (Human Interface Guidelines). Your menus stay live while the menubar is hidden, so a ⌘ shortcut still works; a visible "Menu Bar" button on screen is the other half. Photo Booth does both:
+
+```tsx
+const { window: win } = useApp();
+const isFullScreen = () => win.kind() === "fullscreen";
+createEffect(() => {
+  app.setMenus([{ label: "View", items: [
+    { label: isFullScreen() ? "Exit Full Screen" : "Full Screen", shortcut: "F",
+      onClick: () => win.setFullScreen(!isFullScreen()) },
+  ]}]);
+});
+// …and in the JSX:
+<Show when={isFullScreen()}><Button label="Menu Bar" onClick={() => win.setFullScreen(false)} /></Show>
 ```
 
 ## The Manifest: mockintosh.json
@@ -383,7 +441,7 @@ Installing from the App Store writes the manifest to `Applications/<title>` as a
 
 ## Constraints
 
-- **512×342 pixels** — the entire screen. Your window is smaller.
+- **512×342 pixels** — the entire screen. Your window is smaller, unless it is `fullscreen`.
 - **Indexed pixels** — `BLACK`/`WHITE` are safest.
 - **No DOM UI** — hidden `<video>`/`<audio>` for media is fine; do not render HTML into the screen.
 - **No direct fetch / localStorage / OPFS** — use `useApp().fetch`, `useApp().storage` and `useApp().fs`. Import file-system types and `MIME` from `@mockintosh/sdk`, not `@mockintosh/fs`. Anything else you need from the host is a [capability](#capabilities): declare it in `requires` or check it at the point of use.

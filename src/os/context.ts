@@ -8,9 +8,8 @@ import type { SpriteRegistry } from "./sprites/registry";
 import type { FileSystem } from "@mockintosh/fs";
 import type { AnimRect } from "./zoomAnimation";
 import type { AppInstaller } from "./installedApps";
-import type { PrintService } from "@mockintosh/sdk";
+import type { FetchFunction, PrintService, WindowSpec } from "@mockintosh/sdk";
 import type { PlatformEnv } from "../platform/types";
-import type { FetchFunction } from "@mockintosh/sdk";
 import type { CapabilitySet } from "./capabilities";
 
 export interface IconScreenRect {
@@ -44,7 +43,21 @@ export interface OSServices {
   printer?: PrintService;
   /** Installs third-party apps, when the platform can load code at runtime. */
   installer?: AppInstaller;
+  /**
+   * Open an app the way the user does: check its `requires`, bring a matching
+   * open window to the front if there is one, otherwise run its `onOpen`
+   * (by default: open its main window).
+   */
   openApp: (appId: string, props?: Record<string, unknown>, fromRect?: IconScreenRect) => void;
+  /**
+   * Open a window for `appId` from a spec (defaults from its `defineApp`),
+   * zooming out of `fromRect` when given. Returns the window id.
+   */
+  openWindow: <P extends Record<string, unknown>>(
+    appId: string,
+    spec?: WindowSpec<P>,
+    fromRect?: IconScreenRect
+  ) => string;
   openFolderWindow: (title: string, directoryId: string, fromRect?: IconScreenRect) => void;
   openFSNode: (nodeId: string, fromRect?: IconScreenRect) => void;
   closeWindow: (id: string) => void;

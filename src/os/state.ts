@@ -7,10 +7,13 @@
  * schedule a repaint via the @mockintosh/ui renderer hook.
  */
 
-import { createSignal } from "solid-js";
+import { createSignal, type JSX } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { isModalKind, sortWindowsForPaint, windowLayer } from "./layering";
+import { windowDefinition, type OSWindowKind } from "./windowKinds";
 import type { MenubarDefinition } from "@mockintosh/sdk";
+
+export type { OSWindowKind } from "./windowKinds";
 
 /** The app that owns the desktop and folder windows; active when nothing else is. */
 export const FINDER_APP_ID = "finder";
@@ -19,14 +22,20 @@ export const FINDER_APP_ID = "finder";
 // Window types
 // ---------------------------------------------------------------------------
 
-export type OSWindowKind =
-  | "finder-desktop"
-  | "finder-folder"
-  | "document"
-  | "dialog"
-  | "alert"
-  | "utility"
-  | "presentation";
+/** Content mounted in a window. Props are whatever the opener passed (`OSWindow.props`). */
+export type WindowComponent = (props: Record<string, unknown>) => JSX.Element;
+
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The kind and bounds a window had before it went full screen. */
+export interface WindowedState extends WindowBounds {
+  kind: OSWindowKind;
+}
 
 export interface OSWindow {
   id: string;
@@ -37,6 +46,8 @@ export interface OSWindow {
   width: number;
   height: number;
   kind: OSWindowKind;
+  /** Content to mount; the owning app's `Component` when absent. */
+  Component?: WindowComponent;
   props: Record<string, unknown>;
   scrollY: number;
   scrollX: number;
@@ -60,8 +71,10 @@ export interface OSWindow {
    * menus depend on window state (e.g. Finder's current folder).
    */
   menus?: MenubarDefinition[];
-  userBounds?: { x: number; y: number; width: number; height: number };
-  standardBounds?: { x: number; y: number; width: number; height: number };
+  userBounds?: WindowBounds;
+  standardBounds?: WindowBounds;
+  /** Set while a window that was opened windowed is in full screen; what `setWindowFullScreen(id, false)` restores. */
+  windowed?: WindowedState;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +142,16 @@ export function getMenubarMenus(): MenubarDefinition[] {
   return win?.menus ?? getAppMenus(win?.appId ?? FINDER_APP_ID) ?? [];
 }
 
+/**
+ * Whether the menubar is off screen: the frontmost non-modal window covers
+ * the screen (Macintosh "special presentation mode"). Its menus still exist —
+ * ⌘ shortcuts keep working — which is how an app offers the way back.
+ */
+export function isMenubarHidden(): boolean {
+  const win = menubarWindow();
+  return !!win && windowDefinition(win.kind).coversScreen;
+}
+
 export const [getOpenMenuIndex, setOpenMenuIndex] = createSignal<number | null>(null);
 export const [getHighlightedMenuItem, setHighlightedMenuItem] = createSignal<number | null>(null);
 
@@ -163,11 +186,15 @@ export function closeOSWindow(id: string): void {
   }));
   setActiveWindowId((prev) => {
     if (prev !== id) return prev;
-    const remaining = _windowStore.list.filter(
-      (w) => w.id !== id && w.kind !== "finder-desktop"
-    );
+    const remaining = _windowStore.list.filter((w) => w.id !== id);
     return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
   });
+}
+
+/** Close every window — what shutting the machine down does. */
+export function closeAllWindows(): void {
+  _setWindowStore("list", []);
+  setActiveWindowId(null);
 }
 
 export function bringToFront(id: string): void {
@@ -206,4 +233,39 @@ export function updateOSWindow(id: string, updates: Partial<OSWindow>): void {
 export function getActiveWindow(): OSWindow | undefined {
   const id = getActiveWindowId();
   return id ? _windowStore.list.find((w) => w.id === id) : undefined;
+}
+
+/**
+ * Bounds of a window that covers the screen: `width` is the outer width and
+ * `height` the content height, and a `fullscreen` window has no chrome, so
+ * both are simply the screen's.
+ */
+export function fullScreenBounds(screen: { width: number; height: number }): WindowBounds {
+  return { x: 0, y: 0, width: screen.width, height: screen.height };
+}
+
+/**
+ * Switch a window into or out of full screen in place — the content stays
+ * mounted, as when the zoom box toggles `standardBounds`. Entering remembers
+ * the kind and bounds to come back to; leaving restores them. A window that
+ * was opened as `fullscreen` has no windowed form and leaving is a no-op.
+ */
+export function setWindowFullScreen(
+  id: string,
+  on: boolean,
+  screen: { width: number; height: number }
+): void {
+  const win = _windowStore.list.find((w) => w.id === id);
+  if (!win) return;
+  const isFullScreen = windowDefinition(win.kind).coversScreen;
+  if (on && !isFullScreen) {
+    updateOSWindow(id, {
+      windowed: { kind: win.kind, x: win.x, y: win.y, width: win.width, height: win.height },
+      kind: "fullscreen",
+      ...fullScreenBounds(screen),
+    });
+    bringToFront(id);
+  } else if (!on && isFullScreen && win.windowed) {
+    updateOSWindow(id, { ...win.windowed, windowed: undefined });
+  }
 }

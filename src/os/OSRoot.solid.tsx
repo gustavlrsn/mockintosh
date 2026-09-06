@@ -4,6 +4,7 @@ import type { OSServices } from "./context";
 import {
   getMenubarMenus,
   getSplashVisible,
+  isMenubarHidden,
   setSplashVisible,
   getWindowOutline,
 } from "./state";
@@ -46,7 +47,10 @@ export function OSRoot(props: OSRootProps): JSX.Element {
               />
             )}
           </Show>
-          <Menubar height={props.menubarHeight} menus={getMenubarMenus()} />
+          {/* A full-screen window owns the whole screen; its menus stay live for ⌘ shortcuts. */}
+          <Show when={!isMenubarHidden()}>
+            <Menubar height={props.menubarHeight} menus={getMenubarMenus()} />
+          </Show>
         </Show>
         <ScreenCorners />
       </box>

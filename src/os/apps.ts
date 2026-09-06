@@ -8,7 +8,7 @@ import { setAppMenus, type OSWindowKind } from "./state";
 /**
  * A registered app. Same contract third-party apps declare with `defineApp`
  * (`@mockintosh/sdk`), widened for the shell: any window kind (the Finder's
- * desktop, dialogs). `menus` is the app-level menubar; apps whose menus change
+ * folder windows). `menus` is the app-level menubar; apps whose menus change
  * at runtime call `useApp().setMenus` for the current window.
  */
 export interface SolidApp<P extends Record<string, unknown> = Record<string, unknown>>

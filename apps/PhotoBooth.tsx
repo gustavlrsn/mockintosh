@@ -8,20 +8,32 @@ import {
   getOrCreateDitherState,
 } from "./photobooth/dither";
 
+/** Viewfinder size in the app's own (windowed) window. */
 const PREVIEW = 288;
 const BAR_H = 40;
 const COUNTDOWN_SECS = 3;
 const CAPTURE_INTERVAL_MS = 66;
 
+/** A 1-byte-per-pixel picture: photos keep the viewfinder size they were taken at. */
 interface Photo {
   pixels: Uint8Array;
+  width: number;
+  height: number;
   timestamp: number;
 }
 
-/** Show a PREVIEW-sized 1-byte-per-pixel frame, or a flat `fill` when there is none. */
-function paint1bit(surface: RasterSurface, pixels: Uint8Array | null, fill: Ink): void {
-  if (pixels) surface.blitPixels(pixels, PREVIEW, PREVIEW);
-  else surface.fill(fill);
+interface Size {
+  width: number;
+  height: number;
+}
+
+/** Paint a picture centred in the surface (clipped when larger), on a flat `fill`. */
+function paintPicture(surface: RasterSurface, picture: Photo | null, view: Size, fill: Ink): void {
+  surface.fill(fill);
+  if (!picture) return;
+  const x = Math.floor((view.width - picture.width) / 2);
+  const y = Math.floor((view.height - picture.height) / 2);
+  surface.blitPixels(picture.pixels, picture.width, picture.height, x, y);
 }
 
 function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
@@ -36,6 +48,10 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   const [flash, setFlash] = createSignal(false);
   const [ditherMode, setDitherMode] = createSignal<DitherMode>("atkinson");
   const [frame, setFrame] = createSignal(0);
+
+  const isFullScreen = () => win.kind() === "fullscreen";
+  /** The viewfinder fills the window above the button bar — the whole screen in full screen. */
+  const view = (): Size => ({ width: win.width(), height: win.height() - BAR_H });
 
   const ditherRef: { current: DitherState | null } = { current: null };
   let video: HTMLVideoElement | null = null;
@@ -57,7 +73,8 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
     }
     const now = performance.now();
     if (video && video.videoWidth > 0 && now - lastCapture >= CAPTURE_INTERVAL_MS) {
-      const state = getOrCreateDitherState(ditherRef, PREVIEW, PREVIEW);
+      const { width, height } = view();
+      const state = getOrCreateDitherState(ditherRef, width, height);
       ditherVideoFrame(video, state, ditherMode());
       lastCapture = now;
       setFrame((n) => n + 1);
@@ -85,12 +102,24 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
     }
   }
 
+  /** The last dithered camera frame, as a picture. */
+  function liveFrame(): Photo | null {
+    const state = ditherRef.current;
+    if (!state) return null;
+    return {
+      pixels: state.pixels,
+      width: state.canvas.width,
+      height: state.canvas.height,
+      timestamp: 0,
+    };
+  }
+
   function takePhoto(): void {
-    const src = ditherRef.current?.pixels;
-    if (!src) return;
+    const live = liveFrame();
+    if (!live) return;
     setPhotos((prev) => [
       ...prev,
-      { pixels: new Uint8Array(src), timestamp: Date.now() },
+      { ...live, pixels: new Uint8Array(live.pixels), timestamp: Date.now() },
     ]);
     setFlash(true);
     if (flashTimer) clearTimeout(flashTimer);
@@ -124,7 +153,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
         app.fs,
         desktop.id,
         name,
-        { width: PREVIEW, height: PREVIEW, data: photo.pixels },
+        { width: photo.width, height: photo.height, data: photo.pixels },
         { attributes: { icon: "icon/photobooth-smr-32" } }
       );
     } catch (e) {
@@ -132,9 +161,12 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
     }
   }
 
+  function toggleFullScreen(): void {
+    win.setFullScreen(!isFullScreen());
+  }
+
   createEffect(() => {
     const viewing = viewingPhoto();
-    const n = photos().length;
     const counting = countdown() !== null;
     app.setMenus([
       {
@@ -145,6 +177,16 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
             shortcut: "T",
             disabled: counting || viewing !== null || loading() || !!errorText(),
             onClick: () => startCountdown(),
+          },
+        ],
+      },
+      {
+        label: "View",
+        items: [
+          {
+            label: isFullScreen() ? "Exit Full Screen" : "Full Screen",
+            shortcut: "F",
+            onClick: toggleFullScreen,
           },
         ],
       },
@@ -163,7 +205,6 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
         ],
       },
     ]);
-    void n;
   });
 
   onMount(() => {
@@ -186,53 +227,56 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
 
   return (
     <box width={win.width()} height={win.height()} flexDirection="column" background={0}>
-      <box width={PREVIEW} height={PREVIEW} position="relative">
+      <box width={view().width} height={view().height} position="relative">
         <raster
-          width={PREVIEW}
-          height={PREVIEW}
+          width={view().width}
+          height={view().height}
           revision={frame()}
           onPaint={(surface) => {
+            const size = { width: surface.rect.width, height: surface.rect.height };
             if (flash()) {
-              paint1bit(surface, null, 0);
+              paintPicture(surface, null, size, 0);
               return;
             }
-            const photo = viewing();
-            if (photo) {
-              paint1bit(surface, photo.pixels, 0);
-              return;
-            }
-            paint1bit(surface, ditherRef.current?.pixels ?? null, 0);
+            paintPicture(surface, viewing() ?? liveFrame(), size, 0);
           }}
         />
         <Show when={loading()}>
-          <box position="absolute" left={60} top={PREVIEW / 2 - 8} background={0} padding={2}>
-            <text font="menu">Initializing camera...</text>
+          <box position="absolute" left={0} top={0} width={view().width} height={view().height} justifyContent="center" alignItems="center">
+            <box background={0} padding={2}>
+              <text font="menu">Initializing camera...</text>
+            </box>
           </box>
         </Show>
         <Show when={!!errorText()}>
-          <box position="absolute" left={8} top={PREVIEW / 2 - 8} background={0} padding={2}>
-            <text font="menu">{errorText()}</text>
+          <box position="absolute" left={0} top={0} width={view().width} height={view().height} justifyContent="center" alignItems="center">
+            <box background={0} padding={2}>
+              <text font="menu">{errorText()}</text>
+            </box>
           </box>
         </Show>
         <Show when={countdown() !== null && countdown()! > 0}>
-          <box
-            position="absolute"
-            left={PREVIEW / 2 - 14}
-            top={PREVIEW / 2 - 12}
-            width={28}
-            height={24}
-            background={0}
-            borderColor={1}
-            borderWidth={1}
-            justifyContent="center"
-            alignItems="center"
-          >
-            <text font="menu" align="center">{String(countdown())}</text>
+          <box position="absolute" left={0} top={0} width={view().width} height={view().height} justifyContent="center" alignItems="center">
+            <box
+              width={28}
+              height={24}
+              background={0}
+              borderColor={1}
+              borderWidth={1}
+              justifyContent="center"
+              alignItems="center"
+            >
+              <text font="menu" align="center">{String(countdown())}</text>
+            </box>
           </box>
         </Show>
       </box>
       <box height={1} background={1} />
       <box height={BAR_H - 1} padding={8} flexDirection="row" alignItems="center" gap={6} background={0}>
+        {/* In full screen the menubar is gone; this is the visible way back (Macintosh HIG). */}
+        <Show when={isFullScreen()}>
+          <Button label="Menu Bar" onClick={toggleFullScreen} />
+        </Show>
         <Show
           when={viewingPhoto() === null}
           fallback={

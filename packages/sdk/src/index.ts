@@ -140,18 +140,83 @@ export interface PrintService {
   printPage(height: number, draw: (port: GrafPort, size: { width: number; height: number }) => void): Promise<void>;
 }
 
-export interface AppProps {
+/**
+ * The window definitions an app may ask for — the Macintosh `procID`s of
+ * `NewWindow`, in spirit:
+ *
+ * - `document`   — title bar with close and zoom boxes; grow box and scroll
+ *                  bars when the window is `resizable` / `scrollable`
+ *                  (`documentProc` / `zoomDocProc`)
+ * - `dialog`     — title bar with a close box, no zoom, fixed size
+ *                  (`movableDBoxProc`)
+ * - `utility`    — like `dialog` but floats above document windows
+ *                  (`rDocProc`; tool palettes)
+ * - `plain`      — a bare 1px frame, no title bar, cannot be moved
+ *                  (`plainDBox`)
+ * - `alert`      — `plain`, system-modal: every other window ignores input
+ *                  until it closes (`dBoxProc`)
+ * - `fullscreen` — no chrome at all; covers the whole screen, menubar
+ *                  included. The menubar's ⌘ shortcuts still work, so an app
+ *                  in full screen must offer a way back — a shortcut, a
+ *                  visible "Menu Bar" button, or both (Macintosh HIG).
+ */
+export type WindowKind = "document" | "dialog" | "utility" | "plain" | "alert" | "fullscreen";
+
+/**
+ * What an app asks for when it opens a window. Everything is optional: the
+ * defaults come from the app's `defineApp` (`defaultSize`, `windowKind`,
+ * `scrollable`, `resizable`, `minSize`, `title`, `Component`), so
+ * `openWindow()` with no argument opens the app's main window.
+ */
+export interface WindowSpec<P extends Record<string, unknown> = Record<string, unknown>> {
+  kind?: WindowKind;
+  title?: string;
+  /** Content size in pixels. Ignored for `fullscreen`, which is the screen. */
+  size?: { width: number; height: number };
+  /** Screen position of the window's top-left corner; staggered by the OS when omitted. */
+  position?: { x: number; y: number };
+  scrollable?: boolean;
+  resizable?: boolean;
+  minSize?: { width: number; height: number };
+  /** The content to mount; the app's `Component` when omitted. */
+  Component?: (props: P) => JSX.Element;
+  /** Props for the component. */
+  props?: P;
+}
+
+/**
+ * Everything an app can do that does not depend on being inside a window:
+ * what `onOpen` receives, and what `useApp()` extends with the window it is
+ * mounted in.
+ */
+export interface AppContext {
   getSprite(name: string): Sprite | undefined;
   storage: AppStorage;
+  fs: AppFileSystem;
   os: {
+    /** Open another app, as the Finder would when its icon is double-clicked. */
+    openApp(appId: string, props?: Record<string, unknown>): void;
+    /** @deprecated Renamed `openApp`; this opens an *app*, which decides about its windows. */
     openWindow(appId: string, props?: Record<string, unknown>): void;
     closeWindow(windowId: string): void;
     showDialog(options: DialogOptions): Promise<string | null>;
   };
+  /**
+   * Open one of this app's windows. Returns the new window's id, which
+   * `os.closeWindow` accepts.
+   */
+  openWindow<P extends Record<string, unknown>>(spec?: WindowSpec<P>): string;
   fetch?: FetchFunction;
   env: {
     origin: string;
   };
+  /**
+   * What this Macintosh can do. Apps that work with or without a feature
+   * check here instead of declaring it in `requires`.
+   */
+  capabilities: ReadonlySet<Capability>;
+  /** The system printer, when this platform has one. */
+  print?: PrintService;
 }
 
 /** Request options an app may pass to `fetch` — the portable subset of `RequestInit`. */
@@ -209,8 +274,10 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
    * of the app failing at runtime. Omit when the app runs anywhere.
    */
   requires?: Capability[];
+  /** Content size of the main window. */
   defaultSize: { width: number; height: number };
-  windowKind?: "document" | "dialog" | "alert" | "utility";
+  /** Kind of the main window (default `document`). */
+  windowKind?: WindowKind;
   scrollable?: boolean;
   resizable?: boolean;
   minSize?: { width: number; height: number };
@@ -233,7 +300,21 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
    * prefixed with the app id to avoid clashing with built-ins.
    */
   sprites?: Record<string, Sprite>;
+  /** Content of the app's main window. */
   Component: (props: P) => JSX.Element;
+  /**
+   * What happens when the user opens the app — its `main`. The OS calls it
+   * when the app's icon is double-clicked (`props` is `{}`) or a document it
+   * handles is opened (`props` is `FileDocumentProps`), after checking
+   * `requires` and after bringing an already-open matching window to the
+   * front instead. The default opens the main window: `app.openWindow({ props })`.
+   *
+   * An app that should decide for itself — start in full screen, put up a
+   * dialog first, or open no window at all — supplies this and opens whatever
+   * it wants through `app.openWindow`. It runs outside any component, so it
+   * is a place for opening windows, not for creating effects.
+   */
+  onOpen?(app: AppContext, props: P): void;
 }
 
 /** Props the OS passes when an app is launched to open a file. */
@@ -263,26 +344,22 @@ export interface AppWindow {
   isActive: Accessor<boolean>;
   /** Current vertical scroll offset of the content, when `scrollable`. */
   scrollY: Accessor<number>;
+  /** The window's current kind; `fullscreen` while `setFullScreen(true)` is in effect. */
+  kind: Accessor<WindowKind>;
   setTitle(title: string): void;
+  /**
+   * Make this window cover the whole screen, menubar included, keeping its
+   * content mounted; `false` gives it back the kind and bounds it had before.
+   * A window that was *opened* as `fullscreen` has nothing to go back to and
+   * stays as it is — close it instead.
+   */
+  setFullScreen(on: boolean): void;
   close(): void;
 }
 
-export interface AppServices {
-  getSprite(name: string): Sprite | undefined;
-  storage: AppStorage;
-  fs: AppFileSystem;
+export interface AppServices extends AppContext {
   /** The window this component is mounted in. */
   window: AppWindow;
-  os: AppProps["os"];
-  fetch?: AppProps["fetch"];
-  env: AppProps["env"];
-  /**
-   * What this Macintosh can do. Apps that work with or without a feature
-   * check here instead of declaring it in `requires`.
-   */
-  capabilities: ReadonlySet<Capability>;
-  /** The system printer, when this platform has one. */
-  print?: PrintService;
   /**
    * Set the menubar for the window this component is mounted in. It replaces
    * the app-level `menus` while this window is active, so each window's menus

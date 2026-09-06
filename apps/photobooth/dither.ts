@@ -81,7 +81,10 @@ export function bayerTo1bit(
   }
 }
 
-/** Center-crop to square, mirror horizontally, dither into `state.pixels`. */
+/**
+ * Center-crop the video to the target's aspect ratio (so nothing stretches),
+ * mirror horizontally, dither into `state.pixels`.
+ */
 export function ditherVideoFrame(
   video: HTMLVideoElement,
   state: DitherState,
@@ -93,13 +96,17 @@ export function ditherVideoFrame(
 
   const targetW = state.canvas.width;
   const targetH = state.canvas.height;
-  const cropSize = Math.min(srcW, srcH);
-  const cropX = (srcW - cropSize) >> 1;
-  const cropY = (srcH - cropSize) >> 1;
+  const targetAspect = targetW / targetH;
+  let cropW = srcW;
+  let cropH = srcH;
+  if (srcW / srcH > targetAspect) cropW = Math.round(srcH * targetAspect);
+  else cropH = Math.round(srcW / targetAspect);
+  const cropX = (srcW - cropW) >> 1;
+  const cropY = (srcH - cropH) >> 1;
 
   const { ctx } = state;
   ctx.setTransform(-1, 0, 0, 1, targetW, 0);
-  ctx.drawImage(video, cropX, cropY, cropSize, cropSize, 0, 0, targetW, targetH);
+  ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
 
   const scaled = ctx.getImageData(0, 0, targetW, targetH);
   if (mode === "bayer") {
