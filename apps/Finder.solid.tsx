@@ -150,6 +150,29 @@ function createMarquee(opts: {
   };
 }
 
+/**
+ * `<For>` keys by object identity, but Finder rebuilds `PositionedIcon`
+ * records on every FS write (z-order bump, rename, move). Reconciling by
+ * `nodeId` keeps the IconCell — and its CanvasNode — alive so an in-flight
+ * pointer capture can still deliver click / dragEnd.
+ */
+function KeyedIcons(props: {
+  each: PositionedIcon[];
+  children: (item: Accessor<PositionedIcon>) => JSX.Element;
+}): JSX.Element {
+  const keys = createMemo(() => props.each.map((item) => item.icon.nodeId));
+  const byId = createMemo(() => {
+    const map = new Map<string, PositionedIcon>();
+    for (const item of props.each) map.set(item.icon.nodeId, item);
+    return map;
+  });
+  return (
+    <For each={keys()}>
+      {(id) => props.children(() => byId().get(id)!)}
+    </For>
+  );
+}
+
 function marqueeRect(m: MarqueeState): { x: number; y: number; w: number; h: number } {
   return {
     x: Math.min(m.anchorX, m.currentX),
@@ -760,54 +783,52 @@ export function FinderDesktop(): JSX.Element {
       />
 
       {/* Desktop icons — sorted by zOrder so recently moved icons render on top */}
-      <For each={orderedIcons()}>
-        {(item) => {
-          const sprite: SpriteRef = os.sprites.get(item.icon.img);
-
-          return (
-            <IconCell
-              icon={item.icon}
-              x={item.pos.x}
-              y={item.pos.y}
-              cellW={DESKTOP_ICON_CELL_W}
-              sprite={sprite}
-              isSelected={() => selectedSet().has(item.icon.nodeId)}
-              isDropTarget={() => dropTargetId() === item.icon.nodeId}
-              sourceDirectoryId={item.icon.isVolume ? ROOT_ID : (getDesktopFolderId(os.fs) ?? ROOT_ID)}
-              onClick={() => setSelectedSet(new Set([item.icon.nodeId]))}
-              onDoubleClick={() => {
-                setSelectedSet(new Set([item.icon.nodeId]));
-                if (item.icon.isDirectory) {
-                  openFolderWindow(item.icon, item.pos.x, item.pos.y + os.menubarHeight);
-                } else {
-                  os.openFSNode(item.icon.nodeId, {
-                    x: item.pos.x,
-                    y: item.pos.y + os.menubarHeight,
-                    width: DESKTOP_ICON_CELL_W,
-                    height: ICON_SIZE + 18,
-                  });
-                }
-              }}
-              getCompanions={() => getCompanions(item.icon.nodeId)}
-              isRenaming={() => renamingNodeId() === item.icon.nodeId}
-              renameCaretIndex={
-                renamingNodeId() === item.icon.nodeId ? renameCaretIndex() : undefined
+      <KeyedIcons each={orderedIcons()}>
+        {(item) => (
+          <IconCell
+            item={item}
+            cellW={DESKTOP_ICON_CELL_W}
+            sprite={() => os.sprites.get(item().icon.img)}
+            isSelected={() => selectedSet().has(item().icon.nodeId)}
+            isDropTarget={() => dropTargetId() === item().icon.nodeId}
+            sourceDirectoryId={() =>
+              item().icon.isVolume ? ROOT_ID : (getDesktopFolderId(os.fs) ?? ROOT_ID)
+            }
+            onClick={() => setSelectedSet(new Set([item().icon.nodeId]))}
+            onDoubleClick={() => {
+              const { icon, pos } = item();
+              setSelectedSet(new Set([icon.nodeId]));
+              if (icon.isDirectory) {
+                openFolderWindow(icon, pos.x, pos.y + os.menubarHeight);
+              } else {
+                os.openFSNode(icon.nodeId, {
+                  x: pos.x,
+                  y: pos.y + os.menubarHeight,
+                  width: DESKTOP_ICON_CELL_W,
+                  height: ICON_SIZE + 18,
+                });
               }
-              onStartRename={(caretIndex) => {
-                if (selectedSet().size === 1 && selectedSet().has(item.icon.nodeId)) {
-                  setRenameCaretIndex(caretIndex);
-                  setRenamingNodeId(item.icon.nodeId);
-                }
-              }}
-              onCommitRename={(newName) => {
-                setRenamingNodeId(null);
-                void runFinderMutation(os.showDialog, () => os.fs.rename(item.icon.nodeId, newName));
-              }}
-              onCancelRename={() => setRenamingNodeId(null)}
-            />
-          );
-        }}
-      </For>
+            }}
+            getCompanions={() => getCompanions(item().icon.nodeId)}
+            isRenaming={() => renamingNodeId() === item().icon.nodeId}
+            renameCaretIndex={() =>
+              renamingNodeId() === item().icon.nodeId ? renameCaretIndex() : undefined
+            }
+            onStartRename={(caretIndex) => {
+              const nodeId = item().icon.nodeId;
+              if (selectedSet().size === 1 && selectedSet().has(nodeId)) {
+                setRenameCaretIndex(caretIndex);
+                setRenamingNodeId(nodeId);
+              }
+            }}
+            onCommitRename={(newName) => {
+              setRenamingNodeId(null);
+              void runFinderMutation(os.showDialog, () => os.fs.rename(item().icon.nodeId, newName));
+            }}
+            onCancelRename={() => setRenamingNodeId(null)}
+          />
+        )}
+      </KeyedIcons>
 
       {/* Marquee selection rectangle */}
       <Show when={marquee()}>
@@ -967,58 +988,54 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
       />
 
       {/* Icon grid — sorted by zOrder so recently moved icons render on top */}
-      <For each={orderedIcons()}>
-        {(item) => {
-          const sprite: SpriteRef = os.sprites.get(item.icon.img);
-
-          return (
-            <IconCell
-              icon={item.icon}
-              x={item.pos.x}
-              y={item.pos.y}
-              cellW={FOLDER_ICON_CELL_W}
-              sprite={sprite}
-              isSelected={() => selectedSet().has(item.icon.nodeId)}
-              isDropTarget={() => dropTargetId() === item.icon.nodeId}
-              sourceDirectoryId={dirId() ?? ROOT_ID}
-              onClick={() => setSelectedSet(new Set([item.icon.nodeId]))}
-              onDoubleClick={() => {
-                setSelectedSet(new Set([item.icon.nodeId]));
-                const content = windowContentRect(win);
-                const screenX = content.x + item.pos.x;
-                const screenY = content.y + item.pos.y - win.scrollY;
-                if (item.icon.isDirectory) {
-                  openNested(item.icon, screenX, screenY);
-                } else {
-                  os.openFSNode(item.icon.nodeId, {
-                    x: screenX,
-                    y: screenY,
-                    width: FOLDER_ICON_CELL_W,
-                    height: ICON_SIZE + 18,
-                  });
-                }
-              }}
-              onScroll={handleScroll}
-              getCompanions={() => getCompanions(item.icon.nodeId)}
-              isRenaming={() => renamingNodeId() === item.icon.nodeId}
-              renameCaretIndex={
-                renamingNodeId() === item.icon.nodeId ? renameCaretIndex() : undefined
+      <KeyedIcons each={orderedIcons()}>
+        {(item) => (
+          <IconCell
+            item={item}
+            cellW={FOLDER_ICON_CELL_W}
+            sprite={() => os.sprites.get(item().icon.img)}
+            isSelected={() => selectedSet().has(item().icon.nodeId)}
+            isDropTarget={() => dropTargetId() === item().icon.nodeId}
+            sourceDirectoryId={() => dirId() ?? ROOT_ID}
+            onClick={() => setSelectedSet(new Set([item().icon.nodeId]))}
+            onDoubleClick={() => {
+              const { icon, pos } = item();
+              setSelectedSet(new Set([icon.nodeId]));
+              const content = windowContentRect(win);
+              const screenX = content.x + pos.x;
+              const screenY = content.y + pos.y - win.scrollY;
+              if (icon.isDirectory) {
+                openNested(icon, screenX, screenY);
+              } else {
+                os.openFSNode(icon.nodeId, {
+                  x: screenX,
+                  y: screenY,
+                  width: FOLDER_ICON_CELL_W,
+                  height: ICON_SIZE + 18,
+                });
               }
-              onStartRename={(caretIndex) => {
-                if (selectedSet().size === 1 && selectedSet().has(item.icon.nodeId)) {
-                  setRenameCaretIndex(caretIndex);
-                  setRenamingNodeId(item.icon.nodeId);
-                }
-              }}
-              onCommitRename={(newName) => {
-                setRenamingNodeId(null);
-                void runFinderMutation(os.showDialog, () => os.fs.rename(item.icon.nodeId, newName));
-              }}
-              onCancelRename={() => setRenamingNodeId(null)}
-            />
-          );
-        }}
-      </For>
+            }}
+            onScroll={handleScroll}
+            getCompanions={() => getCompanions(item().icon.nodeId)}
+            isRenaming={() => renamingNodeId() === item().icon.nodeId}
+            renameCaretIndex={() =>
+              renamingNodeId() === item().icon.nodeId ? renameCaretIndex() : undefined
+            }
+            onStartRename={(caretIndex) => {
+              const nodeId = item().icon.nodeId;
+              if (selectedSet().size === 1 && selectedSet().has(nodeId)) {
+                setRenameCaretIndex(caretIndex);
+                setRenamingNodeId(nodeId);
+              }
+            }}
+            onCommitRename={(newName) => {
+              setRenamingNodeId(null);
+              void runFinderMutation(os.showDialog, () => os.fs.rename(item().icon.nodeId, newName));
+            }}
+            onCancelRename={() => setRenamingNodeId(null)}
+          />
+        )}
+      </KeyedIcons>
 
       {/* Marquee selection rectangle */}
       <Show when={marquee()}>
@@ -1046,15 +1063,13 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
 // ---------------------------------------------------------------------------
 
 interface IconCellProps {
-  icon: FinderIcon;
-  x: number;
-  y: number;
+  item: Accessor<PositionedIcon>;
   cellW: number;
-  sprite: SpriteRef;
+  sprite: Accessor<SpriteRef>;
   isSelected: () => boolean;
   isDropTarget: () => boolean;
   /** FS directory ID this icon lives in. */
-  sourceDirectoryId: string;
+  sourceDirectoryId: Accessor<string>;
   onClick: () => void;
   onDoubleClick: () => void;
   /** Forwarded from the parent scrollable container so the wheel scrolls even
@@ -1064,7 +1079,7 @@ interface IconCellProps {
   getCompanions?: () => PendingDragCompanion[];
   isRenaming: () => boolean;
   /** Caret index derived from the label click that opened rename (only read while renaming). */
-  renameCaretIndex?: number;
+  renameCaretIndex: Accessor<number | undefined>;
   onStartRename: (caretIndex: number) => void;
   onCommitRename: (newName: string) => void;
   onCancelRename: () => void;
@@ -1074,12 +1089,24 @@ function IconCell(props: IconCellProps): JSX.Element {
   const os = useOS();
   const iconOffsetX = Math.floor((props.cellW - ICON_SIZE) / 2);
   const labelH = 14;
+  const icon = () => props.item().icon;
 
-  const textW = measureText(props.icon.title, FONT);
-  const labelW = Math.min(textW + LABEL_PAD * 2, props.cellW);
-  const labelLeft = Math.max(0, Math.floor((props.cellW - labelW) / 2));
+  const labelGeom = createMemo(() => {
+    const textW = measureText(icon().title, FONT);
+    const labelW = Math.min(textW + LABEL_PAD * 2, props.cellW);
+    const labelLeft = Math.max(0, Math.floor((props.cellW - labelW) / 2));
+    return { labelW, labelLeft };
+  });
 
-  const hitMask = buildIconCellHitMask(props.sprite, props.cellW, iconOffsetX, labelLeft, labelW);
+  const hitMask = createMemo(() =>
+    buildIconCellHitMask(
+      props.sprite(),
+      props.cellW,
+      iconOffsetX,
+      labelGeom().labelLeft,
+      labelGeom().labelW,
+    ),
+  );
 
   const isHighlighted = () => props.isSelected() || props.isDropTarget();
 
@@ -1091,6 +1118,7 @@ function IconCell(props: IconCellProps): JSX.Element {
   function clearRenameTimer(): void {
     if (renameTimer) { clearTimeout(renameTimer); renameTimer = null; }
   }
+  onCleanup(clearRenameTimer);
 
   function isPartOfActiveDrag(nodeId: string): boolean {
     const drag = finderDrag();
@@ -1102,7 +1130,7 @@ function IconCell(props: IconCellProps): JSX.Element {
   function handleDrag(gx: number, gy: number): void {
     clearRenameTimer();
     const info = pendingDragInfo;
-    if (!info || info.nodeId !== props.icon.nodeId) return;
+    if (!info || info.nodeId !== icon().nodeId) return;
 
     if (!info.thresholdMet) {
       if (info.firstDragX === -Infinity) {
@@ -1116,7 +1144,7 @@ function IconCell(props: IconCellProps): JSX.Element {
       info.thresholdMet = true;
       activateDrag(
         info,
-        props.sprite,
+        props.sprite(),
         gx - info.mouseOffsetX,
         gy - info.mouseOffsetY,
       );
@@ -1128,23 +1156,24 @@ function IconCell(props: IconCellProps): JSX.Element {
   return (
     <box
       position="absolute"
-      left={props.x}
-      top={props.y}
+      left={props.item().pos.x}
+      top={props.item().pos.y}
       width={props.cellW}
       height={ICON_SIZE + labelH + 4}
-      hitMask={props.isRenaming() ? undefined : hitMask}
+      hitMask={props.isRenaming() ? undefined : hitMask()}
       onMouseDown={(lx, ly) => {
         if (props.isRenaming()) return;
+        const ic = icon();
         wasSelectedBeforeMouseDown = props.isSelected();
         mouseDownLY = ly;
         if (ly >= ICON_SIZE) lastLabelMouseDownX = lx;
         if (!props.isSelected()) props.onClick();
-        bumpZOrder(os.fs, props.icon.nodeId);
+        bumpZOrder(os.fs, ic.nodeId);
         pendingDragInfo = {
-          nodeId:             props.icon.nodeId,
-          sourceDirectoryId:  props.sourceDirectoryId,
-          img:                props.icon.img,
-          title:              props.icon.title,
+          nodeId:             ic.nodeId,
+          sourceDirectoryId:  props.sourceDirectoryId(),
+          img:                ic.img,
+          title:              ic.title,
           cellW:              props.cellW,
           mouseOffsetX:       lx,
           mouseOffsetY:       ly,
@@ -1167,7 +1196,7 @@ function IconCell(props: IconCellProps): JSX.Element {
               renameTimer = null;
               if (!finderDrag() && props.isSelected()) {
                 const idx = labelClickToCharIndex(
-                  props.icon.title,
+                  icon().title,
                   lastLabelMouseDownX,
                   props.cellW,
                 );
@@ -1176,7 +1205,7 @@ function IconCell(props: IconCellProps): JSX.Element {
             }, RENAME_DELAY_MS);
           }
           props.onClick();
-          bumpZOrder(os.fs, props.icon.nodeId);
+          bumpZOrder(os.fs, icon().nodeId);
         }
       }}
       onDoubleClick={() => {
@@ -1189,17 +1218,18 @@ function IconCell(props: IconCellProps): JSX.Element {
       }}
       onScroll={props.onScroll}
       onMouseEnter={() => {
-        if (finderDrag() && props.icon.isDirectory && !isPartOfActiveDrag(props.icon.nodeId)) {
-          setDropTargetId(props.icon.nodeId);
+        const ic = icon();
+        if (finderDrag() && ic.isDirectory && !isPartOfActiveDrag(ic.nodeId)) {
+          setDropTargetId(ic.nodeId);
         }
       }}
       onMouseLeave={() => {
-        if (dropTargetId() === props.icon.nodeId) setDropTargetId(null);
+        if (dropTargetId() === icon().nodeId) setDropTargetId(null);
       }}
     >
       {/* Icon image */}
       <Show
-        when={props.sprite}
+        when={props.sprite()}
         fallback={
           <box
             position="absolute"
@@ -1232,19 +1262,19 @@ function IconCell(props: IconCellProps): JSX.Element {
         fallback={
           <text
             position="absolute"
-            left={labelLeft}
+            left={labelGeom().labelLeft}
             top={ICON_SIZE}
             padding={LABEL_PAD}
             font={FONT}
             color={isHighlighted() ? 0 : 1}
             background={isHighlighted() ? 1 : 0}
           >
-            {props.icon.title}
+            {icon().title}
           </text>
         }
       >
         {(_) => {
-          const [renameValue, setRenameValue] = createSignal(props.icon.title);
+          const [renameValue, setRenameValue] = createSignal(icon().title);
           const renameInputW = createMemo(() => {
             const tw = measureText(renameValue(), FONT);
             const minTw = measureText("n", FONT);
@@ -1259,7 +1289,7 @@ function IconCell(props: IconCellProps): JSX.Element {
             if (committed) return;
             committed = true;
             const trimmed = renameValue().trim();
-            if (trimmed && trimmed !== props.icon.title) {
+            if (trimmed && trimmed !== icon().title) {
               props.onCommitRename(trimmed);
             } else {
               props.onCancelRename();
@@ -1282,7 +1312,7 @@ function IconCell(props: IconCellProps): JSX.Element {
                 padding={LABEL_PAD}
                 borderless
                 autoFocus
-                initialCaretIndex={props.renameCaretIndex}
+                initialCaretIndex={props.renameCaretIndex()}
               />
             </box>
           );

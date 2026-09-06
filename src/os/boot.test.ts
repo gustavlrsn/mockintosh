@@ -123,4 +123,85 @@ describe("bootOS on the headless platform", () => {
     for (let i = 0; i < after.length; i++) if (after[i] !== before[i]) changed++;
     expect(changed).toBeGreaterThan(100); // a new folder icon + label appeared
   });
+  // Regression: a z-order bump used to remount every IconCell mid-press, so the
+  // pointer dispatcher never delivered the click that starts inline rename.
+  it("renames a desktop icon after a second click on its selected label", async () => {
+    const meta = { shift: false, ctrl: false, alt: false, meta: true };
+    const none = { shift: false, ctrl: false, alt: false, meta: false };
+    platform.key({ type: "down", key: "n", modifiers: meta });
+    platform.key({ type: "up", key: "n", modifiers: meta });
+    platform.tick();
+
+    const fs = os.services.fs;
+    const desktop = fs.locate("desktop");
+    expect(desktop).toBeTruthy();
+    const folder = fs.children(desktop!.id).find((n) => n.name === "untitled folder");
+    expect(folder).toBeTruthy();
+
+    const pos = desktopCellPos(fs, folder!.id);
+    expect(pos).not.toBeNull();
+
+    // First click: the icon sprite (not the label) selects the icon.
+    platform.click(pos!.iconX, pos!.iconY);
+    platform.tick();
+
+    // Second click: the label of the already-selected icon. Far enough from
+    // the sprite that bootOS does not treat this as a double-click.
+    platform.click(pos!.labelX, pos!.labelY);
+    platform.tick();
+    vi.advanceTimersByTime(350);
+    await Promise.resolve(); // TextInput autoFocus is scheduled on a microtask
+    platform.tick();
+
+    platform.key({ type: "down", key: "a", modifiers: meta });
+    platform.key({ type: "up", key: "a", modifiers: meta });
+    for (const ch of "Renamed") {
+      platform.key({ type: "down", key: ch, modifiers: none });
+      platform.key({ type: "up", key: ch, modifiers: none });
+    }
+    platform.key({ type: "down", key: "Enter", modifiers: none });
+    platform.key({ type: "up", key: "Enter", modifiers: none });
+    platform.tick();
+
+    expect(fs.node(folder!.id)?.name).toBe("Renamed");
+  });
+
 });
+
+/** Layout constants mirrored from Finder.solid — desktop icons without a stored position. */
+const DESKTOP_ICON_CELL_W = 64;
+const DESKTOP_ICON_CELL_H = 64;
+const DESKTOP_PADDING_TOP = 8;
+const ICON_SIZE = 32;
+
+function desktopCellPos(
+  fs: BootedOS["services"]["fs"],
+  nodeId: string,
+): { iconX: number; iconY: number; labelX: number; labelY: number } | null {
+  const ids: string[] = [];
+  for (const vol of fs.volumes()) ids.push(vol.id);
+  for (const vol of fs.volumes()) {
+    const desktop = fs.locate("desktop", vol.id);
+    if (!desktop) continue;
+    for (const node of fs.children(desktop.id)) ids.push(node.id);
+  }
+  const trash = fs.locate("trash");
+  if (trash && !ids.includes(trash.id)) ids.push(trash.id);
+
+  const index = ids.indexOf(nodeId);
+  if (index < 0) return null;
+
+  const desktopH = HEIGHT - MENUBAR_HEIGHT;
+  const maxRows = Math.max(1, Math.floor((desktopH - DESKTOP_PADDING_TOP) / DESKTOP_ICON_CELL_H));
+  const col = Math.floor(index / maxRows);
+  const row = index % maxRows;
+  const cellX = WIDTH - (col + 1) * DESKTOP_ICON_CELL_W;
+  const cellY = MENUBAR_HEIGHT + row * DESKTOP_ICON_CELL_H + DESKTOP_PADDING_TOP;
+  const iconOffsetX = Math.floor((DESKTOP_ICON_CELL_W - ICON_SIZE) / 2);
+  return {
+    iconX: cellX + iconOffsetX + ICON_SIZE / 2,
+    iconY: cellY + ICON_SIZE / 2,
+    labelX: cellX + DESKTOP_ICON_CELL_W / 2,
+    labelY: cellY + ICON_SIZE + 7,
+  };
+}
