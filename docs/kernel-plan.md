@@ -1,525 +1,439 @@
-# Mockintosh as a UNIX-shaped machine — namespace, kernel, processes, shell
+# A programmable Mockintosh — build apps, operate the OS, then change the system
 
-Working plan, 9 September 2026; revised 10 September after review. Nothing here is implemented; this document fixes the design and the order of work.
+Working plan, 9 September 2026; rewritten 10 September around the user's chosen experiences. This is a proposal, not a claim that the features below exist. It supersedes the earlier M1–M4 namespace/RPC/process/shell sequence. Existing platform and app/window changes should land separately before implementation starts.
 
-## Why
+## Read this first
 
-Thijs Verreck's research preview of Prototyper (9 Sep 2026) makes one claim worth taking seriously: a "canvas" tool is orders of magnitude more usable by LLM agents when the thing under the GUI is a real operating system — a filesystem as the single namespace for all state, a small syscall table, processes, and text in/out — because agents are text machines that already know UNIX. His demo: `mkdir /shapes/rectangle` in a VFS terminal, and a rectangle appears on the canvas.
+Mockintosh should be a computer you can create things inside. You can ask an agent for an app, find the result on your desktop, open its source, and change it yourself. You can also ask an agent on your regular computer to operate the same Mockintosh you are looking at.
 
-Mockintosh is already most of the way there without having said so. `bootOS(platform)` runs DOM-free, `src/platform/headless/` boots the whole shell in Node, `@mockintosh/fs` is a real virtual filesystem, and the framebuffer is 22 KB of packed bits any program can read. What is missing is the *shape*: the state that is not in the filesystem (windows, the UI tree, running apps, cursor, devices) is reachable only through several ad-hoc TypeScript surfaces, and there is no text interface at all.
+The architecture serves those experiences. Plan 9 contributes two useful ideas: give running services discoverable file-like interfaces, and let familiar names refer to different providers. A build service might run on your laptop while its source and resulting app live inside Mockintosh. You do not need a distributed operating system before this becomes useful.
 
-The agent thesis is a bet on a demo. The plan is built so it does not depend on the bet: the first milestone — a namespace over live state, including the UI tree — pays for itself in test quality alone. `boot.test.ts` today finds the Apple menu by scanning menubar row 10 for the first black pixel; after the first milestone it asks for the menu by name and clicks a button by name. If Prototyper turns out to be wrong about agents, we still get tests that say what they mean.
+The VFS and a real shell remain central to this direction. Terminal, shell scripts, ChatGippity, and external MCP clients operate the same machine. The shell is a planned interface for humans and agents, delivered in stages alongside the experiences rather than postponed until somebody proves it is useful.
 
-"Everything works like UNIX" decomposes into four separable ideas, built in this order because each is the substrate of the next:
+Read the experience sections for what we are building; the walkthrough for where work happens; and the engineering sections when implementing. Terms used throughout:
 
-| Phase | Idea | UNIX precedent | What it buys | Who benefits |
-| --- | --- | --- | --- | --- |
-| **1** | Everything is a file, behind one syscall table | Plan 9 `/proc`, `/dev`; `open/read/write` | Agents and tests inspect and drive the machine — windows, buttons, menus, devices — with `ls`/`cat`/`write`; one seam every client goes through | tests, agents |
-| **2** | The syscall table over the wire | RPC to a kernel | Agents (MCP, Cursor, Claude Code) operate a running Mockintosh with structured calls; no shell needed yet | agents |
-| **3** | Processes, not just windows | pids, `fork/exec`, signals | Force-quit, open-document delivery to a running app, background helpers with no window | users |
-| **4** | Text is the universal interface | `sh`, pipes, `/bin` | A Terminal for humans; a CLI pipe for scripts; tests as shell scripts | humans, scripts |
-
-## Where we are
-
-Surfaces an external program would have to learn today to operate Mockintosh:
-
-| Surface | File | Who uses it |
+| Term | Meaning here | Example |
 | --- | --- | --- |
-| `Platform` | `src/platform/types.ts` | hosts (web, headless) |
-| `OSServices` | `src/os/context.ts` | shell components |
-| `AppServices` (`useApp()`) | `packages/sdk/src/index.ts` | apps |
-| `UIServices` | `packages/ui/src/services.ts` | UI framework |
-| `FileSystem` | `packages/fs/src/fileSystem.ts` | everyone, id-based |
-| window store | `src/os/state.ts` (`getWindows`, `openOSWindow`, `bringToFront`, …) | shell, `bootOS` |
-| app registry | `src/os/apps.ts` (`registerApp`, `getApp`) | boot, installer |
-| `HeadlessPlatform` injectors | `src/platform/headless/index.ts` (`click`, `key`, `tick`, `lastFrame`) | `boot.test.ts` |
-| `BootedOS` | `src/os/boot.ts` | entry points |
+| Service | A component that performs work through a documented interface | Build source into an app bundle |
+| Namespace | A map from paths to files or service resources | `/services/build` names the selected builder |
+| VFS | Virtual filesystem combining mounted storage and live services under those paths | `cat` reads a document or an OS setting through the same interface |
+| Shell | A command language over the kernel and VFS | Save a build-and-run sequence as a script |
+| Mount | Attach a service's resource tree at a path | A remote builder appears under `/services/build` |
+| Kernel | The common entry point for inspecting and operating Mockintosh | Read a file, open an app, submit an action |
+| Session | The particular running OS and caller an operation belongs to | The browser instance visible on your desk |
+| App instance | One running app with owned windows and cleanup | The Counter currently open |
+| Agent run | A conversation task with tool calls and results | “Build me a counter” through completion |
 
-There is no way to ask "where is the Apple menu", "which windows are open", "which app is active", or "where is the OK button" from outside the Solid tree — even though the renderer holds all of it: every `CanvasNode` (`packages/ui/src/nodes.ts`) has a `type`, a `layout` rect, `textContent`, and its event handlers (`hasMouseHandlers`). That is an accessibility tree that nothing exposes.
+These are separate concepts. Mounting a server connects to its interface; it does not execute its code on the device. A file-like interface may describe a live command or event stream, not a document stored on disk.
 
-Assets already in place that the plan builds on rather than replaces:
+## Experience A — “Build me an app”
 
-- `FileSystem` over `FSBackend`, reactive catalog, roles, attributes, MIME types, durability rules (ARCHITECTURE.md § File System); `resolve(path)` and `pathOf(id)` already exist.
-- `Platform` with required (screen, input, clock, disk) and optional (peripherals) members, and `platformCapabilities()` derived from it.
-- `bootOS` owning boot order, frame loop, input policy (double-click, ⌘-shortcuts).
-- Headless platform + `check:core` guaranteeing the core has no DOM dependency.
-- `defineApp` / `SolidApp` as the app contract; `AppInstaller` loading bundles via `Platform.loadModule`.
+**What you do.** Open ChatGippity and ask: “Make a counter with a big number and plus and minus buttons.” The agent creates it and puts a launch icon on the desktop. Open the app and use it. Choose Open Source, change the increment from one to five, press Build & Run, and see the change. Close and reopen Mockintosh: the app and your source are still there.
 
-## Target architecture
+**What makes it worthwhile.** The result is a possession you can inspect and modify. The agent accelerates creation, while an ordinary web developer can understand the resulting project.
 
-```
-  Solid shell (src/os, apps/*)          External clients
-  Finder · Terminal · apps · dialogs    MCP server · CLI · tests
-          │  sync, reactive                     │  async, serialisable
-          ▼                                     ▼
-  ┌──────────────────────┐   projection   ┌──────────────────────────┐
-  │  VFS (mount table)   │ ─────────────▶ │  Kernel (syscall table)  │
-  │  sync stat/children  │                │  stat readdir read write │
-  │  reactive stores     │                │  mkdir unlink rename     │
-  └──────────┬───────────┘                │  watch · spawn kill ps   │
-             │                            │  wait · now sleep        │
-             │                            └──────────────────────────┘
-   ┌─────────┼──────────────────┬──────────────────┐
-   ▼         ▼                  ▼                  ▼
- /disk     /windows /apps     /dev /sys         /proc
- FileSystem  window store,    Platform,          process table
- (catalog,   UI tree walk     inject path,       (phase 3)
-  FSBackend) (@mockintosh/ui) capabilities
-```
+**How it works.**
 
-Two layers, one namespace. The **VFS** is synchronous and reactive: the Solid shell renders from it exactly as the Finder renders a folder today. The **Kernel** is an asynchronous, JSON-friendly projection of the same VFS plus process and time verbs; it is what tests, RPC, and the shell's commands use.
+1. The agent reads the SDK contract for this running OS.
+2. It creates a project folder containing readable Solid/TypeScript source and a manifest.
+3. It asks a build service to compile an immutable revision of those files.
+4. Build diagnostics come back as file/line/column messages. The agent can edit and retry.
+5. The installer registers a successful build and creates a desktop shortcut.
+6. The agent opens the app, checks its controls and output, and reports what worked.
+7. The human opens the same source files in an editor. Save and Build & Run use the same services.
 
-Two invariants the whole plan rests on:
+**Acceptance.** Complete that loop in the visible browser OS. Verify the buttons, the manual source edit, the desktop shortcut, and persistence after reboot. A compile error leaves editable source and the last successful build available. Agent claims are grounded in build/tool results rather than merely returning a code block.
 
-1. **The VFS is the only namespace.** Every piece of state an agent might need — windows, UI nodes, processes, devices, capabilities, the framebuffer — has a path. Syscalls are the verbs; paths are the nouns.
-2. **No shell-only backdoors.** Everything reachable through the sync layer is reachable through the Kernel projection. This is testable: enumerate the mounts and check each is exposed. It is what stops the table of surfaces above from growing again.
+**Scope.** Solid components, signals, TypeScript, imports, and a normal project layout. The visual vocabulary is Mockintosh's `@mockintosh/ui` custom renderer, not browser HTML/CSS. Arbitrary npm packages, a complete IDE, live state-preserving hot reload, and a full shell are not required for this experience.
 
-`OSServices` and `AppServices` become facades: they may keep sync reactive reads (through the VFS) and typed conveniences, but every mutation they offer must be a VFS write or a syscall.
+## Experience B — “Use my Mockintosh”
 
----
+**What you do.** In an AI client on your regular computer, connect the Mockintosh MCP server and ask: “Open Control Panel and change the desktop pattern.” Watch the agent open the app, find its controls, choose a pattern, and verify the result. Ask ChatGippity inside the OS to do the same thing.
 
-## Phase 1 — Namespace: mount table, synthetic filesystems, kernel projection
+Technically, the person talks to an AI client; the MCP server supplies tools to that client. ChatGippity can call the shared tools directly inside Mockintosh. It need not run a second MCP connection to operate its own OS. Supporting arbitrary third-party MCP servers from ChatGippity is a separate extension. See the [MCP architecture](https://modelcontextprotocol.io/docs/learn/architecture).
 
-### Goal
+**How it works.** Both clients receive a description of the same running machine and use the same actions. Tools expose windows, named controls, menus, files, settings, and screenshots. Actions enter the same OS policy and input paths as human actions.
 
-Make the VFS the single namespace and define `Kernel` as its projection. Live OS state gets paths; the persistent catalog becomes one mount among several; the UI tree is browsable and clickable by path. `boot.test.ts` stops scanning pixels for navigation.
+**Acceptance.** An external MCP client and ChatGippity can each open an app, click a named control, type into a field, change a real persistent setting, and inspect the result in that exact browser instance. Reloading preserves the setting. A separately booted headless machine is useful for tests but does not satisfy the live-browser demonstration.
 
-### Design — mounts
+**Scope.** The first real setting is desktop pattern, with a small set of valid choices. Control Panel currently shows a sample pattern without a setting control, and Desktop uses a fixed checker background. Implement the setting and its human UI together; giving a nonexistent setting a path is not sufficient.
 
-`@mockintosh/fs` grows a **mount table**. A `MountableFS` is the minimal contract a mount must satisfy; the existing `FileSystem` implements it for the persistent volume, and small synthetic implementations expose OS state.
+## Experience C — “Change the system” (potential next step)
 
-```ts
-// packages/fs/src/mount.ts
-export interface MountableFS {
-  stat(subpath: string): FSNode | undefined;          // synchronous, reactive
-  children(subpath: string): FSNode[];
-  read(subpath: string): Promise<Uint8Array>;
-  write?(subpath: string, data: Uint8Array): Promise<void>;
-  mkdir?(subpath: string, name: string): Promise<void>;
-  remove?(subpath: string): Promise<void>;
-  rename?(subpath: string, name: string): Promise<void>;
-}
+**What you do.** Ask for a new Finder action or a different built-in app behavior, inspect the change, try it, and restore the previous version if you prefer it.
 
-export class VFS {
-  mount(at: Path, fs: MountableFS, options?: { hidden?: boolean }): void;
-  unmount(at: Path): void;
-  resolve(path: Path): { mount: MountableFS; at: Path; subpath: string } | undefined;
-  // …stat/children/read/write dispatch to the owning mount
-}
-```
+There are three progressively stronger forms of hackability:
 
-Reads are synchronous and reactive (backed by Solid signals/stores in each synthetic FS) so the Finder can list `/windows` with the same memo it uses for a folder. Mutations are async. Missing optional methods raise `EACCES`/`ENOSYS`, so `/proc/<pid>/status` is read-only by construction.
+| Level | Example | What must exist |
+| --- | --- | --- |
+| Change data and settings | Change desktop pattern or an app preference | Documented settings and persistence; part of B |
+| Edit apps and extension points | Fork a bundled utility, add an Open Selection handler | Source packages, documented extension contracts, replace/restore lifecycle |
+| Replace shell or core code | Change Finder behavior or window chrome | A development build, a bootable previous version, and a recovery route outside the modified shell |
 
-Synthetic node ids use the convention `<mount>:<key>` (`win:finder-1725…`, `ui:finder-1725…/box.2/button.0`, `dev:screen`) so everything that keys by `NodeId` today — Finder selection, attributes — keeps working unchanged.
+A settings write changes data. Editing app source changes the next compiled program. Editing a file named `/sys/...` does not automatically modify the running kernel. Each kind of change needs an explicit apply/build/reload operation.
 
-### Design — kernel
+Start after A and B with “fork a bundled app, edit it, run the fork, restore the original.” Then choose one concrete shell extension to expose. Core self-modification remains an experiment: keep a known-good boot path, and test changed shell code in a separate runtime/instance. The current renderer and QuickDraw globals do not support arbitrary nested boots in one realm.
 
-New directory `src/os/kernel/`. Types are explicit and JSON-friendly (paths and pids, not object handles) so the same table is exposed over JSON-RPC in phase 2 without an adapter layer.
+## What exists in this checkout
 
-```ts
-// src/os/kernel/types.ts
-export type Path = string;                 // absolute, "/"-separated
-export type Pid = number;
+The source is ahead of some earlier planning notes. Recheck these seams when implementation starts; do not implement against historical descriptions.
 
-export interface KernelStat {
-  path: Path;
-  kind: "file" | "directory";
-  type?: string;                           // MIME for files
-  size?: number;
-  modifiedAt: number;
-  synthetic: boolean;                      // true for /dev, /proc, /windows, …
-  attributes: NodeAttributes;
-}
+| Existing piece | Useful foundation | Missing work |
+| --- | --- | --- |
+| [bootOS](../src/os/boot.ts), [Platform](../src/platform/types.ts), headless host | DOM-free OS core, shared input policy, frame readback | Kernel/session interface and live bridge |
+| [FileSystem](../packages/fs/src/fileSystem.ts) | Reactive catalog, byte bodies, path resolution, stable ids, roles | Mount adapter, source revisions, project installation |
+| [SDK](../packages/sdk/src/index.ts), [app context](../src/os/appContext.ts) | Solid apps, `AppContext`, `onOpen`, multiple windows | Running-instance ownership, rebuild/restart lifecycle |
+| [app template](../templates/app/vite.config.ts), root import map | Universal Solid compilation and shared runtime imports | Build from VFS source and load resulting artifacts |
+| [AppInstaller](../src/os/installedApps.ts), [openers](../src/os/openers.ts) | Manifest installation and document launching | Directory bundles, build replacement, Open Source |
+| [FileViewer](../apps/FileViewer.tsx), UI TextInput | Read-only text display; single-line editing | A usable multiline source editor |
+| [ChatGippity](../apps/ChatGippity.tsx), [chat endpoint](../api/chat.ts) | Chat UI, provider proxy, a limited tool round | Matching request schema and repeated OS/build tool loop |
+| [generated chat context](../scripts/build-chat-context.ts) | Developer guide already embedded in the prompt | Serve exact runtime SDK/version/types/examples to both clients |
+| [Control Panel](../apps/ControlPanel.tsx), [Desktop](../src/os/components/Desktop.solid.tsx) | Place to expose desktop pattern | Persistent setting and editable control |
 
-export interface KernelDirent { name: string; kind: "file" | "directory"; type?: string }
+Concrete chat mismatch: the UI sends `messages`, while the endpoint expects `prompt` and `conversationHistory`; the UI also appends the new user message twice when constructing its request. The endpoint allows one tool round followed by a response with tools disabled. A multi-step app-building agent needs a different loop. Fix these during the chat milestone, preserving existing supported chat tools.
 
-export interface SpawnSpec {
-  app: string;                             // registered app id, or a /bin command in phase 4
-  args?: Record<string, unknown>;          // today's `props`
-  fromRect?: AnimRect;                     // zoom-open origin (GUI clients only)
-}
+The earlier claim that `api/mockintosh-context.ts` still teaches SDK v1 is obsolete: it now imports the generated developer guide. Extend that source-of-truth mechanism.
 
-export interface ProcessInfo {
-  pid: Pid;
-  app: string;
-  args: Record<string, unknown>;
-  state: "running" | "exited";
-  startedAt: number;
-  windows: string[];                       // window ids
-}
+## Follow one request through the system
 
-export type KernelWatchEvent =
-  | { type: "added" | "removed" | "changed"; path: Path };
+For “Build me a counter,” start with this division of work:
 
-export interface Kernel {
-  // --- files ---
-  stat(path: Path): Promise<KernelStat | null>;
-  readdir(path: Path): Promise<KernelDirent[]>;
-  read(path: Path): Promise<Uint8Array>;
-  readText(path: Path): Promise<string>;
-  write(path: Path, data: FileContent, options?: WriteFileOptions): Promise<void>;
-  mkdir(path: Path): Promise<void>;
-  unlink(path: Path): Promise<void>;
-  rename(from: Path, to: Path): Promise<void>;
-  setattr(path: Path, patch: NodeAttributes): Promise<void>;
-  /** Fires on any change under `path`; a Solid effect internally. */
-  watch(path: Path, cb: (event: KernelWatchEvent) => void): Unsubscribe;
+~~~text
+ChatGippity on the Mockintosh screen
+    ↕ conversation, proposed tool calls, tool results
+Agent/model gateway (regular computer or server)
+    ↕ authenticated calls for one selected OS session
+Shared Mockintosh tools
+    ├── read/write project files in the live OS's storage
+    ├── submit source revision to the selected build service
+    ├── install artifact and create desktop shortcut
+    └── open app, inspect controls, click, capture result
 
-  // --- processes (phase 1: spawn only, over openApp; ps/kill/wait arrive with phase 3) ---
-  spawn(spec: SpawnSpec): Promise<Pid>;
-  kill(pid: Pid): Promise<void>;
-  ps(): Promise<ProcessInfo[]>;
-  wait(pid: Pid): Promise<number>;         // exit code
+External AI client → MCP adapter → the same shared Mockintosh tools
+~~~
 
-  // --- time ---
-  now(): number;
-  sleep(ms: number): Promise<void>;
-}
-```
+The gateway holds model credentials and requests model responses. The live OS owns its local files, UI, and action execution. The builder accepts source and returns artifacts; it does not need direct access to the whole OS.
 
-Deliberately **not** syscalls: windows, UI nodes, menus, dialogs, cursor, clipboard, printer, screen. Those are files — `write /windows/<id>/rect`, `write /windows/<id>/ui/…/click`, `read /dev/screen`, `write /dev/mouse`. Keeping the verb set to files + processes + time is what makes the table small enough to stay stable. The Macintosh analogy is the A-trap dispatch table: one indirection every caller goes through, so the implementation can move underneath.
+Start with a build provider on the regular computer using the app template's compilation configuration. That is the first useful remote computation service. Keep the provider replaceable so a hosted server or browser worker can implement the same contract later. The first browser demo may require that companion process; say so in setup. A self-contained public web deployment needs a hosted or in-browser provider before it can promise the same experience without the companion.
 
-Every syscall returns a `Promise` even where the VFS read is synchronous, so synthetic and remote backends can be slow later. GUI code that needs synchronous reactive reads uses the VFS directly through the facade — that is the two-layer model above, not a backdoor.
+An immutable source snapshot crosses this boundary, not an OPFS handle or a browser-local filesystem path. A remote service cannot dereference those. Returned artifacts are written into the app package in the live OS.
 
-Errors: one `KernelError` with a UNIX-style `code` (`ENOENT`, `EEXIST`, `EISDIR`, `ENOTDIR`, `EACCES`, `ESRCH`, `ENOSYS`) so text tools and agents get a vocabulary they already know. `FSError` maps onto it.
+## Build next, leave room for, explore later
 
-Until phase 3 there is no process table. `spawn` calls today's `openApp` and returns a pid allocated per call; `ps`/`kill`/`wait` throw `ENOSYS`. No window→process adapter: that would be code written to be deleted, and nothing may depend on it.
-
-### Namespace
-
-```
-/
-├── disk/                        the persistent catalog; display name "Macintosh HD" is an attribute
-├── dev/                         peripherals; a node exists iff the Platform provides it
-│   ├── screen                   packed 1-bit framebuffer (read)
-│   ├── mouse                    write "down 100 40" | "up" | "move 10 20" | "click 100 40" | "dblclick …"
-│   ├── keyboard                 write raw text (typed) or "key Enter" / "key cmd+n"
-│   ├── clipboard                read/write text/plain
-│   ├── printer                  write a 1-bit page → PrintService
-│   └── camera                   (later) last frame
-├── proc/                        one directory per process (phase 3)
-│   └── <pid>/{app,args,status,windows,parent}
-├── windows/
-│   └── <id>/
-│       ├── title rect kind active app      write `rect` to move/resize, `active` = "1" to bring to front
-│       └── ui/                             the window's UI tree (see below)
-│           └── <node>/{type,rect,text,name,clickable,click}
-├── apps/                        the registry: what can be launched
-│   └── <appId>/{title,icon,requires,fileTypes}
-└── sys/
-    ├── resolution               "512 342"
-    ├── capabilities             read-only view of platformCapabilities(), one per line
-    ├── menubar/                 the active app's menus: <menu>/<item> — write "1" to invoke
-    └── cursor                   "x y" + current cursor name
-```
-
-Naming: mounts use lowercase UNIX names because their audience is programs and agents; the volume's *display* name stays Macintosh because its audience is people. The volume is mounted at a stable `/disk` (renaming the disk in the Finder must not move every path); the Finder shows the display name. Synthetic mounts are `hidden: true` — they do not appear as disks on the desktop — but the Finder can open them by path once a "Go to Folder…" exists.
-
-### Design — the UI tree
-
-`/windows/<id>/ui/` is the highest-value mount for tests and agents: "click the OK button" is what they actually want, far more than "move window rect".
-
-**Node naming.** Solid node identities are ephemeral, so paths are structural: `<type>.<index>` among siblings of the same type (`box.0/text.1`, `box.2/button.0`), with an optional `name` prop apps and shell components can set — the equivalent of `aria-label` — that becomes an alias directory entry (`ui/ok` → the same node as `ui/box.2/button.0`). Structural paths are stable as long as the tree shape is; named paths are stable as long as the name is. Tests and agents should prefer names; the shell's own dialogs and Finder chrome name their controls.
-
-**Per-node files.** `type` (`box`, `text`, `image`, `button`, …), `rect` (screen coordinates), `text` (`textContent`), `name`, `clickable` (`hasMouseHandlers`), and `click` — writing to it dispatches a click at the node's centre through the inject path (below), so a click by name and a click by coordinates are the same event.
-
-**Layering.** `@mockintosh/ui` must expose a read-only walk of the tree without leaking `CanvasNode` internals: a `UINodeSnapshot { type, rect, text, name, clickable, children }` and `ui.snapshot(rootNode)` (or a per-window equivalent) on the UI instance. `UITreeFS` in `src/os/kernel/fs/` is a reactive view over that, keyed by window. This is a public API addition to the UI package; keep it to the snapshot type and one walk function.
-
-### Design — input
-
-`bootOS` gets one typed inject path: `injectPointer(event: PlatformPointerEvent)` and `injectKey(event: PlatformKeyEvent)`, which own the existing double-click and ⌘-shortcut policy. The platform's `onPointer`/`onKey` call it; so do the `/dev/mouse` and `/dev/keyboard` write handlers (after parsing their string format) and `ui/…/click`. Injected and real input are indistinguishable because they are the same code path — without a string parser on the pointer-move hot path and without losing the typed event.
-
-### Where the existing code lands
-
-| Today | Becomes |
+| Status | Decisions |
 | --- | --- |
-| `platformCapabilities()` | Unchanged; `/sys/capabilities` is a read-only view. (`browser`, `video`, `images`, `network` are not devices, so `/dev` is not their source of truth.) |
-| `state.ts` window store | Unchanged internally; `WindowsFS` (`src/os/kernel/fs/windows.ts`) is a reactive view over it |
-| `apps.ts` registry | `AppsFS` view |
-| Renderer node tree | `ui.snapshot()` in `@mockintosh/ui`; `UITreeFS` view under each window |
-| `bootOS` input handlers + double-click / ⌘ policy | `injectPointer` / `injectKey`; platform and `/dev` both call them |
-| `HeadlessPlatform.click/key/lastFrame` | Still exist for hosts, but tests and agents prefer `/dev/mouse`, `/dev/keyboard`, `/dev/screen`, `ui/…/click` because those work on *every* platform, including the browser |
-| `getMenubarMenus()` | `MenubarFS` — invoking a menu item by writing to `/sys/menubar/File/New` replaces `runMenuShortcut`'s special-casing |
-| `OSServices.openApp` | `kernel.spawn`; `OSServices` keeps the typed method as a facade |
+| **Build next** | VFS; shared OS tools; staged shell/Terminal/CLI; named UI inspection; live MCP bridge; desktop setting; source editor; Solid build provider; directory app packages; replace/restart; ChatGippity tool loop |
+| **Leave room for** | Async service access; session-specific bindings; local/remote builder substitution; stable resource references; scoped operations; revisioned files and cancellable jobs |
+| **Explore later** | Network home and archives; shared spaces and agents; general CPU servers; actual 9P compatibility; arbitrary remote program execution; full POSIX compatibility/preemptive scheduling; core self-modification |
 
-### Implementation steps
+“Leave room for” means a small interface choice justified by these experiences. It does not mean building the entire future system now.
 
-1. `packages/fs`: `MountableFS`, `VFS`. `FileSystem` implements `MountableFS`. Tests for resolution across mount boundaries and for id round-tripping.
-2. `packages/ui`: `UINodeSnapshot`, `ui.snapshot()`, and the `name` prop on layout nodes.
-3. `src/os/kernel/types.ts`, `createKernel(vfs, …)`: the projection, `KernelError`, `watch` over Solid effects.
-4. `src/os/kernel/fs/`: `DevFS`, `WindowsFS`, `UITreeFS`, `AppsFS`, `SysFS`, `MenubarFS`. Each is a small reactive view plus write handlers.
-5. `bootOS`: `injectPointer`/`injectKey`; mount the volume and synthetic mounts right after the file system opens; construct the kernel; build `OSServices` from it; `BootedOS` gains `kernel` and `vfs`.
-6. `boot.test.ts` rewrites: `await kernel.write("/windows/<id>/ui/ok/click", "1")`, `await kernel.readText("/windows/<id>/title")`, `await kernel.write("/dev/mouse", "click 8 10")` replace pixel scans. Pixel assertions stay only where pixels are the thing under test. A test enumerates mounts and asserts invariant 2.
-7. `ARCHITECTURE.md`: § File System gains "Mounts" and the namespace table; new § Kernel with the two-layer diagram; `OSServices` documented as a facade.
+## Shared architecture and invariants
 
-### Acceptance
+~~~text
+Human GUI / source editor      ChatGippity tools      External MCP tools
+            │                         │                       │
+            └────────────── shared operations ────────────────┘
+                                      │
+Terminal / CLI / run_shell → Shell ────┤
+                                      │
+                          Kernel + caller session
+                                      │
+                       VFS: namespace / service bindings
+                   ┌──────────────────┼──────────────────┐
+                   ▼                  ▼                  ▼
+             Local file adapter   OS state services   Build service
+              existing FS       windows/UI/settings   local or remote
+~~~
 
-- `check:core` still passes; `Kernel` and `UINodeSnapshot` have no DOM or Solid types in their public signatures.
-- `ls /` from the kernel lists `disk dev windows apps sys`; `ls /dev` on the headless platform lists `screen mouse keyboard` only; on the web platform it adds `clipboard`, and `printer` when WebUSB is granted.
-- A headless test, through `Kernel` only: opens the Apple menu by writing to `/sys/menubar`, spawns an app, reads its window's title, clicks a named button in its UI tree, writes a new `rect` and sees the next `/dev/screen` read reflect the move — with no reference to `state.ts` or pixel scanning for navigation.
-- Finder can list `/windows` (via a test helper or Go to Folder) with no Finder code changes beyond hiding non-volume mounts from the desktop.
+1. **One operation implementation.** GUI conveniences, internal tools, and MCP tools call shared operations. No MCP-only state mutations or alternate app installer. Typed local calls stay typed; pointer movement and rendering do not serialize to text.
+2. **One naming model, explicit views.** The initial session has a default mount table. Caller/session context is explicit from the start, allowing a different build provider or restricted view later. Full per-process union mounts are deferred.
+3. **Paths name public resources, not every implementation detail.** Expose state needed for control, creation, and extension. Preserve internal stores and the SDK's typed conveniences.
+4. **Async service boundary, efficient local reads.** Service metadata and bodies can be asynchronous. Existing local Solid consumers may retain reactive reads of the same authoritative stores. Remote consumers use a view/cache with loading, error, revision, and staleness state. Do not rewrite all Finder reads before the first experience works.
+5. **Runtime identity and source revision are explicit.** Tool results identify the selected OS session; actions identify their target; builds identify their source. Stale references must not silently operate on a different target.
+6. **A successful transport response is not proof of the user outcome.** Re-read state or inspect the UI after a change. Build success, app launch, and tested behavior are separate results.
+7. **The VFS is the common resource namespace.** Persistent files and public live resources are mounted trees with common stat/list/read/write operations. MCP convenience tools must not grow an independent resource model. Actions have documented control endpoints or kernel lifecycle operations, and shell commands use those same contracts. An accepted capability must be usable from both tools and the shell; neither gets private mutations.
 
----
+Suggested homes: `src/os/kernel/` for session/operations and OS synthetic services; `packages/fs/` for generic namespace types/adapters; `src/os/build/` for project/build contracts; a host-side service module for compilation; `scripts/mockintosh-mcp.ts` for the MCP entry point. Split packages only where a second consumer needs them.
 
-## Phase 2 — The syscall table over the wire
+### Resource and action contracts
 
-### Goal
+A service's public metadata includes a stable resource id, revision, kind, content type, and supported operations. It does not reuse the catalog's `parentId` as a universal identity: one resource can be reachable through several bindings.
 
-Let an agent operate a running Mockintosh with structured calls. This comes before processes and the shell because, with the UI tree in place, it is a thin layer and delivers most of the agent value.
+Define async stat/list/read/write and the needed directory operations, including expected-revision writes for source editing. Keep whole-file helpers initially. For snapshots, commands, and streams document different semantics:
 
-### Design
-
-The `Kernel` types were made JSON-friendly for this. A JSON-RPC 2.0 server maps one method per syscall (`stat`, `readdir`, `read` with base64 bodies, `write`, `spawn`, …) plus `screenshot` (PBM P4 from `/dev/screen` — 1-bit needs no image codec, so it works everywhere). An MCP server is the same table as tools, with `readdir`/`readText`/`write`/`spawn`/`screenshot` as the ones an agent reaches for. Structured calls beat shell quoting for agents; `sh` (phase 4) is for humans and scripts.
-
-Two transports for the same server: in-process for tests and the headless CLI; a browser bridge (postMessage or a dev-server WebSocket, cf. `docs/mockintosh-devtools-extension.md`) so the same tools reach a live web instance.
-
-### Implementation steps
-
-1. `packages/kernel-rpc` (or `src/os/kernel/rpc.ts` if it stays small): `serveKernel(kernel, transport)` and `connectKernel(transport): Kernel`, round-trip tested against the headless boot.
-2. `scripts/mockintosh-mcp.ts`: boots headless (or connects to a browser bridge) and exposes the tools.
-3. Web platform: opt-in dev bridge.
-
-### Acceptance
-
-- From Cursor / Claude Code, via MCP: list windows, spawn the Finder, click a named button, read the resulting window title, take a screenshot — against both a headless boot and a running browser instance.
-
----
-
-## Phase 3 — Processes
-
-### Goal
-
-Separate "a running program" from "a window". Give it a pid, a lifetime, an owner scope, and an entry in `/proc`; make `kill` a real operation; allow programs with no window at all. This is the phase whose beneficiary is the user: force-quit, open-document delivery to a running app, background helpers.
-
-### Design
-
-```ts
-// src/os/kernel/process.ts
-export interface Process {
-  pid: Pid;
-  app: string;
-  args: Record<string, unknown>;
-  parent: Pid | null;
-  state: "running" | "exited";
-  exitCode?: number;
-  startedAt: number;
-  /** Solid owner for everything the process creates that is not a window: intervals, subscriptions, effects. */
-  owner: Owner;
-  windows: Set<string>;
-  io?: ProcessIO;                          // phase 4: stdin/stdout/stderr text streams
-}
-```
-
-Rules:
-
-- `spawn(app)` creates a process and opens the app's first window with `OSWindow.pid` set. Window *content* runs under `runWithOwner(process.owner)` so effects created inside components are attributable to the pid; window *existence* stays in the window store, which drives the tree through `<For>` as today. Windows opened by that app (`useApp().os.openWindow`) belong to the same pid.
-- `kill(pid)` is **store-driven**: remove the process's windows from the store (the tree unmounts through the mechanism that already works), then dispose `owner` for everything else, then mark the process exited in `ProcFS`. Not dispose-first: that would invert Solid's model and reintroduce the `<For>` reorder/remount risk.
-- A process exits on its own when its last window closes *and* it has no `io` (GUI apps), or when `main` returns (phase 4 text programs).
-- `singleInstance` and the current open-document dedupe in `openApp` become **"send to running process"**: if an app is running and a document is opened with it, the kernel delivers an `open-document` event to the existing pid instead of spawning — the Macintosh `odoc` AppleEvent. Apps opt in with an `onOpenDocument` handler on `SolidApp`; apps without one get a new process per document, as today.
-- Scheduling is cooperative and single-threaded; there is no preemption. "Process" here means an accounting and lifetime unit, exactly what Switcher/MultiFinder provided.
-
-`/proc/<pid>/`:
-
-```
-app        app id
-args       JSON
-status     running | exited <code>
-windows    one window id per line
-parent     pid
-```
-
-`/proc/self` resolves to the caller's pid when the kernel call is made from within a process context (an `AppServices.pid` is set per window; Terminal's commands run inside the shell's pid).
-
-### Implementation steps
-
-1. `ProcessTable` (a Solid store) + `ProcFS`; `Kernel.spawn/kill/ps/wait` implemented over it (replacing phase 1's `ENOSYS`).
-2. `Window.solid.tsx` runs `WindowContent` under the process owner; `OSWindow.pid` added; `closeOSWindow` notifies the process table so last-window exit works.
-3. `AppServices` gains `pid` and `onOpenDocument`; `openers.ts` routes through `spawn`-or-deliver.
-4. Dialogs are processes with `parent` = the requesting pid; killing the parent kills its dialogs.
-5. Tests: kill closes all of an app's windows and releases effects (assert with an `onCleanup` spy and a `setInterval` that must stop); `ps` matches `/proc`; open-document delivery to a running Finder; reordering windows does not remount content under a new owner.
-
-### Acceptance
-
-- Two Picture windows are one process if Picture handles `onOpenDocument`, two processes otherwise — verifiable via `/proc`.
-- `kill` of an app with a pending `setInterval` stops the interval (owner disposal), and its windows vanish in the next frame.
-
----
-
-## Phase 4 — Text is the universal interface: `/bin`, `sh`, Terminal
-
-### Goal
-
-A text REPL over the whole machine, for humans in a Terminal app and for scripts through a CLI pipe. It is also what `apps/Testing.tsx` should have been.
-
-### Design
-
-**Commands** are ordinary TypeScript modules with a tiny contract, registered into `/bin` (an `AppsFS`-like synthetic mount over a command registry):
-
-```ts
-// src/os/shell/command.ts
-export interface CommandContext {
-  argv: string[];
-  cwd: Path;
-  kernel: Kernel;
-  stdin: TextStream;
-  stdout: TextStream;
-  stderr: TextStream;
-  env: Readonly<Record<string, string>>;
-}
-export interface Command {
-  name: string;
-  usage: string;
-  run(ctx: CommandContext): Promise<number>;   // exit code
-}
-```
-
-Initial `/bin` (each ≤ 40 lines because the kernel does the work):
-
-| Command | Notes |
+| Resource | Read/write meaning |
 | --- | --- |
-| `ls [-l] [path]`, `cat`, `echo`, `stat`, `mkdir`, `rm`, `mv`, `cp`, `pwd`, `cd` | straight syscall wrappers |
-| `open <path\|appId> [args]` | `spawn`; `open /disk/Desktop/Readme` routes through `openers.ts` |
-| `ps`, `kill <pid>`, `wait <pid>` | process table |
-| `windows` | `ls -l /windows` with a readable table |
-| `click <x> <y> \| <window> <name>`, `dblclick`, `drag x1 y1 x2 y2`, `type "text"`, `key cmd+n` | writes to `/dev/mouse`, `/dev/keyboard`, `ui/…/click` |
-| `menu "File" "New Folder"` | writes to `/sys/menubar/...` |
-| `screenshot [path]` | `/dev/screen` → PBM (P4) file, or ASCII art to stdout when no path |
-| `sleep ms`, `frame [n]` | advance; `frame` waits for `n` presented frames so scripts can be deterministic |
-| `sh [-c cmd \| script]` | the shell itself, so scripts can be files |
+| Source file | Read UTF-8 text; conditional replacement checks the last revision |
+| Window title or setting | Read current value; validated write updates owning state |
+| Control endpoint | Write one complete command; return its outcome or job reference |
+| Build diagnostics | Read structured messages for a named build |
+| Events | Subscribe from a cursor; cancel explicitly; gaps require resnapshot |
 
-**Shell** (`src/os/shell/sh.ts`): starts as `sh -c` with `;` and single/double quotes. Pipelines (`|`), redirects, `&&`/`||`, and `$VAR` are added when a concrete script needs them; control flow, globbing, and job control are a program's job. Each command runs as a process (phase 3) with `io`, so `ps` shows running commands and `kill` works on them.
+Structured tools can wrap these operations: `inspect`, `read_file`, `write_file`, `open_app`, `click`, `type_text`, `key`, `menu`, `set_setting`, `build_app`, `install_app`, `restart_app`, and `screenshot`. These are proposed tool names, not an additional set of implementations. Discoverable service operations and their schemas provide the canonical contracts; tool names provide convenient entry points.
 
-**Two front ends over the same shell:**
+Use stable error codes such as `ENOENT`, `EACCES`, `ENOSYS`, `ESTALE`, `ECONFLICT`, `EDISCONNECTED`, and `ECANCELLED`, plus readable messages. Cross-mount rename fails explicitly until a copy/move contract exists. Rebinding does not copy state; `pathOf(id)` needs a namespace and a preferred-path policy when aliases exist.
 
-1. **Terminal app** (`apps/Terminal.tsx`): a Solid app using the mono font, a `TextInput` line editor, and a scrollback `TextBlock`. Anachronistic on a 1984 Macintosh and worth it; it is also the fastest way for a human to verify what an agent did.
-2. **Headless CLI** (`scripts/mockintosh-sh.ts`, later `packages/cli`): boots on the headless platform and pipes host stdin/stdout to `sh`. `echo 'open finder; windows' | npx mockintosh-sh` is the whole script integration.
+### Initial namespace
 
-`apps/Testing.tsx` is retired in favour of shell scripts under `tests/shell/*.sh` run by a vitest harness that boots headless and asserts on stdout.
+All paths below are proposed. App/role directories may be renamed; internal code uses their ids and roles, and discovers their current paths.
 
-### Acceptance
+~~~text
+/disk/                                  persistent local volume
+/windows/<windowId>/                    title, rect, active, app, UI snapshot
+/windows/<windowId>/ui/<nodeId>/         identity, name, role, state, rect, actions
+/apps/<appId>/                          registry metadata and source-package reference
+/instances/<instanceId>/                app, windows, build, status, diagnostics
+/dev/screen                            packed pixels plus format metadata
+/dev/mouse                             pointer commands
+/dev/keyboard                          text and key commands
+/sys/menubar/                          current menus and available actions
+/sys/settings/desktop-pattern          current persistent desktop pattern
+/sys/capabilities                      available host features and services
+/sys/sdk/                              runtime version, guide, types, examples
+/services/build/                       supported toolchain and build operations
+/services/build/jobs/<jobId>/           source revision, status, diagnostics, artifact
+~~~
 
-- `echo 'mkdir /disk/Desktop/Notes; open finder; frame; windows' | mockintosh-sh` prints a window table including a Finder window, on Node, with no browser.
-- The Terminal app runs the same line inside the GUI and the folder appears on the desktop.
-- Every existing `boot.test.ts` scenario can be expressed as a shell script; at least the menu and ⌘N scenarios are.
+The volume display name stays “Macintosh HD” while its mount path remains stable. Synthetic trees need not appear as desktop disks. Add a small Inspector or Go to Folder when useful; a complete shell is not required to inspect source, errors, and actions.
 
----
+This mounted namespace is the VFS, not merely a list of suggested names for unrelated APIs. Existing FileSystem is the persistent-volume adapter. OS services supply the live mounts. Retaining typed local fast paths does not create a second authoritative state model.
 
-## Cross-cutting concerns
+### UI inspection and action semantics
 
-**SDK impact.** Phases 1–3 are internal; `defineApp`/`useApp` keep working. Additive SDK changes: the `name` prop on UI nodes (phase 1), `AppServices.pid` and `SolidApp.onOpenDocument` (phase 3), and an opt-in `AppServices.kernel` (narrowed: no `kill` of foreign pids, writes confined to the app's storage, its own windows' `ui`, and `/dev`) when the first app needs it. Third-party apps thereby gain the same text-driven testability. Document in `packages/sdk/docs/APP_DEV_GUIDE.md` once phase 4 lands.
+Expose immutable UI snapshots through `@mockintosh/ui`, without leaking mutable CanvasNode internals. Include stable lifetime id/generation, window id, optional developer name, semantic role, text/value, enabled/focused state, clipped rectangle, and available actions. Provide an aggregate per-window snapshot so remote clients do not need one network request per property.
 
-**Security model.** There is none today because everything is first-party. The kernel is where one would go: a per-process capability set (which mounts are writable) is a natural extension of `requires`. Not in scope for these phases; design so it can be added at `createKernel` without touching callers.
+Assign names to Finder, menus, Control Panel, editor controls, window chrome, and generated app example controls. Duplicate names within a lookup scope produce an ambiguity result; structural paths are for browsing and debugging. Sibling insertion/removal can reuse a structural path, so it is not a safe action identity.
 
-**Physical product.** `docs/physical-product-plan.md` wants the same OS on a microcontroller. The kernel and `/dev` are what a device build needs anyway — a UART console running `sh` is the classic embedded debug port, and `/dev/screen` over serial is the screenshot tool. Nothing here adds host requirements beyond `core-env.d.ts`.
+Coordinate input uses the existing typed inject path in `bootOS`. Named click resolves and validates a target immediately before dispatch. If the window is inactive, activation is an explicit step, followed by a fresh target check; do not claim the activation click also pressed the control. Reject stale, disabled, occluded, or modal-blocked targets. Semantic menu/setting operations use the same validated handlers as the human UI and are distinguishable in the action history from simulated clicks.
 
-**Performance.** Synthetic reads are store reads; no polling. `/dev/screen` reads copy 22 KB. `watch` uses Solid effects, so an agent subscribing to `/windows` costs the same as the Finder rendering it. `UITreeFS` snapshots lazily per window on read, not per frame. Real input never passes through a string parser.
+Screenshots expose actual pixels and dimensions/stride/encoding. The MCP adapter produces an image format its client can display; PBM/raw bytes alone are not sufficient for every image-capable client. Conversion belongs at the host/adapter edge, preserving the DOM-free core.
 
-**Documentation.** `ARCHITECTURE.md` is updated at the end of each phase (the layering diagram, § File System, § Capabilities, a new § Kernel and § Shell). This document stays as the plan; decisions taken along the way are appended under Decisions log.
+A render barrier finishes pending layout/paint before capture and can return on an idle desktop. It must not wait indefinitely for a new presented frame when nothing is dirty. It is not a promise that arbitrary network work or host timers have settled.
 
----
+## Engineering A + B — shell, Terminal, and scripts
 
-## Sequencing and milestones
+**Experience.** Open Terminal and explore the running machine with familiar commands. Ask an agent to write a script, read it yourself, run it, and save it as a repeatable tool. The script can open apps, inspect controls, change settings, build source, and capture results. An external agent can execute that same script through MCP.
 
-| Milestone | Contents | Exit criterion |
+**Why it matters for agents.** Familiar commands and paths provide a reusable vocabulary; pipelines and scripts let the agent compose operations without a new tool for each workflow. Text output can be searched and filtered before returning it to the model. This is an architectural reason to include a shell, not an established claim that it outperforms structured tools on every task. Validate both on the chosen scenarios.
+
+MCP is the connection/tool protocol; shell is one interface it can expose. Provide `run_shell` alongside structured tools, with command/script, cwd, bounded output, cancellation, and the selected session. Complex JSON arguments, source text, and binary artifacts may be easier to pass through structured calls. Both routes use the same authority, resource identities, and operation results. The shell runs inside Mockintosh's environment; `run_shell` is not permission to execute the regular computer's host shell.
+
+### Commands and three front ends
+
+Commands are TypeScript modules registered under `/bin`, discoverable with help and usage. The shell parses syntax, resolves paths, connects streams, and runs commands. A command receives argv, cwd, environment, a caller-scoped kernel, stdin/stdout/stderr, and a cancellation signal; it returns an exit status. Build and app commands wrap the shared services rather than hiding separate implementations.
+
+| Commands | Purpose |
+| --- | --- |
+| `help`, `ls`, `cat`, `stat`, `pwd`, `cd` | Discover commands, documents, SDK, and live resources |
+| `echo`, `write`, `mkdir`, `rm`, `mv`, `cp` | Create and manipulate VFS contents; `write path text` sends one complete body |
+| `open`, `windows`, `inspect`, `click`, `dblclick`, `drag`, `type`, `key`, `menu` | Operate the visible OS through shared policies |
+| `build`, `install`, `restart` | Compile a source revision, select an artifact, run the app |
+| `grep`, `head`, `tail` | Filter text; document the supported options |
+| `screenshot`, `render`, `sleep` | Capture output, finish pending painting, or wait with cancellation |
+| `ps`, `kill`, `wait` | Inspect and manage locally owned execution once process accounting lands |
+| `sh -c command`, `sh script` | Run command strings and scripts stored in the VFS |
+
+The `build` command waits for the submitted job and exits nonzero on failure; it prints diagnostics to stderr and the successful build id to stdout. `install` takes an explicit successful build id, checks its source revision, and refuses accidental downgrade/stale selection unless requested. `restart` runs the selected installed build. Thus a script cannot silently install an unrelated result after a failed build.
+
+There are three front ends over one interpreter:
+
+- **Terminal app:** line editor, history, scrollback, and interrupt. This uses the existing single-line input as a starting point; it does not require the source editor's multiline buffer.
+- **Host CLI:** `mockintosh-sh --connect <session>` acts on a live OS; explicit `--headless` boots an isolated machine for tests. Host stdin/stdout connect to the interpreter's streams.
+- **Agent tool:** `run_shell` invokes the interpreter in a scoped OS session and returns exit status, bounded stdout/stderr, and a run reference when work continues. Omitted output is reported; full output can be retained as a resource.
+
+Paths belong to the caller's VFS. Per-shell cwd/environment persist for that shell, while a tool invocation explicitly chooses whether to reuse or create a shell session. Source files written through structured tools are immediately visible to shell commands.
+
+### Staged implementation, retained ambition
+
+| Stage | Lands with | Contents |
 | --- | --- | --- |
-| **M1 — Namespace** (phase 1) | `VFS`/mounts in `@mockintosh/fs`; `ui.snapshot()`; `Kernel` projection; `DevFS`, `WindowsFS`, `UITreeFS`, `AppsFS`, `SysFS`, `MenubarFS`; typed inject path | `boot.test.ts` navigates by name, not pixels; `/dev` differs correctly between web and headless; invariant 2 test passes |
-| **M2 — Agent surface** (phase 2) | JSON-RPC over `Kernel`; MCP server; browser bridge | Cursor / Claude Code opens apps, clicks named controls, reads windows, screenshots a live Mockintosh |
-| **M3 — Processes** (phase 3) | `ProcessTable`, `ProcFS`, owner-scoped content, store-driven `kill`, `onOpenDocument`, dialogs as child processes | `kill` releases effects and windows; `/proc` matches `ps` |
-| **M4 — Text** (phase 4) | `Command`, `/bin`, `sh -c`, Terminal app, `mockintosh-sh` CLI, shell-script tests replacing `Testing.tsx` | Script scenario runs end-to-end on Node from a one-line pipe; Terminal runs it in the GUI |
+| **S1 — Explore and control** | M1 | Command registry, Terminal, CLI, `run_shell`, quotes/escapes, `;`, basic file/UI commands, exit status, cancellation |
+| **S2 — Compose and save** | M2 | Script files, `\|`, `<`, `>`, `>>`, stderr redirection, `&&`/`\|\|`, environment expansion, text filters, build/install/restart commands |
+| **S3 — Manage running work** | M3 | `/proc`, `ps`/`kill`/`wait`, background command jobs, stream cleanup and ownership integrated with app instances |
 
-Relative size: M1 medium-large (most new code, but each synthetic FS is small and independent; the UI package API is the part to get right), M2 small, M3 medium (touches window mounting, the riskiest change), M4 medium (mostly additive).
+This is a useful shell, not a promise of Bash compatibility. Publish supported syntax and fail on unsupported constructs. Functions, loops, globbing, command substitution, richer job control, and shell-language compatibility remain explicit follow-on design choices rather than being dismissed as “a program's job.” Save ordinary sequences early, and add those features when the desired scripts justify them.
 
-**Land the platform/headless refactor first.** It is already ~200 changed files; adding a kernel makes it unreviewable. M1 starts on a clean tree as its own PR; M2–M4 are separate PRs.
+Pipelines carry byte streams with text helpers, bounded buffers, backpressure, EOF, and cancellation. Define pipeline exit status, including an option to fail when any stage fails. Redirection to ordinary files follows file-write rules; writing a control endpoint submits a complete command, not arbitrary chunks. `&&` runs the next command only after success. Distinguish parsing/dispatch failures, command failure, cancellation, and disconnected/unknown outcomes. Never execute script text with JavaScript eval or pass it to the host shell.
 
----
+Local execution records unify command runs and app-instance ownership as S3 lands: actual pid, parent, kind, app/command identity, state, exit code, and owned resources. `/proc/<pid>/{status,args,windows,parent,ctl}` is a view of those records; `/proc/self` uses caller context. Existing `/instances` entries refer to the corresponding app execution records rather than forming a second lifecycle authority. `kill` requests cancellation, removes owned windows through the store, and runs registered cleanup; it cannot preempt a synchronous same-realm infinite loop. Remote build job ids remain separate from local pids; command cancellation explicitly requests remote cancellation when supported.
 
-## Risks
+### Concrete scripts and acceptance
 
-- **UI node naming.** Structural paths shift whenever a component adds a sibling. Mitigation: names on every control the shell owns; tests and agents told to prefer names; a `stat` on a structural path that no longer exists fails loudly with `ENOENT` rather than clicking the wrong thing.
-- **UI package API leak.** `ui.snapshot()` must not expose `CanvasNode`; keep the snapshot type minimal and immutable, and let `UITreeFS` derive `clickable`/`rect` from it rather than reaching in.
-- **Owner-scoped content (M3)** changes where Solid disposes app trees. Store-driven `kill` keeps window lifetime where it is today; still test that reordering a window does not remount its content.
-- **Reactive synthetic reads** must not create write-during-read cycles: a `/windows/<id>/rect` write that triggers a `watch` that writes again. Keep write handlers batched (`fs.batch()` style) and untracked.
-- **Shell scope creep.** Say no to control flow, globbing, and job control until a concrete script needs them; each is a program's job.
-- **Naming.** UNIX names in `/` beside a Macintosh-named disk looks odd in the Finder. Hidden mounts make it invisible to users; if that proves insufficient, mounts can be moved under a Mac-named `System` mount without changing the kernel.
+Proposed S2 syntax, once the named setting values and commands exist:
 
-## Open questions
+~~~sh
+cat /sys/settings/desktop-pattern
+echo checker > /sys/settings/desktop-pattern
+open control_panel
+render && screenshot /disk/check.pbm
+ls /apps | grep counter
+~~~
 
-1. `/dev`, `/proc`, `/windows` vs Mac-flavoured `System/Devices`, `System/Processes`, `System/Windows`? Recommendation: UNIX names, hidden from the desktop — programs are the audience.
-2. UI node `name`: a plain prop on every layout node, or only on interactive ones (`button`, `TextInput`, menu items)? Recommendation: any node, since tests also want to read text by name (`ui/status/text`).
-3. Should `/windows/<id>/ui` also expose the OS chrome (close box, title bar, scrollbars) as nodes, or only the content tree? Recommendation: chrome too, named (`close`, `zoom`, `titlebar`), since "close the window" is a common agent action and the chrome is already Solid nodes.
-4. Should third-party apps ever get `spawn`? Recommendation: yes but narrowed (own app id and `open` of documents only), when the first app needs it.
+The setting parser accepts a trailing newline. The image command chooses a documented encoding from its option or extension. Project paths in scripts use the actual discovered locations; role-based lookup remains the internal implementation.
 
-## Agent app builder — apps written inside the OS
+Acceptance: a saved script inspects/changes the desktop setting, opens its UI, and captures the result. Run it in Terminal, against the same browser through MCP, and against an explicit headless test instance. A build script stops before installation after a compile error. A pipeline filters a listing, returns the documented exit status, and stops cleanly on interrupt. GUI, direct tools, and shell agree on resulting state and validation errors.
 
-Can an agent living in Mockintosh write Solid apps and store them in the file system? Yes; most of the machinery exists and the gap is one piece, a compiler. This is a follow-on to M1–M4, not a fifth phase: it uses the namespace, processes, and `/bin` and adds one platform capability and one bundle format.
+Shell-script tests are an additional readable integration layer. Move suitable `Testing.tsx` scenarios there once parity is demonstrated; retain focused implementation and pixel tests where they provide different evidence.
 
-### What already works
+## Engineering A — projects, editor, builder, and app lifetime
 
-Third-party apps are ESM bundles that `import` `solid-js`, `@mockintosh/ui` and `@mockintosh/sdk` as bare specifiers, resolved by the import map that `vite.config.ts` injects into `index.html`, so every bundle shares the one Solid runtime. `AppInstaller` (`src/os/installedApps.ts`) calls `Platform.loadModule(url)`, which on the web is `import(url)`. A *compiled* app whose bytes live in the VFS is therefore loadable today: read the blob, `URL.createObjectURL(new Blob([js], { type: "text/javascript" }))`, `import()` it — the trick `apps/Picture.tsx` already uses for images. The loader does not need to know the code came from a file rather than a CDN.
+### Project format and human ownership
 
-### The gap: compiling JSX + TypeScript
+Example logical layout; locate Applications and Desktop by role:
 
-Solid is not plain JSX; it needs `babel-plugin-jsx-dom-expressions` with `generate: "universal"` and `moduleName: "@mockintosh/ui/renderer"`, which `vite-plugin-solid` configures at build time. An agent writes `.tsx`; something must compile it.
+~~~text
+/disk/Applications/Counter.app/
+  mockintosh.json
+  README.md
+  src/index.tsx
+  sprites/icon.sprite                   optional
+  dist/<buildId>/index.js
+  dist/<buildId>/index.js.map
+~~~
 
-| | Approach | Trade-off |
+The manifest has stable app id, title/icon, SDK compatibility, required capabilities, source entry, and the selected successful build entry. Track source revision and toolchain version with the build metadata. Source is authoritative; generated output is inspectable but regenerated. Start with relative project imports and the SDK's supported shared-runtime imports, without arbitrary dependency installation.
+
+The desktop contains one shortcut to the registered app id. Rebuild updates that app instead of creating duplicates. Finder recognizes directory bundles before the generic directory opener, launches them on double-click, and offers Open Source/Show Package Contents. Existing manifest-file installs continue to work.
+
+The source editor needs multiline insertion, selection, newline/indentation handling, scrolling, clipboard where available, Save, dirty state, and a way to navigate build diagnostics. FileViewer's read-only text and TextInput's single-line model do not meet this requirement. Syntax highlighting and language-server features can wait. An agent write must not silently replace a human's unsaved buffer: detect revision conflicts and let either side reload/merge deliberately.
+
+### Build service
+
+Proposed contract:
+
+~~~ts
+interface BuildRequest {
+  requestId: string;
+  sourceRevision: string;
+  files: Array<{ path: string; bytes: Uint8Array }>;
+  entry: string;
+  sdkVersion: string;
+}
+
+interface BuildDiagnostic {
+  severity: "error" | "warning";
+  message: string;
+  file?: string;
+  line?: number;
+  column?: number;
+}
+~~~
+
+Submission returns a job reference. Status, diagnostics, cancellation, and the final artifact are separate operations. Byte encoding is the transport adapter's job. Validate relative paths and toolchain compatibility; the builder uses a fixed supported configuration rather than executing a project's arbitrary build script.
+
+The first provider reuses [the app template](../templates/app/vite.config.ts): Solid universal compilation targeting `@mockintosh/ui/renderer`, with the runtime imports and their subpaths externalized to the OS's shared runtime. This preserves familiar source and avoids a second Solid runtime. Type-check against the served SDK contract and report diagnostics; compilation alone is not type-checking. Source maps connect runtime errors to editable source.
+
+A browser worker compiler is a later provider. A small device can use the same remote builder only if its runtime can load and execute the resulting app; remote compilation does not make unsupported Solid/ESM execution possible. Do not replace the chosen Solid authoring experience with a DSL merely to meet a hypothetical device budget.
+
+Build outputs are immutable and tied to the submitted source revision. If the source changes while a build runs, keep the output as that revision's result rather than silently presenting it as the newest code.
+
+### Install, run, edit, rebuild
+
+The loader accepts artifacts from the OS filesystem through a host module-loading adapter. Web Blob/module URL handling stays behind Platform; source packages do not contain transient Blob URLs as durable manifest entries. Bundle relative modules into the artifact and define asset resolution. Validate the manifest and module shape, register sprites, then select the build and create/update its shortcut.
+
+Introduce running app instance ownership when restart becomes necessary, using the current `AppContext`/`onOpen` seam. Record app id, build id, owned windows, cleanup, and attributable diagnostics. Instances may outlive a window only when they explicitly own background work. Reopening documents uses the current app contract and a deliberate instance/delivery policy, rather than a pid allocated for each request.
+
+On restart, close owned windows through the window store, dispose owned effects/subscriptions/timers, update the app registration, and reopen the selected build. Host timers need registered cleanup; a Solid owner does not cancel arbitrary timers. Verify that reordering windows does not remount their contents. Expose instance status before adding a complete POSIX-style process table.
+
+Retain the previous successful artifact and make Restore Previous Build available. Compile failure does not replace the selected build. Runtime initialization failure is reported and allows recovery. Same-realm JavaScript cannot be preempted by cooperative “kill”; a hung app may require reloading the OS with auto-launch disabled. ESM caches may retain loaded modules until reload; promise clean app resources and correct new builds, not unlimited hot-reload memory reclamation.
+
+## Engineering B — shared tools, live connection, and settings
+
+The operation registry owns schemas, validation, dispatch, and result types. Internal tools and the MCP adapter use that registry; neither reaches directly into mutable window stores or invents its own installer. Agent-visible documentation is generated from the same contracts.
+
+The live bridge identifies the OS instance, boot generation, SDK version, capabilities, and granted operations. The external client selects an instance explicitly. Reload invalidates old UI references. Disconnect is reported; an adapter must not silently start a new headless OS and keep reporting success.
+
+Start with a companion MCP server on the regular computer and an opt-in browser connection to it. Pair the connection with that instance; restrict connection origins and authenticate commands. Follow the MCP SDK/specification supported by the target clients; the browser bridge is a separate internal transport, not “MCP over WebSocket” by assumption.
+
+Subscription RPC uses ids, notifications, cancellation/unsubscribe, and disconnect cleanup. Callbacks and returned unsubscribe functions remain local conveniences, not JSON values. Serialize conflicting UI actions; include action ids and outcomes. A timeout after a mutation is an unknown outcome to reconcile, not permission to blindly repeat a click or install.
+
+Implement desktop pattern in a settings service backed by the role-based preferences folder. Control Panel reads and writes the service, Desktop renders its value, and tools can either use the named controls or the same setting operation. Validate supported patterns and supply a default for older disks.
+
+## Engineering A + B — the in-OS agent loop
+
+First align the chat UI and endpoint on a single typed request/response contract and correct message history construction. Preserve existing image/docs behavior while adding the shared OS tools.
+
+An agent run repeats: request model response → validate proposed tool call → execute against selected session → return result → continue or finish. The existing one-tool-round limit cannot build, inspect, fix, and retry. Add an explicit step/time/output budget, cancellation, progress, and errors rather than promising an unbounded background task.
+
+The initial gateway may return proposed tool calls to the OS, which executes them and submits results on the next request. This works without giving a server direct access to browser storage or assuming an Edge request stays alive throughout a build. Correlate tool calls, source revisions, and results to the run; stop submitting new work after cancellation and resolve any already-committed operation.
+
+Show readable progress (“Writing source”, “Building”, “Trying the app”), expandable tool results, and links to source/diagnostics. A human should be able to understand what changed. Record completed actions and changed file revisions; this is an activity history, not deterministic replay of the whole machine.
+
+Use the running OS's SDK guide, declarations, examples, and version as model context. The build pipeline already embeds the guide; extend it instead of introducing a second handwritten SDK description or fetching an incompatible latest branch as the authority.
+
+Keep provider credentials at the gateway. Session operation grants are enforced where tools execute. App creation/control tasks should run through the authorized workflow without confirmation on every click. Treat imported documents and app text as task data, not authority to widen the run's granted scope.
+
+Generated apps currently share a JavaScript realm with the OS. Namespace filtering and manifest `requires` do not turn that into a sandbox. A hostile-code execution boundary needs its own design; the initial build loop must accurately describe this trust model and keep a reload/recovery path.
+
+## Milestones and evidence
+
+These milestone numbers replace the old sequence. Product priority is A then B; implementation delivers B's shared controls early because A uses them to try and debug the apps it creates.
+
+| Milestone | Deliverable | Evidence that it works |
 | --- | --- | --- |
-| 1 | **In-OS compiler**: `@babel/standalone` + `babel-preset-solid` in a Worker, loaded lazily on first `build` (the Solid Playground does this) | ~2–3 MB; full JSX, which matters because LLMs are far better at JSX than at any alternative. Types are stripped, not checked — acceptable in an agent loop; errors surface at run time. |
-| 2 | **JSX-free hyperscript**: a ~50-line `h()` over the universal renderer (Solid ships `solid-js/h` for the DOM; ours targets `@mockintosh/ui/renderer`) | No compiler, works on the embedded build; LLMs write worse code and make more mistakes in it. |
-| 3 | **Server compile** via an Edge function | Simplest; breaks "runs anywhere" and does not fit the device. Skip. |
-| 4 | **Interpreted DSL** — the HyperCard path: a stack is a folder (`cards/` with sprite backgrounds, `scripts/` as shell or a tiny language, buttons whose action is `sh -c …`) | Not Solid apps, but the only thing that runs on a microcontroller, and every part is a text file an agent can `ls`. |
+| **M0 — Baseline and contracts** | Land current refactor separately; confirm SDK/import map and app context; freeze example scenarios and chat contract | Core checks and existing tests pass; current seams documented accurately |
+| **M1 — Operate the visible OS** | VFS, shared tools, named UI, render barrier, persistent desktop setting, live MCP bridge, shell S1 | External client opens Control Panel, changes/verifies the pattern after reload; Terminal and `run_shell` explore/control the same browser |
+| **M2 — Make and edit a real app** | Project folders, source editor, first build provider, package loader/shortcut, instance restart/recovery, shell S2 | Human builds Counter, edits/rebuilds it, reopens after reboot; saved scripts and pipelines exercise the same operations |
+| **M3 — Ask the agent to build it** | Repeated ChatGippity tool loop, runtime SDK context, progress/cancel, source conflicts, shell S3 | ChatGippity creates/tests/repairs Counter and changes settings; agents can use direct tools or shell scripts; running jobs are inspectable and cancellable |
+| **M4 — First system modification experiment** | Fork/restore one bundled app, then one chosen extension contract | Agent and human can inspect, run, and undo the modification; core remains recoverable |
 
-Recommendation: **1 on the web, 4 for the device, 2 as a universal fallback only if it earns its keep.**
+For M1–M3, keep checks proportional but meaningful:
 
-Architecturally the compiler is a **capability**: `Platform.compile?: ModuleCompiler` beside `loadModule`. The web platform provides Babel-in-a-Worker; the headless Node platform provides real `vite-plugin-solid`/esbuild so agents developing *from outside* (M2) get the same loop; the embedded build provides neither, and an IDE app hides its Build button via `requires: ["compiler"]`. The compiler sits behind `Platform`; bundle handling stays in `src/os/installedApps.ts`.
+- Headless tests use named controls and shared operations; retain pixel assertions for visual behavior.
+- Test stale/ambiguous targets, inactive windows, modal blocking, unsupported settings, and idle render barriers.
+- Exercise the same operation results through direct and RPC adapters, including errors and disconnects. Listing mounts alone cannot prove parity.
+- Include shell parity and script/pipeline error, cancellation, redirection, and output-limit cases as S1–S3 land. Compare direct-tool and shell routes on the same agent tasks without assuming either always wins.
+- Run a deterministic fixture agent through the complete tool loop, including a build error and retry. Use a real model run as a separate product demonstration, not the sole regression test.
+- Build and launch a real Solid fixture using the production import configuration; verify source edit → different behavior → persistence, and restart cleanup.
+- Cover concurrent source edits, stale build completion, invalid bundles, failed launch, shortcut deduplication, and previous-build recovery.
+- Run `check:core`, type-checking, and relevant existing suites as each implementation lands. Update ARCHITECTURE and the SDK guide when behavior ships.
 
-### Bundle format: a folder, Mac `.app` style
+The first milestones should be separate reviewable changes. No fixed time estimate is claimed; editor interaction and restart cleanup are larger pieces than a thin RPC adapter.
 
-```
-/disk/Applications/Weather.app/
-  mockintosh.json      id, title, icon, requires, sdk, entry: "dist/index.js"
-  src/index.tsx        what the agent edits
-  sprites/icon.sprite  the Icon Editor's output, referenced by name
-  dist/index.js        build output; regenerated, never edited
-```
+## Future possibilities we are preserving
 
-`installedApps.ts` already reads `MIME.app` manifests in the Applications folder; it grows to accept a directory containing `mockintosh.json` and to load `entry` from the VFS. Sprites in the folder are registered from sprite files instead of the module's `sprites` export, so an icon editor and the app share one file. App Store install becomes "download the folder", and the two sources of apps converge on one format.
+These remain important, but none is a prerequisite for Counter appearing on the desktop.
 
-### The agent loop (once M1, M3 and M4 exist)
+| Possibility | Connection to the chosen experiences | What would make it worth building next |
+| --- | --- | --- |
+| Remote agent or compiler service | Already useful for A on limited hardware | A second host/provider that implements the same contract |
+| Network home and archives | Keep source/apps across devices; recover earlier experiments | “Open my project on another Mockintosh” |
+| Shared folders, mailboxes, or app workshops | Exchange apps and collaborate with people/agents | “Send this app to a friend” or “Work on this project together” |
+| Per-session/per-process rebinding | Give a builder, agent, or app a different view of resources | A concrete need to swap providers or constrain a workspace |
+| General CPU servers | Run larger jobs away from the terminal | A task the fixed build/agent services cannot reasonably express |
+| Plumber / Open Selection | Open diagnostics at a line; connect apps through contextual data | A second use beyond editor diagnostics |
+| App semantic services | Extend a drawing/editor app through its document and event interface | One useful external helper |
+| Richer shell language and compatibility | Extend the committed S1–S3 shell with functions, loops, globbing, or other syntax | A concrete automation script requiring those constructs |
+| Actual 9P interoperability | Mount third-party Plan 9 services or accept 9P clients | A named service/client we want to connect |
+| HyperCard-style worlds, virtual peripherals | Playful packaged environments and device substitution | A user-facing experiment chosen after A/B |
+| Core self-modification | Deeper form of C | A specific shell change plus proven boot recovery |
 
-```
-write /disk/Applications/Weather.app/src/index.tsx     agent edits text
-build Weather.app                                      compiler; errors to stderr as text
-open weather                                           spawn
-screenshot; cat /windows/<id>/ui/**                    see it, structurally and visually
-kill <pid>; build; open …                              iterate
-```
+For network storage, the server must own authoritative file operations and revisions. The current FSBackend writes one catalog document and is not a multiwriter database; putting that backend behind HTTP is insufficient. Add read caching, durable-write acknowledgments, change notifications, and explicit conflicts before claiming shared storage. Offline mutation merging and automatic replay of device commands are not implied.
 
-Every step is text. Compile errors, runtime exceptions (routed to the process's `stderr`, which M3 provides) and the UI tree return through one channel. `watch src/ && build && respawn` is hot reload for free. With an in-OS assistant that has `sh`, this is "describe an app, get an app on the desktop in a minute" — and the human can open `src/index.tsx` in the file viewer to read what was written, which is the HyperCard promise.
+For remote resource mounts, expose async operations and scoped exports; a local reactive cache represents loading/disconnection honestly. Keep service identity separate from mount location. Remote jobs have their own ids and disconnect/lifetime policy rather than borrowing local process ids.
 
-### Two caveats
+A small terminal can keep UI/input local and use remote builds/agents. A device too small to run the renderer may instead need a separate display/input transport to an OS running elsewhere. Neither path is guaranteed merely by the small framebuffer or DOM-free core.
 
-- **Trust.** Third-party bundles already run in the same realm as the OS with full access to the shared runtime; agent-written code is no worse and no better. The deferred per-process capability set at `createKernel` (see Cross-cutting concerns) is where a real answer lives. Until then an agent-authored app is treated exactly like an App Store app: same folder, same manifest `requires`, same user.
-- **Which SDK the agent learns from.** `api/mockintosh-context.ts` still describes the retired v1 imperative SDK (`AppBuilder`, `ctx.fillRect`); an agent following it today writes code that cannot load. The system prompt must be generated from the source of truth — the SDK's type declarations plus `packages/sdk/docs/APP_DEV_GUIDE.md` — and served in the namespace at `/sys/sdk/`, so the agent `cat`s the contract instead of trusting a hand-maintained summary that has already drifted.
+## Decisions and rationale
 
-## Decisions log
-
-- 2026-09-09 — Plan written. Kernel is path-based and async; windows/menus/devices are files, not syscalls.
-- 2026-09-10 — Revised after review:
-  - Dropped the standalone "seam" milestone and its window→process adapter; the kernel is defined as a projection of the VFS and lands with the first synthetic mounts.
-  - Invariant 1 restated: two layers (sync reactive VFS, async serialisable Kernel), one namespace, no shell-only backdoors — testable by enumerating mounts.
-  - Added `/windows/<id>/ui` (UI tree with structural + named paths, `click` files) and the `ui.snapshot()` API in `@mockintosh/ui`; this is the highest-value mount and belongs in M1.
-  - Real input goes through a typed `injectPointer`/`injectKey` in `bootOS` that owns the double-click and ⌘ policy; `/dev/mouse` and `ui/…/click` are clients of it, not the pipeline.
-  - Capabilities are not derived from `/dev`; `/sys/capabilities` is a view of `platformCapabilities()`.
-  - `kill` is store-driven (remove windows, then dispose the owner); window content still runs under the process owner so effects are attributable.
-  - The agent surface is the syscall table over JSON-RPC/MCP and moves up to M2; `sh` is for humans and scripts and starts as `sh -c` + `;`.
-  - Persistent volume mounted at stable `/disk`; "Macintosh HD" is its display name.
-  - `pathOf(id)` already exists; removed from the work list.
-  - Phases renumbered to match build order; the platform/headless refactor ships before M1 starts.
-- 2026-09-10 — Added "Agent app builder": compiler as `Platform.compile?` capability (Babel-in-a-Worker on the web, none on the device), `.app` folder bundle format in `/disk/Applications`, SDK contract served at `/sys/sdk/` instead of the hand-maintained `api/mockintosh-context.ts`.
+- 2026-09-09 — Original plan proposed namespace, RPC, processes, and shell as four phases.
+- 2026-09-10 — Earlier review established named UI access, shared typed input, a stable disk mount, and the kernel as the common operation boundary. These principles are retained.
+- 2026-09-10 — User selected in-OS agent app creation with editable Solid source, and agent control through MCP or in-OS chat, as the first compelling experiences. System hacking is a potential follow-on.
+- 2026-09-10 — Reorganized around those experiences and their acceptance scenarios. The app builder is first-class, including a human source editor and build/restart recovery.
+- 2026-09-10 — A full shell and broad process model cease to be prerequisites. Add the actual instance lifecycle needed for app rebuilding; do not allocate placeholder pids.
+- 2026-09-10 — Preserve Plan 9 composition through async service contracts and explicit session views. Use a companion builder first; defer general network storage/CPU infrastructure until a concrete experience requires it.
+- 2026-09-10 — Corrected outdated assumptions: generated SDK chat context already exists; current app context and onOpen are the ownership seam; structural UI indices can be reused; watch callbacks are not a wire protocol.
+- 2026-09-10 — Future choices remain visible with their triggers. Moving them out of the first milestones is sequencing, not rejection.
+- 2026-09-10 — User reaffirmed the shell and VFS direction. The experience rewrite had removed too much shell detail. Restored Terminal, CLI, command modules, scripts, pipes/redirection, process commands, and shell tests as a staged S1–S3 commitment within M1–M3. Named the VFS explicitly and strengthened tool/shell parity. Full shell-language compatibility still need not precede the first demonstration.
 
 ## References
 
-- Thijs Verreck, Prototyper research preview, 9 Sep 2026 — `x.com/ThijsVerreck/status/2097596777503363507`: kernel with VFS (`/apps`, `/agents`, `/shapes`, `/proc`, `/dev`, `/mounts`), syscall table, headless operation, `mkdir /shapes/rectangle` creating a shape.
-- Plan 9 from Bell Labs: everything is a file server; `/proc`, `/dev`, per-process namespaces.
-- Inside Macintosh: A-trap dispatch table; Switcher/MultiFinder process model; `odoc` AppleEvent.
-- `ARCHITECTURE.md`, `docs/physical-product-plan.md`, `docs/mockintosh-devtools-extension.md` in this repo.
+- [Plan 9 research and earlier kernel review](plan9-research.md) — primary sources and fuller discussion of namespaces, service protocols, Acme, plumbing, and pitfalls.
+- [Plan 9 from Bell Labs](https://9p.io/sys/doc/9.html) — file interfaces, private namespaces, and terminal/compute/storage separation.
+- [The Use of Name Spaces in Plan 9](https://9p.io/sys/doc/names.html) — service composition and substitution.
+- [9P protocol](https://9p.io/magic/man2html/5/intro) — resource handles, requests, cancellation.
+- [Acme](https://9p.io/sys/doc/acme/acme.html) — applications extended through service interfaces.
+- [MCP architecture](https://modelcontextprotocol.io/docs/learn/architecture) — hosts, clients, servers, tools, and transports.
+- [Architecture](../ARCHITECTURE.md), [SDK developer guide](../packages/sdk/docs/APP_DEV_GUIDE.md), [app template](../templates/app/vite.config.ts) — current implementation contracts.
+- [Physical product plan](physical-product-plan.md), [project ideas](ideas.md) — retained device and creative directions.
