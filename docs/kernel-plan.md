@@ -449,6 +449,58 @@ Relative size: M1 medium-large (most new code, but each synthetic FS is small an
 3. Should `/windows/<id>/ui` also expose the OS chrome (close box, title bar, scrollbars) as nodes, or only the content tree? Recommendation: chrome too, named (`close`, `zoom`, `titlebar`), since "close the window" is a common agent action and the chrome is already Solid nodes.
 4. Should third-party apps ever get `spawn`? Recommendation: yes but narrowed (own app id and `open` of documents only), when the first app needs it.
 
+## Agent app builder — apps written inside the OS
+
+Can an agent living in Mockintosh write Solid apps and store them in the file system? Yes; most of the machinery exists and the gap is one piece, a compiler. This is a follow-on to M1–M4, not a fifth phase: it uses the namespace, processes, and `/bin` and adds one platform capability and one bundle format.
+
+### What already works
+
+Third-party apps are ESM bundles that `import` `solid-js`, `@mockintosh/ui` and `@mockintosh/sdk` as bare specifiers, resolved by the import map that `vite.config.ts` injects into `index.html`, so every bundle shares the one Solid runtime. `AppInstaller` (`src/os/installedApps.ts`) calls `Platform.loadModule(url)`, which on the web is `import(url)`. A *compiled* app whose bytes live in the VFS is therefore loadable today: read the blob, `URL.createObjectURL(new Blob([js], { type: "text/javascript" }))`, `import()` it — the trick `apps/Picture.tsx` already uses for images. The loader does not need to know the code came from a file rather than a CDN.
+
+### The gap: compiling JSX + TypeScript
+
+Solid is not plain JSX; it needs `babel-plugin-jsx-dom-expressions` with `generate: "universal"` and `moduleName: "@mockintosh/ui/renderer"`, which `vite-plugin-solid` configures at build time. An agent writes `.tsx`; something must compile it.
+
+| | Approach | Trade-off |
+| --- | --- | --- |
+| 1 | **In-OS compiler**: `@babel/standalone` + `babel-preset-solid` in a Worker, loaded lazily on first `build` (the Solid Playground does this) | ~2–3 MB; full JSX, which matters because LLMs are far better at JSX than at any alternative. Types are stripped, not checked — acceptable in an agent loop; errors surface at run time. |
+| 2 | **JSX-free hyperscript**: a ~50-line `h()` over the universal renderer (Solid ships `solid-js/h` for the DOM; ours targets `@mockintosh/ui/renderer`) | No compiler, works on the embedded build; LLMs write worse code and make more mistakes in it. |
+| 3 | **Server compile** via an Edge function | Simplest; breaks "runs anywhere" and does not fit the device. Skip. |
+| 4 | **Interpreted DSL** — the HyperCard path: a stack is a folder (`cards/` with sprite backgrounds, `scripts/` as shell or a tiny language, buttons whose action is `sh -c …`) | Not Solid apps, but the only thing that runs on a microcontroller, and every part is a text file an agent can `ls`. |
+
+Recommendation: **1 on the web, 4 for the device, 2 as a universal fallback only if it earns its keep.**
+
+Architecturally the compiler is a **capability**: `Platform.compile?: ModuleCompiler` beside `loadModule`. The web platform provides Babel-in-a-Worker; the headless Node platform provides real `vite-plugin-solid`/esbuild so agents developing *from outside* (M2) get the same loop; the embedded build provides neither, and an IDE app hides its Build button via `requires: ["compiler"]`. The compiler sits behind `Platform`; bundle handling stays in `src/os/installedApps.ts`.
+
+### Bundle format: a folder, Mac `.app` style
+
+```
+/disk/Applications/Weather.app/
+  mockintosh.json      id, title, icon, requires, sdk, entry: "dist/index.js"
+  src/index.tsx        what the agent edits
+  sprites/icon.sprite  the Icon Editor's output, referenced by name
+  dist/index.js        build output; regenerated, never edited
+```
+
+`installedApps.ts` already reads `MIME.app` manifests in the Applications folder; it grows to accept a directory containing `mockintosh.json` and to load `entry` from the VFS. Sprites in the folder are registered from sprite files instead of the module's `sprites` export, so an icon editor and the app share one file. App Store install becomes "download the folder", and the two sources of apps converge on one format.
+
+### The agent loop (once M1, M3 and M4 exist)
+
+```
+write /disk/Applications/Weather.app/src/index.tsx     agent edits text
+build Weather.app                                      compiler; errors to stderr as text
+open weather                                           spawn
+screenshot; cat /windows/<id>/ui/**                    see it, structurally and visually
+kill <pid>; build; open …                              iterate
+```
+
+Every step is text. Compile errors, runtime exceptions (routed to the process's `stderr`, which M3 provides) and the UI tree return through one channel. `watch src/ && build && respawn` is hot reload for free. With an in-OS assistant that has `sh`, this is "describe an app, get an app on the desktop in a minute" — and the human can open `src/index.tsx` in the file viewer to read what was written, which is the HyperCard promise.
+
+### Two caveats
+
+- **Trust.** Third-party bundles already run in the same realm as the OS with full access to the shared runtime; agent-written code is no worse and no better. The deferred per-process capability set at `createKernel` (see Cross-cutting concerns) is where a real answer lives. Until then an agent-authored app is treated exactly like an App Store app: same folder, same manifest `requires`, same user.
+- **Which SDK the agent learns from.** `api/mockintosh-context.ts` still describes the retired v1 imperative SDK (`AppBuilder`, `ctx.fillRect`); an agent following it today writes code that cannot load. The system prompt must be generated from the source of truth — the SDK's type declarations plus `packages/sdk/docs/APP_DEV_GUIDE.md` — and served in the namespace at `/sys/sdk/`, so the agent `cat`s the contract instead of trusting a hand-maintained summary that has already drifted.
+
 ## Decisions log
 
 - 2026-09-09 — Plan written. Kernel is path-based and async; windows/menus/devices are files, not syscalls.
@@ -463,6 +515,7 @@ Relative size: M1 medium-large (most new code, but each synthetic FS is small an
   - Persistent volume mounted at stable `/disk`; "Macintosh HD" is its display name.
   - `pathOf(id)` already exists; removed from the work list.
   - Phases renumbered to match build order; the platform/headless refactor ships before M1 starts.
+- 2026-09-10 — Added "Agent app builder": compiler as `Platform.compile?` capability (Babel-in-a-Worker on the web, none on the device), `.app` folder bundle format in `/disk/Applications`, SDK contract served at `/sys/sdk/` instead of the hand-maintained `api/mockintosh-context.ts`.
 
 ## References
 
