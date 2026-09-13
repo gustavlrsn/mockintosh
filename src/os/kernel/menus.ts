@@ -9,9 +9,12 @@ export function appleMenu(openApp: (id: string) => void): MenubarDefinition {
       onClick: () => openApp("about")
     }, {
       type: "separator"
-    }, {
+    },     {
       label: "Control Panel",
       onClick: () => openApp("control_panel")
+    }, {
+      label: "Icon Gallery",
+      onClick: () => openApp("icon_gallery")
     }, {
       label: "Terminal",
       onClick: () => openApp("terminal")

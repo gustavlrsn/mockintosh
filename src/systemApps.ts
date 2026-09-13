@@ -16,6 +16,7 @@ import AppStore from "@/apps/AppStore";
 import ChatGippity from "@/apps/ChatGippity";
 import Safari, { SafariStream, SafariTextweb } from "@/apps/Safari";
 import SpotifyPlayer from "@/apps/SpotifyPlayer";
+import IconGallery from "@/apps/IconGallery";
 
 for (const app of [
   About,
@@ -31,6 +32,7 @@ for (const app of [
   SafariStream,
   SafariTextweb,
   SpotifyPlayer,
+  IconGallery,
 ]) {
   registerApp(app);
 }

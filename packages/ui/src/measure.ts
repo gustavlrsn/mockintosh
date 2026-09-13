@@ -7,7 +7,8 @@ import { createContext, useContext } from "solid-js";
 import type { MeasureFunc } from "./layout";
 import { requireFont, initBuiltinFonts } from "./fonts/registry";
 import { layoutText } from "./fonts/textLayout";
-import type { CanvasNode } from "./nodes";
+import { alignmentHeight } from "./fonts/metrics";
+import type { CanvasNode, TextVerticalAlign } from "./nodes";
 
 /**
  * Create the MeasureFunc used by computeLayout.
@@ -24,17 +25,25 @@ export function createMeasureFunc(): MeasureFunc {
       const text = node.textContent;
       if (!text) return { width: 0, height: 0 };
       const fontName = node.parent?.props["font"] as string | undefined ?? "body";
-      const block = layoutText(requireFont(fontName), text);
-      return { width: block.width, height: block.height };
+      const font = requireFont(fontName);
+      const block = layoutText(font, text);
+      const valign = (node.parent?.props["verticalAlign"] as TextVerticalAlign | undefined) ?? "top";
+      return { width: block.width, height: alignmentHeight(font, block.lines.length, block.height, valign) };
     }
     if (node.type === "text") {
       const fontName = node.props["font"] as string | undefined ?? "body";
       const font = requireFont(fontName);
       const text = collectTextContent(node);
-      if (!text) return { width: 0, height: font.glyphHeight };
+      const valign = (node.props["verticalAlign"] as TextVerticalAlign | undefined) ?? "top";
+      if (!text) {
+        return { width: 0, height: alignmentHeight(font, 1, font.glyphHeight, valign) };
+      }
       const wrap = node.props["wrap"] as boolean | undefined ?? false;
       const block = layoutText(font, text, wrap ? availableWidth : undefined);
-      return { width: block.width, height: block.height };
+      return {
+        width: block.width,
+        height: alignmentHeight(font, block.lines.length, block.height, valign),
+      };
     }
     if (node.type === "image") {
       const src = node.props["src"] as { width: number; height: number } | undefined;

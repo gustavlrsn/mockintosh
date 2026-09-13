@@ -40,6 +40,16 @@ describe("app window placement", () => {
     expect(win.y + windowTotalHeight(win)).toBeLessThanOrEqual(339);
   });
 
+  it("centres an alert in the upper desktop", () => {
+    const win = buildAppWindow(app, {
+      kind: "alert",
+      size: { width: 376, height: 112 },
+    }, env);
+    expect(win.x).toBe(Math.floor((512 - 376) / 2));
+    expect(win.y).toBe(20 + 40);
+    expect(win.kind).toBe("alert");
+  });
+
   it("still gives fullscreen content the entire display", () => {
     const win = buildAppWindow(app, { kind: "fullscreen" }, env);
     expect({ x: win.x, y: win.y, width: win.width, height: win.height }).toEqual({

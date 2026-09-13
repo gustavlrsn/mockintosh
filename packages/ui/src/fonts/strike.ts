@@ -3,6 +3,8 @@
  *
  * Family numbering, size fallback, baseline (ascent = glyph cell height),
  * and style synthesis live here — not in `@mockintosh/quickdraw`.
+ * UI FontInfo alignment uses `faceMetrics` in `metrics.ts`; do not point
+ * this seam at those numbers or every QuickDraw glyph shifts.
  */
 
 import type { FMInput, FMOutput, FontStrike } from "@mockintosh/quickdraw";
@@ -65,6 +67,7 @@ export function fontFamilyName(id: number): string {
   return "body";
 }
 
+/** QuickDraw strike metrics. Baseline is the bottom of the Decker cell. */
 export function uiFontMetrics(font: DeckerFont): UiFontMetrics {
   return {
     ascent: font.glyphHeight,

@@ -53,10 +53,17 @@ export function buildAppWindow<P extends Record<string, unknown>>(
     const width = Math.min(size.width, standardBounds.width);
     const height = Math.min(size.height, standardBounds.height);
     const n = env.openWindowCount % 6;
-    const wanted = spec.position ?? {
-      x: 20 + n * STAGGER,
-      y: env.menubarHeight + 20 + n * STAGGER,
-    };
+    const def = windowDefinition(kind);
+    const wanted = spec.position ?? (def.modal
+      ? {
+          // Alert() places the dBoxProc window in the upper centre.
+          x: Math.floor((env.screen.width - width) / 2),
+          y: env.menubarHeight + 40,
+        }
+      : {
+          x: 20 + n * STAGGER,
+          y: env.menubarHeight + 20 + n * STAGGER,
+        });
     bounds = {
       x: Math.max(SCREEN_MARGIN, Math.min(wanted.x, env.screen.width - width - SCREEN_MARGIN)),
       y: Math.max(

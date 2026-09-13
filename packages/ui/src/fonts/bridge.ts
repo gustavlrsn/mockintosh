@@ -40,7 +40,11 @@ export function measureText(text: string, fontName: string = "body"): number {
   return textAdvance(requireFont(fontName), text);
 }
 
-/** Line height of a named font, in pixels (the Decker cell, not ascent+descent). */
+/**
+ * Line height of a named font, in pixels — the Decker cell, used for
+ * wrapping and `drawString`. Chrome that centers a label should use
+ * `faceMetricsByName(name).lineHeight` / `cdefBaseline` instead.
+ */
 export function fontLineHeight(fontName: string = "body"): number {
   return requireFont(fontName).glyphHeight;
 }

@@ -19,7 +19,6 @@ export interface WindowAPI {
   setContentSize: (width: number, height: number) => void;
   setInfoBar: (items: string[] | null) => void;
   setMenus: (menus: MenubarDefinition[]) => void;
-  setContentTopInset: (px: number) => void;
   /** Cover the whole screen with this window, or return it to its windowed form. */
   setFullScreen: (on: boolean) => void;
   close: () => void;

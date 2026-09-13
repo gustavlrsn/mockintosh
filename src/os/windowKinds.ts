@@ -16,8 +16,15 @@ export interface WindowDefinition {
   titleBar: boolean;
   closeBox: boolean;
   zoomBox: boolean;
-  /** Frame line width in pixels; 0 draws no frame. */
+  /** Outer hairline in pixels; 0 draws no frame. */
   frame: number;
+  /**
+   * White gap between the outer hairline and `innerFrame`. Combined with
+   * `innerFrame` this is the dBoxProc “picture frame”: 1px / 2px white / 2px.
+   */
+  frameGap?: number;
+  /** Inner band inside `frameGap`; 0 or omitted means no inner band. */
+  innerFrame?: number;
   /** 1px drop shadow to the right and below. */
   shadow: boolean;
   /** Grow box in the bottom-right corner when the window is `resizable`. */
@@ -60,7 +67,8 @@ const WINDOW_DEFINITIONS: Record<OSWindowKind, WindowDefinition> = {
   dialog: { ...DOCUMENT, zoomBox: false, growBox: false },
   utility: { ...DOCUMENT, zoomBox: false, growBox: false, layer: 2 },
   plain: PLAIN,
-  alert: { ...PLAIN, modal: true, layer: 4 },
+  // dBoxProc: 1px outer, 2px white, 2px inner band; square; system-modal.
+  alert: { ...PLAIN, frameGap: 2, innerFrame: 2, modal: true, layer: 4 },
   fullscreen: {
     titleBar: false,
     closeBox: false,

@@ -120,7 +120,7 @@ interface SolidApp<P = Record<string, never>> {
 
 Windows are opened through **`AppContext.openWindow(spec)`** (`OSServices.openWindow` underneath, `buildAppWindow` in `appWindow.ts` — this shell's `NewWindow`). A `WindowSpec` names the kind, title, size, position, `scrollable`/`resizable`, and optionally a `Component` other than the app's main one; every field defaults to the `defineApp` declaration, so `openWindow()` is the main window. The first window opened from an icon gets the zoom-rect animation. `OSWindow.Component` holds a window's own component when it has one; `WindowContent` mounts it, else the app's.
 
-`AppContext` (`appContext.ts`) is everything an app can do without a window — sprites, storage, `fs`, `os.openApp/closeWindow/showDialog`, `openWindow`, `fetch`, `print`, `capabilities`, `env`. `AppServices`, what `useApp()` returns inside a window, is `AppContext` plus `window` and `setMenus`. The OS supplies one `AppServices` per window. `useWindow()` (shell-internal) exposes `{ id, width, height, isActive, scrollY, kind, setTitle, setContentSize, setInfoBar, setMenus, setContentTopInset, setFullScreen, close }`.
+`AppContext` (`appContext.ts`) is everything an app can do without a window — sprites, storage, `fs`, `os.openApp/closeWindow/showDialog`, `openWindow`, `fetch`, `print`, `capabilities`, `env`. `AppServices`, what `useApp()` returns inside a window, is `AppContext` plus `window` and `setMenus`. The OS supplies one `AppServices` per window. `useWindow()` (shell-internal) exposes `{ id, width, height, isActive, scrollY, kind, setTitle, setContentSize, setInfoBar, setMenus, setFullScreen, close }`. Apps fill a non-scrolling band above the body with `WindowHeader` (Finder folder “N items”, Icon Gallery search) and below it with `WindowFooter`; the window scrollbar thumbs only the body. `win.height` is that body. `setContentSize` is the document height that drives the thumb.
 
 Finder is registered like any other app (`FINDER_APP_ID`): the desktop is its window-less surface and folder windows are its windows (`kind: "finder-folder"`, `props: { directoryId }`). Apps that need to write pixels directly (video frames, dithered photos) use a `<raster onPaint>` node, which hands them a `RasterSurface` (`setPixel` / `blitPixels` / `fill` in raster-local coordinates, plus the clipped QuickDraw port); the framebuffer's memory layout never reaches app code. There is no other rendering path.
 
@@ -191,6 +191,7 @@ src/
     fsBootstrap.ts          First-boot volume + role folders
     openers.ts              File type → app resolution
     sprites/                SpriteRegistry + generated built-in sprite data (scripts/convert-sprites.ts)
+    iconCatalog/            System 7.5.3 IconFamily dump (ICN# / ics# / color members); Icon Gallery reads this, not the sprite registry
     cursor.ts               Draws QuickDraw's cursorState with CopyBits (the VBL cursor task)
     cursors.ts              The OS cursors as QuickDraw `Cursor`s (arrow, iBeam, watch, grab)
     zoomAnimation.ts        XOR zoom-rect animation (presents via a callback)
@@ -217,6 +218,8 @@ QuickDraw paints through the original `RgnBlt` / `StretchBits` pipeline (`CopyBi
 Sprites (`Sprite` in `@mockintosh/ui`, re-exported by the SDK) stay 1 byte per pixel as an asset format, with `defineSprite` (2 bpp base64) and `fromGrid` (ASCII art) as the two decoders; `<image>` packs each sprite to a `BitMap` once (cached per sprite) and draws it with `CopyBits`.
 
 Layout snaps every node to the pixel grid (positions floor, sizes round) so centering and percentages never produce half-pixels, which QuickDraw would refuse to draw.
+
+`<text>` has two vertical boxes. The Decker cell (`glyphHeight`) is the line box for wrapping and for QuickDraw (`drawString`, strike `ascent = cell` so the baseline is the cell bottom). Single-line `verticalAlign="middle"` is the Control Manager rule: center FontInfo (`ascent + descent + leading`) in the box, then `MoveTo` the baseline. Built-in faces use the System 6 FONT headers (Chicago 12 is 12/3/0); the Decker cell is only mapped onto that baseline. Those numbers live in `@mockintosh/ui` (`faceMetrics`); they must not replace the strike or every QuickDraw glyph shifts.
 
 ## QuickDraw
 
@@ -253,7 +256,7 @@ Window drag/resize uses an XOR outline (`penMode="xor"` / `darkCheckers`) driven
 
 ### Window chrome invariant
 
-Nothing inside a window can alter its chrome. The body box draws the 1px frame as its border and clips children (`overflow="hidden"`); `@mockintosh/ui` follows the CSS box model, so children are laid out *inside* the border and clipped to it. Header content that belongs to the window (e.g. Finder's item count) goes through `win.infoBar`, not the content area. All chrome metrics live in `src/os/windowGeometry.ts`; apps needing screen-space geometry use `windowContentRect()` rather than hardcoding title-bar heights.
+Nothing inside a window can alter its chrome. The body box draws the outer hairline as its border and clips children (`overflow="hidden"`); `@mockintosh/ui` follows the CSS box model, so children are laid out *inside* the border and clipped to it. `dBoxProc` alerts add a 2px white gap and a 2px inner band inside that hairline. Header content that belongs to the window (e.g. Finder's item count) goes through `win.infoBar`, not the content area. All chrome metrics live in `src/os/windowGeometry.ts`; apps needing screen-space geometry use `windowContentRect()` rather than hardcoding title-bar heights.
 
 ### Window activation invariant
 
@@ -270,7 +273,7 @@ A window's `kind` selects a **window definition** (`src/os/windowKinds.ts`) — 
 | `"dialog"`        | `movableDBoxProc` | title, close; no zoom, no grow                      | 1                            |
 | `"utility"`       | `rDocProc`        | as `dialog`                                         | 2 above documents            |
 | `"plain"`         | `plainDBox`       | 1px frame and shadow; no title bar, not movable     | 1                            |
-| `"alert"`         | `dBoxProc`        | as `plain`; system-modal (other windows `inert`)    | 4 front                      |
+| `"alert"`         | `dBoxProc`        | 1px / 2px white / 2px square frame and shadow; system-modal | 4 front              |
 | `"fullscreen"`    | —                 | none; bounds are the screen, menubar hidden         | 3 above utilities            |
 
 `buildAppWindow` clamps size/position to the desktop (gray region minus 3 px). Zoom box toggles `standardBounds` vs `userBounds`. Opening from a Finder icon plays the zoom-rect animation.

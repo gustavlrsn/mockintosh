@@ -1,4 +1,4 @@
-import { defineSprite, type Sprite } from "@mockintosh/ui";
+import { defineSprite, fromGrid, type Sprite } from "@mockintosh/ui";
 
 const ICON_1BITCAMERA = defineSprite(
   32,
@@ -100,6 +100,41 @@ const ICON_PHOTOBOOTH_SMR_32 = defineSprite(
   32,
   "AKqqqqqqqgAKVVVVVVVVoCWmpqampqZYJmpqaqpqapiapqaVVqampqpqaWqpampqpqaWqqqWpqaqamqqqqmqaqapqqqqqmamqqaqlaqqmqqppqlVaqqZqqqapVWqqqaqmpqlWqqqppqqapVpqqqpqqpqlaaqqqmqqmqVqqqqqaqaaqaqqqqpmqpqqqqmqqmqqmqqqpaaqaqqmqqqqpamqqqaqqqqVqaqqqaqqqVamqqqpqqqqWqaqqqpqqqqqmqqqqpqqqqpqqqqqpaqqpaqqqqqqWqpaqqqqqqqlVaqqqoqqqqqqqqqqCqqqqqqqqqoCqqqqqqqqqAAqqqqqqqqAA=="
 );
+/** System 7 stop-hand (raised palm), drawn as 1-bit pixel art. */
+const ICON_STOP = fromGrid(32, 32, [
+  "................................",
+  ".........####..###..####........",
+  "........#####..###..#####.......",
+  ".......######..###..######......",
+  "......#######..###..#######.....",
+  "......##..###..###..###..##.....",
+  ".....##...###..###..###...##....",
+  ".....##...###..###..###...##....",
+  ".....##...###..###..###...##....",
+  "....###...###..###..###...###...",
+  "....##....###..###..###....##...",
+  "....##....###.......###....##...",
+  "....##.....###.....###.....##...",
+  "....##......##.....##......##...",
+  "....###....................###..",
+  "....###....................###..",
+  "....####..................####..",
+  ".....###................###.....",
+  ".....####................####...",
+  "......###................###....",
+  "......####..............####....",
+  ".......###..............###.....",
+  ".......####............####.....",
+  "........###............###......",
+  "........##################......",
+  ".........################.......",
+  "..........##############........",
+  "...........############.........",
+  "............##########..........",
+  ".............########...........",
+  "..............######............",
+  "................................",
+]);
 const ICON_SAD = defineSprite(
   32,
   32,
@@ -143,6 +178,7 @@ export const iconSprites: Record<string, Sprite> = {
   "icon/photobooth-32x32": ICON_PHOTOBOOTH_32X32,
   "icon/photobooth-smr-32": ICON_PHOTOBOOTH_SMR_32,
   "icon/sad": ICON_SAD,
+  "icon/stop": ICON_STOP,
   "icon/safari": ICON_SAFARI,
   "icon/trash": ICON_TRASH,
   "icon/video": ICON_VIDEO,

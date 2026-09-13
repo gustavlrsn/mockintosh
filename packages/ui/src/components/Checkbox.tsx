@@ -29,13 +29,13 @@ export function Checkbox(props: CheckboxProps): JSX.Element {
     >
       <box width={12} height={12} borderColor={1} borderWidth={1} background={0}>
         <Show when={props.checked}>
-          <text font="body" color={1} align="center">
+          <text font="body" color={1} align="center" verticalAlign="middle">
             {"\u2713"}
           </text>
         </Show>
       </box>
       <Show when={!!props.label}>
-        <text font="body" color={1} stipple={props.disabled}>
+        <text font="body" color={1} stipple={props.disabled} verticalAlign="middle">
           {props.label!}
         </text>
       </Show>

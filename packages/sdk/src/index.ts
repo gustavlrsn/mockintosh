@@ -52,11 +52,16 @@ export {
   type WriteSpriteFileOptions,
 } from "./spriteFile";
 
+/** Classic Alert() icon: System ICON 0 / 1 / 2 (stop / note / caution). */
+export type DialogVariant = "stop" | "note" | "caution";
+
 export interface DialogOptions {
   message: string;
   buttons?: string[];
   showInput?: boolean;
   inputDefault?: string;
+  /** Which alert icon to show. Defaults to `stop`. */
+  variant?: DialogVariant;
 }
 
 /**
@@ -153,8 +158,8 @@ export interface PrintService {
  *                  (`rDocProc`; tool palettes)
  * - `plain`      — a bare 1px frame, no title bar, cannot be moved
  *                  (`plainDBox`)
- * - `alert`      — `plain`, system-modal: every other window ignores input
- *                  until it closes (`dBoxProc`)
+ * - `alert`      — square double frame (1px / 2px white / 2px), system-modal:
+ *                  every other window ignores input until it closes (`dBoxProc`)
  * - `fullscreen` — no chrome at all; covers the whole screen, menubar
  *                  included. The menubar's ⌘ shortcuts still work, so an app
  *                  in full screen must offer a way back — a shortcut, a
@@ -350,6 +355,8 @@ export interface AppWindow {
   scrollY: Accessor<number>;
   /** The window's current kind; `fullscreen` while `setFullScreen(true)` is in effect. */
   kind: Accessor<WindowKind>;
+  /** Height of the scrollable document; drives the window scrollbar thumb. */
+  setContentSize(width: number, height: number): void;
   setTitle(title: string): void;
   /**
    * Make this window cover the whole screen, menubar included, keeping its
@@ -378,6 +385,9 @@ export interface AppServices extends AppContext {
  * context; `useApp()` reads it, so every window sees its own services.
  */
 export const AppServicesContext = createContext<AppServices | null>(null);
+
+export { WindowHeader, WindowFooter, WindowSlotsContext } from "./windowBands";
+export type { WindowBandView, WindowSlots } from "./windowBands";
 
 export function useApp(): AppServices {
   const services = useContext(AppServicesContext);

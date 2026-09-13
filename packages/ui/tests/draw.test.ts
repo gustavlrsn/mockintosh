@@ -86,6 +86,26 @@ describe("drawTree — background fill", () => {
 });
 
 describe("drawTree — borderRadius", () => {
+  it("strokes a thick rounded border with one PenSize FrameRoundRect", () => {
+    const { screen, ctx, root } = makeTestContext();
+    const child = createNode("box");
+    child.style = { width: 24, height: 20, borderWidth: 3 };
+    child.props = { background: 0, borderColor: 1, borderRadius: 8 };
+    child.parent = root;
+    root.children = [child];
+
+    computeLayout(root, W, H, noMeasure);
+    drawTree(root, ctx);
+
+    expect(px(screen, 0, 0)).toBe(0);
+    expect(px(screen, 23, 0)).toBe(0);
+    expect(px(screen, 12, 0)).toBe(1);
+    expect(px(screen, 12, 1)).toBe(1);
+    expect(px(screen, 12, 2)).toBe(1);
+    expect(px(screen, 12, 3)).toBe(0);
+    expect(px(screen, 12, 10)).toBe(0);
+  });
+
   it("cuts the square corners of a filled box", () => {
     const { screen, ctx, root } = makeTestContext();
     const child = createNode("box");

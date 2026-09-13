@@ -20,7 +20,12 @@
     "mockintosh-sh": "tsx scripts/mockintosh-sh.ts",
     "mcp": "tsx scripts/companion/mcp.ts",
     "test:m1": "tsx scripts/companion/demo.ts",
-    "test:browser-build": "npm run build && tsx scripts/builder/browser-demo.ts"
+    "test:browser-build": "npm run build && tsx scripts/builder/browser-demo.ts",
+    "icons:find": "tsx scripts/find-icons.ts",
+    "icons:import": "tsx scripts/import-icon.ts",
+    "icons:refresh-catalog": "tsx scripts/refresh-icon-catalog.ts",
+    "icons:gallery": "tsx scripts/icons-gallery.ts",
+    "icons:extract-753": "python3 scripts/extract-system753-icons.py"
   },
   "dependencies": {
     "@babel/standalone": "^7.29.8",

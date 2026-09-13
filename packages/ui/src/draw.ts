@@ -43,6 +43,7 @@ import {
   PenPat,
   PenMode,
   PenNormal,
+  PenSize,
 } from "@mockintosh/quickdraw";
 import {
   makeRect,
@@ -70,6 +71,7 @@ import type { FocusManager } from "./focus";
 import type { Sprite } from "./sprite";
 import { requireFont } from "./fonts/registry";
 import { layoutText } from "./fonts/textLayout";
+import { faceMetrics, middleCellTop } from "./fonts/metrics";
 import { encodeUiText, fontAscent, fontFamilyId } from "./fonts/strike";
 
 // -------------------------------------------------------------------------
@@ -290,11 +292,12 @@ function drawBox(
     if (borderStyle === "dotted" || borderStyle === "dashed") {
       drawDashedBorder({ x, y, width, height }, borderStyle, bw);
     } else {
-      for (let i = 0; i < bw; i++) {
-        const inset = makeRect(r.top + i, r.left + i, r.bottom - i, r.right - i);
-        if (ovSize > 0) FrameRoundRect(inset, ovSize, ovSize);
-        else FrameRect(inset);
-      }
+      // One Frame* with the pen size — the Control Manager default-ring
+      // sequence — not concentric 1px frames. PenSize hangs inside the rect
+      // (`FrRect` / hollow `DrawArc`), so the stroke stays in the border box.
+      if (bw > 1) PenSize(bw, bw);
+      if (ovSize > 0) FrameRoundRect(r, ovSize, ovSize);
+      else FrameRect(r);
     }
     PenNormal();
   }
@@ -382,10 +385,14 @@ function drawText(
   // Same line breaking as the measure pass, so drawn geometry matches layout.
   const font = requireFont(fontName);
   const block = layoutText(font, text, wrap ? innerW : undefined);
-  const ascent = fontAscent(fontName);
+  // Strike ascent = cell height (baseline at the Decker cell bottom).
+  const strikeAscent = fontAscent(fontName);
+  const face = faceMetrics(font);
+  const singleMiddle = verticalAlign === "middle" && block.lines.length === 1;
 
   let lineY = innerY;
-  if (verticalAlign === "middle") lineY = innerY + Math.floor((innerH - block.height) / 2);
+  if (singleMiddle) lineY = middleCellTop(innerY, innerH, face);
+  else if (verticalAlign === "middle") lineY = innerY + Math.floor((innerH - block.height) / 2);
   else if (verticalAlign === "bottom") lineY = innerY + innerH - block.height;
 
   for (const line of block.lines) {
@@ -394,7 +401,7 @@ function drawText(
       if (align === "center") lineX = innerX + Math.floor((innerW - line.width) / 2);
       else if (align === "right") lineX = innerX + innerW - line.width;
       const bytes = encodeUiText(font, line.text);
-      MoveTo(lineX, lineY + ascent);
+      MoveTo(lineX, lineY + strikeAscent);
       DrawText(bytes, 0, bytes.length);
     }
     lineY += block.lineHeight;

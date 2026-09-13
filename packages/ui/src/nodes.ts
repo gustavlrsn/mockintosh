@@ -222,7 +222,11 @@ export interface TextProps extends LayoutStyle, EventHandlers, SemanticProps {
    * itself inside its parent.
    */
   align?: TextAlign;
-  /** Vertical alignment of the line block within this node's content box. */
+  /**
+   * Vertical alignment of the line block within this node's content box.
+   * Single-line `middle` is the Control Manager rule: FontInfo line box
+   * centered, then the baseline (`ascent` from the top of that box).
+   */
   verticalAlign?: TextVerticalAlign;
   /** Word-wrap lines to the node's content width. Explicit `\n` always breaks. */
   wrap?: boolean;

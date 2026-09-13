@@ -39,8 +39,18 @@ export interface ScreenRect {
   height: number;
 }
 
-/** Frame line width of this window (0 for chromeless kinds). */
+/**
+ * Total chrome thickness on each edge: outer hairline + optional white gap
+ * + optional inner band. Content and `windowTotalHeight` use this; the body
+ * box itself only draws `definition.frame` as its border.
+ */
 export function windowFrame(win: Pick<OSWindow, "kind">): number {
+  const d = windowDefinition(win.kind);
+  return d.frame + (d.frameGap ?? 0) + (d.innerFrame ?? 0);
+}
+
+/** Outer hairline only — the body box's `borderWidth`. */
+export function windowOuterFrame(win: Pick<OSWindow, "kind">): number {
   return windowDefinition(win.kind).frame;
 }
 
@@ -52,15 +62,37 @@ export function hasInfoBar(win: Pick<OSWindow, "kind" | "infoBar">): boolean {
   return hasTitleBar(win) && !!win.infoBar && win.infoBar.length > 0;
 }
 
-/** Outer height of the header (title bar + optional info bar); 0 without a title bar. */
-export function windowHeaderHeight(win: Pick<OSWindow, "kind" | "infoBar">): number {
+/** App-filled band below the title bar; `infoBar` is the 20px text fallback. */
+export function headerBandHeight(
+  win: Pick<OSWindow, "kind" | "headerHeight" | "infoBar">
+): number {
+  if (!hasTitleBar(win)) return 0;
+  if (win.headerHeight !== undefined) return win.headerHeight;
+  return hasInfoBar(win) ? INFO_BAR_H : 0;
+}
+
+export function footerBandHeight(win: Pick<OSWindow, "footerHeight">): number {
+  return win.footerHeight ?? 0;
+}
+
+/** Outer height of the title bar + header band; frame only without a title bar. */
+export function windowHeaderHeight(
+  win: Pick<OSWindow, "kind" | "headerHeight" | "infoBar">
+): number {
   if (!hasTitleBar(win)) return windowFrame(win);
-  return TITLE_BAR_H + (hasInfoBar(win) ? INFO_BAR_H : 0);
+  return TITLE_BAR_H + headerBandHeight(win);
 }
 
 /** Outer frame height. */
-export function windowTotalHeight(win: Pick<OSWindow, "kind" | "infoBar" | "height" | "scrollable">): number {
-  return windowHeaderHeight(win) + win.height + (win.scrollable ? SB_W : windowFrame(win));
+export function windowTotalHeight(
+  win: Pick<OSWindow, "kind" | "headerHeight" | "infoBar" | "footerHeight" | "height" | "scrollable">
+): number {
+  return (
+    windowHeaderHeight(win) +
+    win.height +
+    footerBandHeight(win) +
+    (win.scrollable ? SB_W : windowFrame(win))
+  );
 }
 
 /** Whether the window shows a grow box: it must be resizable and of a kind that has one. */

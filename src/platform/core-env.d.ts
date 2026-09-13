@@ -28,3 +28,8 @@ declare class TextDecoder {
   constructor(label?: string);
   decode(input?: ArrayBufferView | ArrayBuffer): string;
 }
+
+declare module "*.json" {
+  const value: unknown;
+  export default value;
+}

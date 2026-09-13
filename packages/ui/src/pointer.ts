@@ -213,8 +213,16 @@ export function createPointerDispatcher(
   return {
     dispatch(type, x, y, extras) {
       if (type === "scroll") {
-        const hit = hitTest(root, x, y);
-        hit?._eventHandlers.onScroll?.(extras?.deltaY ?? 0);
+        // Wheel targets the deepest hit (often a button). Walk up to the
+        // nearest onScroll, like a DOM wheel on a nested clickable.
+        let node = hitTest(root, x, y);
+        while (node) {
+          if (node._eventHandlers.onScroll) {
+            node._eventHandlers.onScroll(extras?.deltaY ?? 0);
+            return;
+          }
+          node = node.parent;
+        }
         return;
       }
 

@@ -20,6 +20,7 @@ const DESKTOP_SHORTCUTS: readonly DesktopShortcut[] = [
   { name: "App Store",      appId: "appstore",    icon: "icon/appstore-smr-32x32" },
   { name: "ChatGippity",    appId: "chatgippity", icon: "icon/computer" },
   { name: "Spotify Player", appId: "spotify",     icon: "icon/spotify" },
+  { name: "Icon Gallery",   appId: "icon_gallery", icon: "icon-gallery/icon" },
 ];
 
 /** Create the startup volume and its standard folders on a fresh disk; repair them otherwise. */

@@ -183,3 +183,15 @@ describe("mousedown capture phase", () => {
     expect(hitTest(root, 30, 30)).toBe(outer);
   });
 });
+
+describe("scroll bubbling", () => {
+  it("delivers wheel to the nearest ancestor with onScroll", () => {
+    const { root, outer, inner } = nestedTree();
+    const deltas: number[] = [];
+    inner._eventHandlers.onClick = () => {};
+    outer._eventHandlers.onScroll = (dy) => deltas.push(dy);
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    ptr.dispatch("scroll", 30, 30, { deltaY: 16 });
+    expect(deltas).toEqual([16]);
+  });
+});

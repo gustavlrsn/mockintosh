@@ -39,3 +39,6 @@ yarn-error.log*
 
 # Private working notes (not published or committed)
 /docs/private/
+
+# Local icon-find previews (not committed)
+/.icon-previews/

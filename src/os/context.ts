@@ -8,7 +8,7 @@ import type { SpriteRegistry } from "./sprites/registry";
 import type { FileSystem } from "@mockintosh/fs";
 import type { AnimRect } from "./zoomAnimation";
 import type { AppInstaller } from "./installedApps";
-import type { FetchFunction, PrintService, WindowSpec } from "@mockintosh/sdk";
+import type { DialogOptions, FetchFunction, PrintService, WindowSpec } from "@mockintosh/sdk";
 import type { PlatformEnv } from "../platform/types";
 import type { CapabilitySet } from "./capabilities";
 
@@ -22,12 +22,7 @@ export interface IconScreenRect {
 /** Drag outline rect — shared type for window drag and zoom animation. */
 export type DragRect = AnimRect;
 
-export interface DialogOptions {
-  message: string;
-  buttons?: string[];
-  showInput?: boolean;
-  inputDefault?: string;
-}
+export type { DialogOptions };
 
 export interface OSServices {
   instances?: import("./instances").AppInstances;

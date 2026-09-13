@@ -12,6 +12,7 @@ import { createMeasureFunc } from "../src/measure";
 import { installFontBridge } from "../src/fonts/bridge";
 import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
 import { requireFont } from "../src/fonts/registry";
+import { faceMetrics } from "../src/fonts/metrics";
 
 // Synthetic monospace font: every printable ASCII glyph is 5px + 1px spacing = 6px advance.
 function monoFont(): DeckerFont {
@@ -118,7 +119,9 @@ function render(t: CanvasNode, w: number, h: number): Uint8Array {
 describe("<text> alignment", () => {
   const W = 120;
   const H = 60;
-  const glyphH = requireFont("body").glyphHeight;
+  const body = requireFont("body");
+  const glyphH = body.glyphHeight;
+  const bodyFace = faceMetrics(body);
 
   it("verticalAlign=top draws at the top of the box", () => {
     const px = render(textNode({ verticalAlign: "top" }, { width: W, height: H }, "Hi"), W, H);
@@ -127,18 +130,63 @@ describe("<text> alignment", () => {
     expect(ink.minY).toBeLessThan(glyphH);
   });
 
-  it("verticalAlign=middle centers the line block", () => {
+  it("verticalAlign=middle sits caps on the CDEF FontInfo baseline", () => {
     const px = render(textNode({ verticalAlign: "middle" }, { width: W, height: H }, "Hi"), W, H);
     const ink = inkBounds(px, W, H)!;
-    const expectedTop = Math.floor((H - glyphH) / 2);
-    expect(ink.minY).toBeGreaterThanOrEqual(expectedTop);
-    expect(ink.maxY).toBeLessThan(expectedTop + glyphH);
+    const baseline = Math.floor((H - bodyFace.lineHeight) / 2) + bodyFace.ascent;
+    const cellTop = baseline - bodyFace.capAscent;
+    expect(ink.minY).toBe(cellTop + bodyFace.capTop);
+    expect(ink.maxY).toBe(cellTop + bodyFace.capTop + bodyFace.capHeight - 1);
   });
 
   it("verticalAlign=bottom draws against the bottom edge", () => {
     const px = render(textNode({ verticalAlign: "bottom" }, { width: W, height: H }, "Hi"), W, H);
     const ink = inkBounds(px, W, H)!;
     expect(ink.minY).toBeGreaterThanOrEqual(H - glyphH);
+  });
+
+  it("single-line middle measures the FontInfo line box, not the cell", () => {
+    const t = textNode({ verticalAlign: "middle", font: "menu" }, {}, "OK");
+    render(t, W, H);
+    expect(t.layout.height).toBe(faceMetrics(requireFont("menu")).lineHeight);
+  });
+
+  it("places Chicago OK on rows 5–13 of a 20px Control Manager face", () => {
+    const faceH = 20;
+    const face = createNode("box");
+    face.style = {
+      width: 59,
+      height: faceH,
+      paddingLeft: 8,
+      paddingRight: 8,
+      justifyContent: "center",
+      alignItems: "center",
+    };
+    face.props = { background: 0 };
+    const label = textNode(
+      { font: "menu", align: "center", verticalAlign: "middle" },
+      {},
+      "OK"
+    );
+    label.parent = face;
+    face.children = [label];
+    const px = render(face, 64, faceH);
+    const ink = inkBounds(px, 64, faceH)!;
+    expect(ink.minY).toBe(5);
+    expect(ink.maxY).toBe(13);
+  });
+
+  it("wrapped middle still centers the full cell block", () => {
+    const t = textNode(
+      { wrap: true, verticalAlign: "middle", font: "body" },
+      { width: 40, height: H },
+      "aaaa bbbb cccc dddd"
+    );
+    const px = render(t, W, H);
+    const ink = inkBounds(px, W, H)!;
+    expect(t.layout.height).toBe(H);
+    expect(ink.minY).toBeGreaterThan(glyphH);
+    expect(ink.maxY).toBeLessThan(H - glyphH);
   });
 
   it("align=right puts ink against the right edge; align=left against the left", () => {

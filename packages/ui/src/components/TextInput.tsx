@@ -343,6 +343,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
       borderStyle={bordered() ? "solid" : undefined}
       borderWidth={bordered() ? 1 : 0}
       padding={pad()}
+      justifyContent="center"
       overflow="visible"
       tabIndex={props.disabled ? undefined : 0}
       onFocus={handleFocus}
@@ -366,7 +367,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
       </Show>
 
       <Show when={!!displayValue()}>
-        <text font={fontName()} color={1}>
+        <text font={fontName()} color={1} verticalAlign="middle">
           {displayValue()}
         </text>
       </Show>
@@ -383,8 +384,10 @@ export function TextInput(props: TextInputProps): JSX.Element {
               position="absolute"
               left={pad() + charOffsetToPixels(r.lo)}
               top={pad()}
+              height={innerTextH()}
               font={fontName()}
               color={0}
+              verticalAlign="middle"
             >
               {slice}
             </text>
@@ -404,7 +407,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
       </Show>
 
       <Show when={showPlaceholder()}>
-        <text font={fontName()} color={1} stipple>
+        <text font={fontName()} color={1} verticalAlign="middle">
           {props.placeholder}
         </text>
       </Show>

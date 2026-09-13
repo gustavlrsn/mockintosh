@@ -3,7 +3,9 @@
  *
  * This is the single source of truth for line breaking. `measure.ts` uses it
  * to size `<text>` nodes and `draw.ts` uses it to paint them, so measured and
- * drawn geometry can never disagree.
+ * drawn geometry can never disagree. Height here is the Decker cell block;
+ * single-line `verticalAlign="middle"` then substitutes the FontInfo line
+ * box (`alignmentHeight` in `metrics.ts`) in both passes.
  */
 
 import { textAdvance, type DeckerFont } from "./font";

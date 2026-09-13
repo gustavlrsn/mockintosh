@@ -11,6 +11,7 @@ export type { UIServices, UIClipboard } from "./services";
 // -------------------------------------------------------------------------
 export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid } from "./sprite";
 export type { Sprite } from "./sprite";
+export { decodeBase64 } from "./base64";
 
 // -------------------------------------------------------------------------
 // Types
@@ -73,6 +74,8 @@ export { useMeasure } from "./measure";
 // -------------------------------------------------------------------------
 export { registerFont, listFonts, getFont, requireFont } from "./fonts/registry";
 export { measureText, fontLineHeight, drawString } from "./fonts/bridge";
+export { faceMetrics, faceMetricsByName, alignmentHeight, cdefBaseline, middleCellTop } from "./fonts/metrics";
+export type { FontFaceMetrics, FontInfo } from "./fonts/metrics";
 export { COMMAND_KEY, CHECK_MARK, BULLET } from "./fonts/extraGlyphs";
 
 // -------------------------------------------------------------------------

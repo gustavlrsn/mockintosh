@@ -15,14 +15,13 @@ import { WindowCtx, type WindowAPI } from "../windowContext";
 import { isBlockedByModal } from "../layering";
 import { getWindows, setWindowFullScreen } from "../state";
 import { windowDefinition } from "../windowKinds";
-import { AppServicesContext, type AppServices } from "@mockintosh/sdk";
+import { AppServicesContext, WindowSlotsContext, type AppServices } from "@mockintosh/sdk";
 import { createAppContext } from "../appContext";
 import { measureText, type PointerCaptureEvent } from "@mockintosh/ui";
 
 import {
   FRAME,
   TITLE_BAR_H,
-  INFO_BAR_H,
   SB_W,
   SB_INNER,
   SHADOW,
@@ -30,9 +29,11 @@ import {
   ZOOM_SIZE,
   GROW_SIZE,
   hasGrowBox,
-  hasInfoBar,
   hasTitleBar,
+  headerBandHeight,
+  footerBandHeight,
   windowFrame,
+  windowOuterFrame,
   windowHeaderHeight,
   windowTotalHeight,
   windowContentWidth,
@@ -65,14 +66,19 @@ export function Window(props: WindowProps): JSX.Element {
 
   // Outer geometry
   const frame = createMemo(() => windowFrame(props.win));
+  const outer = createMemo(() => windowOuterFrame(props.win));
   const headerH = createMemo(() => windowHeaderHeight(props.win));
+  const bandH = createMemo(() => headerBandHeight(props.win));
+  const footH = createMemo(() => footerBandHeight(props.win));
   const totalH = createMemo(() => windowTotalHeight(props.win));
+  const [headerView, setHeaderView] = createSignal<(() => JSX.Element) | null>(null);
+  const [footerView, setFooterView] = createSignal<(() => JSX.Element) | null>(null);
 
-  // Interior geometry (inside the frame) — all children use these.
-  const innerW = createMemo(() => props.win.width - 2 * frame());
-  const innerH = createMemo(() => totalH() - 2 * frame());
+  // Interior geometry (inside the outer hairline) — all children use these.
+  const innerW = createMemo(() => props.win.width - 2 * outer());
+  const innerH = createMemo(() => totalH() - 2 * outer());
   const titleBarInnerH = TITLE_BAR_H - FRAME;
-  const headerInnerH = createMemo(() => headerH() - frame());
+  const headerInnerH = createMemo(() => headerH() - outer());
   const contentW = createMemo(() => windowContentWidth(props.win));
 
   const closeSprite = createMemo(() =>
@@ -91,25 +97,34 @@ export function Window(props: WindowProps): JSX.Element {
   const zoomY  = Math.floor((TITLE_BAR_H - ZOOM_SIZE) / 2) - FRAME;
   const stripeY = closeY;
 
-  // Scrollbar thumb geometry
-  const scrollbarInset = createMemo(() => props.win.contentTopInset ?? 0);
+  // Scrollbar thumb geometry — the track is the scrollable body only.
   const scrollableBodyH = createMemo(() =>
-    props.win.height - scrollbarInset() + (props.win.scrollable ? SB_W : 0)
+    props.win.height + (props.win.scrollable ? SB_W : 0)
   );
   const thumbH = createMemo(() => {
-    const viewH = props.win.height - scrollbarInset();
+    const viewH = props.win.height;
     const contentH = props.win.contentHeight;
     if (contentH <= viewH) return scrollableBodyH();
     return Math.max(16, Math.floor(scrollableBodyH() * viewH / contentH));
   });
   const thumbY = createMemo(() => {
-    const viewH = props.win.height - scrollbarInset();
+    const viewH = props.win.height;
     const contentH = props.win.contentHeight;
     if (contentH <= viewH) return SB_W;
     const trackH = scrollableBodyH() - SB_W * 2 - thumbH();
     const ratio = props.win.scrollY / Math.max(1, contentH - viewH);
     return SB_W + Math.floor(trackH * ratio);
   });
+
+  function applyBandHeight(field: "headerHeight" | "footerHeight", next: number): void {
+    const prev = props.win[field] ?? 0;
+    if (prev === next) return;
+    const minH = props.win.minHeight ?? 60;
+    updateOSWindow(props.win.id, {
+      [field]: next,
+      height: Math.max(minH, props.win.height + prev - next),
+    });
+  }
 
   function spriteSrc(s: ReturnType<typeof os.sprites.get>) {
     if (!s) return undefined;
@@ -136,11 +151,11 @@ export function Window(props: WindowProps): JSX.Element {
   }
 
   function handleThumbDrag(gx: number, gy: number) {
-    const winY = props.win.y + headerH() + scrollbarInset();
+    const winY = props.win.y + headerH();
     const trackH = scrollableBodyH() - SB_W * 2 - thumbH();
     const relY   = gy - winY - SB_W - thumbH() / 2;
     const ratio  = Math.max(0, Math.min(1, relY / Math.max(1, trackH)));
-    const maxScroll = Math.max(0, props.win.contentHeight - (props.win.height - scrollbarInset()));
+    const maxScroll = Math.max(0, props.win.contentHeight - props.win.height);
     updateOSWindow(props.win.id, { scrollY: Math.round(ratio * maxScroll) });
   }
 
@@ -181,12 +196,25 @@ export function Window(props: WindowProps): JSX.Element {
         height={totalH()}
         background={0}
         borderColor={1}
-        borderWidth={frame()}
+        borderWidth={outer()}
         overflow="hidden"
         semantic={{ name: "window", role: "window", windowId: props.win.id }}
         focusScope
         onMouseDownCapture={handleActivationPress}
       >
+        {/* ── Inner band (dBoxProc: 2px black inside a 2px white gap) ── */}
+        <Show when={(def().innerFrame ?? 0) > 0}>
+          <box
+            position="absolute"
+            left={def().frameGap ?? 0}
+            top={def().frameGap ?? 0}
+            width={innerW() - 2 * (def().frameGap ?? 0)}
+            height={innerH() - 2 * (def().frameGap ?? 0)}
+            borderColor={1}
+            borderWidth={def().innerFrame}
+          />
+        </Show>
+
         {/* ── Title bar ─────────────────────────────────────────── */}
         <Show when={hasTitleBar(props.win)}>
         <box
@@ -364,15 +392,13 @@ export function Window(props: WindowProps): JSX.Element {
             />
           </Show>
 
-          {/* Title text — centered on both axes; paddingBottom keeps the
-              label off the separator line (optical centering). */}
+          {/* Title text — optical middle (cap box), not the full Decker cell. */}
           <text
             position="absolute"
             left={0}
             top={0}
             width={innerW()}
             height={titleBarInnerH}
-            paddingBottom={1}
             font="menu"
             align="center"
             verticalAlign="middle"
@@ -382,39 +408,7 @@ export function Window(props: WindowProps): JSX.Element {
         </box>
         </Show>
 
-        {/* ── Info bar ──────────────────────────────────────────── */}
-        <Show when={hasInfoBar(props.win)}>
-          <box
-            position="absolute"
-            left={0}
-            top={titleBarInnerH}
-            width={innerW()}
-            height={INFO_BAR_H}
-            background={0}
-          >
-            <box
-              position="absolute"
-              left={0}
-              top={INFO_BAR_H - 1}
-              width={innerW()}
-              height={1}
-              background={1}
-            />
-            <text
-              position="absolute"
-              left={4}
-              top={0}
-              width={innerW() - 8}
-              height={INFO_BAR_H}
-              font="menu"
-              verticalAlign="middle"
-            >
-              {(props.win.infoBar ?? []).join("   ")}
-            </text>
-          </box>
-        </Show>
-
-        {/* ── Content area ──────────────────────────────────────── */}
+        {/* ── Scrollable body ───────────────────────────────────── */}
         <box
           position="absolute"
           left={0}
@@ -422,14 +416,67 @@ export function Window(props: WindowProps): JSX.Element {
           width={contentW()}
           height={props.win.height}
           overflow="scroll"
-          scrollOffset={props.win.scrollY}
+          scrollOffset={Math.min(props.win.scrollY, Math.max(0, props.win.contentHeight - props.win.height))}
           onScroll={(dy) => {
-            const maxY = Math.max(0, props.win.contentHeight - (props.win.height - scrollbarInset()));
+            const maxY = Math.max(0, props.win.contentHeight - props.win.height);
             updateOSWindow(props.win.id, { scrollY: Math.max(0, Math.min(maxY, props.win.scrollY + dy)) });
           }}
         >
-          <WindowContent win={props.win} />
+          <WindowContent
+            win={props.win}
+            slots={{
+              setHeader: (view, height) => {
+                setHeaderView((prev) => (view === null ? null : (prev ?? view)));
+                applyBandHeight("headerHeight", height);
+              },
+              setFooter: (view, height) => {
+                setFooterView((prev) => (view === null ? null : (prev ?? view)));
+                applyBandHeight("footerHeight", height);
+              },
+            }}
+          />
         </box>
+
+        {/* Header after the body so it wins hit-testing if the two overlap. */}
+        <Show when={bandH() > 0}>
+          <box
+            position="absolute"
+            left={0}
+            top={titleBarInnerH}
+            width={innerW()}
+            height={bandH()}
+            background={0}
+          >
+            <Show when={headerView()} fallback={<DefaultInfoBar win={props.win} />}>
+              {(view) => view()()}
+            </Show>
+            <box
+              position="absolute"
+              left={0}
+              top={bandH() - 1}
+              width={innerW()}
+              height={1}
+              background={1}
+            />
+          </box>
+        </Show>
+
+        {/* ── Footer band (WindowFooter) ────────────────────────── */}
+        <Show when={footH() > 0}>
+          <box
+            position="absolute"
+            left={0}
+            top={headerInnerH() + props.win.height}
+            width={innerW()}
+            height={footH()}
+            background={0}
+          >
+            <box position="absolute" left={0} top={0} width={innerW()} height={1} background={1} />
+            <Show when={footerView()}>
+              {(view) => view()()}
+            </Show>
+          </box>
+        </Show>
 
         {/* ── Vertical scrollbar ────────────────────────────────── */}
         {/* The band is SB_W wide including the frame line; its 16px sprites
@@ -438,7 +485,7 @@ export function Window(props: WindowProps): JSX.Element {
           <box
             position="absolute"
             left={innerW() - SB_INNER}
-            top={headerInnerH() + scrollbarInset()}
+            top={headerInnerH()}
             width={SB_W}
             height={scrollableBodyH()}
             background={0}
@@ -460,7 +507,7 @@ export function Window(props: WindowProps): JSX.Element {
             />
 
             {/* Thumb */}
-            <Show when={props.win.contentHeight > props.win.height - scrollbarInset()}>
+            <Show when={props.win.contentHeight > props.win.height}>
               <box
                 position="absolute"
                 left={1}
@@ -481,7 +528,7 @@ export function Window(props: WindowProps): JSX.Element {
               top={scrollableBodyH() - SB_W}
               size={SB_W}
               onClick={() => {
-                const maxY = Math.max(0, props.win.contentHeight - (props.win.height - scrollbarInset()));
+                const maxY = Math.max(0, props.win.contentHeight - props.win.height);
                 updateOSWindow(props.win.id, {
                   scrollY: Math.min(maxY, props.win.scrollY + 16),
                 });
@@ -495,7 +542,7 @@ export function Window(props: WindowProps): JSX.Element {
           <box
             position="absolute"
             left={0}
-            top={headerInnerH() + props.win.height}
+            top={headerInnerH() + props.win.height + footH()}
             width={contentW()}
             height={SB_W}
             background={0}
@@ -531,7 +578,7 @@ export function Window(props: WindowProps): JSX.Element {
               const outline = getWindowOutline();
               if (outline) {
                 const MIN_H = props.win.minHeight ?? 60;
-                const newH = outline.height - headerH() - (props.win.scrollable ? SB_W : frame());
+                const newH = outline.height - headerH() - footH() - (props.win.scrollable ? SB_W : frame());
                 updateOSWindow(props.win.id, {
                   width: outline.width,
                   height: Math.max(MIN_H, newH),
@@ -630,7 +677,26 @@ function toggleZoom(win: OSWindow): void {
   }
 }
 
-function WindowContent(props: { win: OSWindow }): JSX.Element {
+function DefaultInfoBar(props: { win: OSWindow }): JSX.Element {
+  return (
+    <text
+      position="absolute"
+      left={4}
+      top={0}
+      width="100%"
+      height="100%"
+      font="menu"
+      verticalAlign="middle"
+    >
+      {(props.win.infoBar ?? []).join("   ")}
+    </text>
+  );
+}
+
+function WindowContent(props: {
+  win: OSWindow;
+  slots: import("@mockintosh/sdk").WindowSlots;
+}): JSX.Element {
   const os = useOS();
   /** The window's own component when it was opened with one, else its app's main component. */
   const component = () => props.win.Component ?? getApp(props.win.appId)?.Component;
@@ -649,7 +715,6 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
       updateOSWindow(props.win.id, { contentWidth: width, contentHeight: height }),
     setInfoBar: (items) => updateOSWindow(props.win.id, { infoBar: items ?? undefined }),
     setMenus: (menus) => updateOSWindow(props.win.id, { menus }),
-    setContentTopInset: (px) => updateOSWindow(props.win.id, { contentTopInset: px }),
     setFullScreen: (on) => setWindowFullScreen(props.win.id, on, os.resolution),
     close: () => os.closeWindow(props.win.id),
   };
@@ -667,6 +732,7 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
       // The shell's kinds are the SDK's plus `finder-folder`, a document window.
       kind: () => (props.win.kind === "finder-folder" ? "document" : props.win.kind),
       setTitle: api.setTitle,
+      setContentSize: api.setContentSize,
       setFullScreen: api.setFullScreen,
       close: api.close,
     },
@@ -676,6 +742,7 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
   return (
     <WindowCtx.Provider value={api}>
       <AppServicesContext.Provider value={services}>
+      <WindowSlotsContext.Provider value={props.slots}>
       <box width="100%" height="100%" inert={modalFront()}>
         <ErrorBoundary fallback={error => {
           if (props.win.instanceId) os.instances?.fail(props.win.instanceId, error);
@@ -686,6 +753,7 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
         </Show>
         </ErrorBoundary>
       </box>
+      </WindowSlotsContext.Provider>
       </AppServicesContext.Provider>
     </WindowCtx.Provider>
   );

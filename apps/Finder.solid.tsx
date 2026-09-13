@@ -25,7 +25,7 @@ import {
 import { registerApp } from "../src/os/apps";
 import { useWindow } from "../src/os/windowContext";
 import { ROOT_ID, isFSError, type FileSystem, type FSNode } from "@mockintosh/fs";
-import type { MenubarDefinition } from "@mockintosh/sdk";
+import { WindowHeader, type MenubarDefinition } from "@mockintosh/sdk";
 import {
   bumpZOrder,
   clearPositions,
@@ -34,7 +34,7 @@ import {
   placeIcons,
   type IconPlacement,
 } from "./finder/attributes";
-import { windowContentRect, windowTotalHeight } from "../src/os/windowGeometry";
+import { INFO_BAR_H, windowContentRect, windowTotalHeight } from "../src/os/windowGeometry";
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -377,13 +377,8 @@ export interface FolderWindowSpec {
   openedFromRect?: { x: number; y: number; width: number; height: number };
 }
 
-function folderItemCountLabel(count: number): string {
-  return `${count} item${count !== 1 ? "s" : ""}`;
-}
-
 /** Build the OSWindow record for a Finder folder window. */
 export function buildFolderWindow(fs: FileSystem, spec: FolderWindowSpec): OSWindow {
-  const count = fs.childCount(spec.directoryId);
   return {
     id: `folder-${spec.directoryId}-${Date.now()}`,
     appId: FINDER_APP_ID,
@@ -400,7 +395,7 @@ export function buildFolderWindow(fs: FileSystem, spec: FolderWindowSpec): OSWin
     contentWidth: spec.width,
     scrollable: true,
     resizable: true,
-    infoBar: [folderItemCountLabel(count)],
+    headerHeight: INFO_BAR_H,
     openedFromRect: spec.openedFromRect,
   };
 }
@@ -957,25 +952,23 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
   const itemCount = () => `${icons().length} item${icons().length !== 1 ? "s" : ""}`;
   const dirId = () => directoryId();
 
-  // The item count is window chrome (info bar), not content — the OS draws it
-  // above the scrollbar and it never scrolls.
-  createEffect(() => {
-    updateOSWindow(win.id, { infoBar: [itemCount()] });
-  });
-
   // This window's menus reflect its folder (Clean Up) and the trash state.
   createEffect(() => {
     windowApi.setMenus(buildFinderMenus(os.fs, dirId(), {os, selected: [...selectedSet()]}));
   });
 
   function handleScroll(dy: number): void {
-    const inset = win.contentTopInset ?? 0;
-    const maxY = Math.max(0, win.contentHeight - (win.height - inset));
+    const maxY = Math.max(0, win.contentHeight - win.height);
     updateOSWindow(win.id, { scrollY: Math.max(0, Math.min(maxY, win.scrollY + dy)) });
   }
 
   return (
     <>
+      <WindowHeader height={INFO_BAR_H}>
+        <box width="100%" height="100%" paddingLeft={4} justifyContent="center">
+          <text font="menu" verticalAlign="middle">{itemCount()}</text>
+        </box>
+      </WindowHeader>
       {/* Content drop zone (below icons in z-order = lower priority) */}
       <box
         position="absolute"

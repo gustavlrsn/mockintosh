@@ -201,12 +201,19 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     },
     showDialog(options) {
       return new Promise<string | null>((resolve) => {
-        osServices.openApp("__dialog__", {
-          message: options.message,
-          buttons: options.buttons ?? ["OK"],
-          showInput: options.showInput,
-          inputDefault: options.inputDefault,
-          resolve,
+        osServices.openWindow("__dialog__", {
+          props: {
+            message: options.message,
+            buttons: options.buttons ?? ["OK"],
+            showInput: options.showInput,
+            inputDefault: options.inputDefault,
+            variant: options.variant ?? "stop",
+            resolve,
+          },
+          size: {
+            width: 376,
+            height: options.showInput ? 148 : 112,
+          },
         });
       });
     },
@@ -259,7 +266,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     id: "__dialog__",
     title: "",
     icon: "icon/computer",
-    defaultSize: { width: 260, height: 140 },
+    defaultSize: { width: 376, height: 112 },
     windowKind: "alert",
     scrollable: false,
     resizable: false,

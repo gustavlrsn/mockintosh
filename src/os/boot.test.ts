@@ -134,6 +134,50 @@ describe("bootOS on the headless platform", () => {
     );
   });
 
+  it("draws a dBoxProc alert: 1px / 2px white / 2px band, stop icon, default-ring OK", () => {
+    void os.services.showDialog({
+      message: 'The application "Decker" could not be found.',
+      buttons: ["OK"],
+    });
+    platform.tick();
+
+    const dialog = getWindows().find((w) => w.appId === "__dialog__");
+    expect(dialog).toBeDefined();
+    expect(dialog!.kind).toBe("alert");
+    expect(dialog!.width).toBe(376);
+    expect(dialog!.height).toBe(112);
+    expect(dialog!.x).toBe(Math.floor((WIDTH - 376) / 2));
+
+    const frame = platform.lastFrame()!;
+    const { x, y } = dialog!;
+    const inset = 1 + 2 + 2;
+
+    // Square picture frame: 1px outer, 2px white, 2px inner.
+    expect(inkCoverage(frame, x + 20, y, 40, 1)).toBe(1);
+    expect(inkCoverage(frame, x + 20, y + 1, 40, 2)).toBe(0);
+    expect(inkCoverage(frame, x + 20, y + 3, 40, 2)).toBe(1);
+    // Stop-hand ink in the icon cell (inside the frame + 16px pad).
+    expect(inkCoverage(frame, x + inset + 16, y + inset + 16, 32, 32)).toBeGreaterThan(0.25);
+    // Default-ring OK sits on the bottom-left (20px face + 4px ring + 16px pad).
+    const btnTop = y + inset + 112 - 16 - 28;
+    const btnLeft = x + inset + 16;
+    expect(inkCoverage(frame, btnLeft + 10, btnTop, 40, 3)).toBe(1);
+
+    // CDEF FontInfo: Chicago 12 in a 20px face → baseline 14, caps on 5–13.
+    const faceTop = btnTop + 4;
+    const faceLeft = btnLeft + 4;
+    let inkMin = 20;
+    let inkMax = -1;
+    for (let row = 1; row < 19; row++) {
+      if (inkCoverage(frame, faceLeft + 18, faceTop + row, 24, 1) > 0) {
+        if (row < inkMin) inkMin = row;
+        if (row > inkMax) inkMax = row;
+      }
+    }
+    expect(inkMin).toBe(5);
+    expect(inkMax).toBe(13);
+  });
+
   it("runs ⌘-shortcuts from the active menubar (⌘N creates a folder on the desktop)", () => {
     const before = platform.lastFrame()!.slice();
     const meta = { shift: false, ctrl: false, alt: false, meta: true };

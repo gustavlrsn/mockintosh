@@ -62,10 +62,15 @@ export interface OSWindow {
   minHeight?: number;
   /** Screen rect of the icon this window was opened from (for close zoom). */
   openedFromRect?: { x: number; y: number; width: number; height: number };
-  /** Optional info bar items (shown below title bar). */
+  /**
+   * @deprecated Prefer `WindowHeader`. Text items for the default 20px
+   * header band when `headerHeight` is unset.
+   */
   infoBar?: string[];
-  /** Height of fixed non-scrolling strip at the top of content. */
-  contentTopInset?: number;
+  /** Non-scrolling chrome below the title bar (app-filled via `WindowHeader`). */
+  headerHeight?: number;
+  /** Non-scrolling chrome below the scrollable body (`WindowFooter`). */
+  footerHeight?: number;
   /**
    * Per-window menubar override. Most apps set menus once for the whole app
    * (`SolidApp.menus` / `setAppMenus`); a window sets its own only when its
