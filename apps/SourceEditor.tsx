@@ -1,0 +1,70 @@
+import {createSignal, onCleanup, onMount, type JSX} from "solid-js";
+import {Button, TextInput, TextEditor} from "@mockintosh/ui";
+import {defineApp, useApp} from "@mockintosh/sdk";
+import {useOS} from "../src/os/context";
+import {Cancellation} from "../src/os/kernel/cancellation";
+import {parse, resource} from "../src/os/kernel/schema";
+import {jobSchema} from "../src/os/projects";
+function SourceEditor(props: {path?: string}): JSX.Element {
+  const os = useOS(), app = useApp(), kernel = os.kernel!;
+  const caller = kernel.createSession();
+  const [path, setPath] = createSignal(props.path ?? os.projects!.pathFor(os.fs.locate("applications")!.id) + "/Counter.app");
+  const [text, setText] = createSignal(""), [saved, setSaved] = createSignal("");
+  const [status, setStatus] = createSignal("Load a project or create Counter."), [busy, setBusy] = createSignal(false), [line, setLine] = createSignal(1);
+  let revision: number | undefined, loadedPath: string | undefined, closed = false;
+  let token = new Cancellation();
+  const invoke = (name: string, args: Record<string, unknown>) => kernel.invoke(caller, name, args, token);
+  onCleanup(() => { closed = true; kernel.revokeSession(caller.id); });
+  async function action(work: () => Promise<void>) {
+    if (busy()) return;
+    setBusy(true); token = new Cancellation();
+    try { await work(); } catch (error) { if (!closed) setStatus(error instanceof Error ? error.message : String(error)); }
+    finally { if (!closed) setBusy(false); }
+  }
+  async function load() {
+    if (text() !== saved() && await os.showDialog({message: "Discard unsaved changes and reload?", buttons: ["Cancel", "Discard"]}) !== "Discard") return;
+    const file = path() + "/src/index.tsx";
+    const before = parse(resource, await invoke("stat", {path: file}));
+    const body = await invoke("read", {path: file}) as string;
+    const after = parse(resource, await invoke("stat", {path: file}));
+    if (before.revision !== after.revision) throw new Error("Source changed while loading; reload again");
+    if (closed) return;
+    revision = after.revision; loadedPath = file; setText(body); setSaved(body); setLine(1); setStatus("Loaded");
+  }
+  async function save() {
+    if (revision === undefined || loadedPath !== path() + "/src/index.tsx") throw new Error("Load the project before saving");
+    const body = text();
+    const file = parse(resource, await invoke("write", {path: loadedPath, body, expectedRevision: revision}));
+    revision = file.revision; if (!closed) { setSaved(body); setStatus("Saved"); }
+  }
+  async function build() {
+    if (text() !== saved()) await save();
+    let job = parse(jobSchema, await invoke("build_submit", {path: path()}));
+    setStatus("Building…");
+    while (job.state === "building") { await token.delay(100); job = parse(jobSchema, await invoke("build_status", {id: job.id})); }
+    if (job.state !== "succeeded") {
+      const diagnostic = job.diagnostics[0];
+      if (diagnostic?.line) setLine(diagnostic.line);
+      throw new Error(diagnostic ? `${diagnostic.file ?? "Build"}:${diagnostic.line ?? ""} ${diagnostic.message}` : job.state);
+    }
+    await invoke("app_install", {path: path(), build: job.id});
+    if (!closed) setStatus("Build installed and running");
+  }
+  onMount(() => { if (props.path) void action(load); });
+  return <box width={app.window.width()} height={app.window.height()} padding={6} gap={5}>
+    <TextInput name="source-project-path" value={path()} onChange={setPath} width={app.window.width() - 12} disabled={busy()} />
+    <box flexDirection="row" gap={4}>
+      <Button name="source-create" label="New Counter" disabled={busy()} onClick={() => void action(async () => { await invoke("project_create", {path: path(), id: "counter", title: "Counter"}); await load(); })} />
+      <Button name="source-load" label="Load" disabled={busy()} onClick={() => void action(load)} />
+      <Button name="source-save" label="Save" disabled={busy() || text() === saved()} onClick={() => void action(save)} />
+      <Button name="source-build" label="Build & Run" disabled={busy() || revision === undefined} onClick={() => void action(build)} />
+      <Button name="source-restore" label="Restore" disabled={busy()} onClick={() => void action(async () => {
+        const manifest = JSON.parse(await invoke("read", {path: path() + "/mockintosh.json"}) as string);
+        await invoke("app_restore", {app: manifest.id}); setStatus("Previous build restored");
+      })} />
+    </box>
+    <TextEditor name="source-code" value={text()} onChange={setText} disabled={busy()} line={line()} width={app.window.width() - 12} height={Math.max(40, app.window.height() - 100)} />
+    <text wrap>{`${text() !== saved() ? "Modified. " : ""}${status()}`}</text>
+  </box>;
+}
+export default defineApp({id: "source_editor", title: "Source Editor", icon: "icon/computer", defaultSize: {width: 480, height: 260}, singleInstance: false, Component: SourceEditor});

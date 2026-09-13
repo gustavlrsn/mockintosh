@@ -9,6 +9,7 @@ const BY_EXTENSION: Readonly<Record<string, string>> = {
   json: MIME.json,
   deck: MIME.deck,
   png: "image/png",
+  pbm: "image/x-portable-bitmap",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   gif: "image/gif",

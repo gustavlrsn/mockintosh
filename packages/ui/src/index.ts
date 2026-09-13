@@ -95,3 +95,6 @@ export { createStore } from "solid-js/store";
 // JSX — side-effect import to augment JSX namespace
 // -------------------------------------------------------------------------
 import "./jsx.d.ts";
+
+export { inspectTree, type InspectionNode, type SemanticMetadata } from "./inspection";
+export {TextEditor, type TextEditorProps} from "./components/TextEditor";

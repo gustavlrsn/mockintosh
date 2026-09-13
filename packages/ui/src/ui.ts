@@ -9,6 +9,7 @@
  * `globals._fontMeasure` are module-level. One createUI() per process.
  */
 
+import { inspectTree, type InspectionNode } from "./inspection";
 import { render, _setRepaintHook } from "./renderer";
 import { createNode } from "./nodes";
 import { computeLayout } from "./layout";
@@ -41,6 +42,7 @@ export interface UIConfig {
 }
 
 export interface UIInstance {
+  inspect(): readonly InspectionNode[];
   /**
    * Mount a Solid component tree. Returns a cleanup function that
    * unmounts the tree and stops reactive effects.
@@ -120,7 +122,9 @@ export function createUI(config: UIConfig): UIInstance {
   let autoFocusApplied = false;
 
   const instance: UIInstance = {
+    inspect() { if (root._dirty) computeLayout(root, width, height, measureFunc); return inspectTree(root, focusManager); },
     render(component: () => JSX.Element): () => void {
+      let disposed = false;
       const focusContextValue = {
         manager: focusManager,
         getNode: () => null,
@@ -149,10 +153,10 @@ export function createUI(config: UIConfig): UIInstance {
 
       if (!autoFocusApplied) {
         autoFocusApplied = true;
-        Promise.resolve().then(() => applyAutoFocus(root, focusManager));
+        Promise.resolve().then(() => { if (!disposed) applyAutoFocus(root, focusManager); });
       }
 
-      return cleanup;
+      return () => { disposed = true; cleanup(); };
     },
 
     frame(): void {

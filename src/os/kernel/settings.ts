@@ -1,0 +1,94 @@
+import { createSignal } from "solid-js";
+import type { FileSystem } from "@mockintosh/fs";
+import { defineOperation, type Kernel } from "./index";
+import { ServiceError } from "./errors";
+import * as s from "./schema";
+export const desktopPatternName = "desktop-pattern";
+export type DesktopPattern = "checker" | "white" | "black";
+export function parseDesktopPattern(body: string): DesktopPattern {
+  const value = body.replace(/\r?\n$/, "");
+  if (value !== "checker" && value !== "white" && value !== "black") throw new ServiceError("invalid-argument", "Expected checker, white, or black");
+  return value;
+}
+export async function createDesktopSettings(fs: FileSystem) {
+  const preferences = fs.locate("preferences");
+  if (!preferences) throw new ServiceError("missing-resource", "Preferences folder is missing");
+  const name = desktopPatternName;
+  const [pattern, setPattern] = createSignal<DesktopPattern>("checker");
+  const [diagnostic, setDiagnostic] = createSignal<string | null>(null);
+  let observed = "",
+    sequence = 0,
+    stopped = false;
+  let pending: Promise<void> = Promise.resolve();
+  const writes = new Set<Promise<unknown>>();
+  async function refresh() {
+    const node = fs.child(preferences.id, name);
+    const key = node ? `${node.id}:${node.revision}` : "missing";
+    if (key === observed) return;
+    observed = key;
+    const current = ++sequence;
+    let value: DesktopPattern = "checker",
+      error: string | null = null;
+    try {
+      if (!node || node.kind !== "file") throw new Error("Desktop preference is missing; using checker");
+      value = parseDesktopPattern((await fs.readText(node.id)) ?? "");
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    if (!stopped && current === sequence) {
+      setPattern(value);
+      setDiagnostic(error);
+    }
+  }
+  const unsubscribe = fs.subscribe(() => {
+    pending = pending.then(refresh);
+  });
+  await refresh();
+  return {
+    pattern,
+    diagnostic,
+    set(body: string) {
+      const value = parseDesktopPattern(body);
+      const write = (async () => {
+        await fs.writeFile(preferences.id, name, value + "\n", {
+          type: "text/plain"
+        });
+        await fs.flush();
+        await pending;
+        return {
+          pattern: pattern(),
+          diagnostic: diagnostic()
+        };
+      })();
+      writes.add(write);
+      void write.finally(() => writes.delete(write)).catch(() => {});
+      return write;
+    },
+    async settled() {
+      await Promise.all([...writes]);
+      await pending;
+    },
+    shutdown() {
+      stopped = true;
+      sequence++;
+      unsubscribe();
+    }
+  };
+}
+export type DesktopSettings = Awaited<ReturnType<typeof createDesktopSettings>>;
+
+const patternEnum = { type: "string", enum: ["checker", "white", "black"] } as const;
+
+export function registerDesktopSettings(kernel: Kernel, settings: DesktopSettings) {
+  kernel.register(defineOperation(
+    "desktop_pattern",
+    "Read or set the persistent desktop pattern",
+    { value: patternEnum },
+    [],
+    s.object({ pattern: patternEnum, diagnostic: s.string }),
+    async (a) => {
+      if (a.value !== undefined) await settings.set(a.value);
+      return { pattern: settings.pattern(), diagnostic: settings.diagnostic() ?? "" };
+    },
+  ));
+}

@@ -4,6 +4,7 @@
  */
 import "./systemApps";
 import { DEFAULT_SCREEN, createWebPlatform } from "./platform/web";
+import { installCompanionUI } from "./platform/web/companion";
 import { bootOS } from "./os/boot";
 
 bootOS(
@@ -12,4 +13,4 @@ bootOS(
     width: DEFAULT_SCREEN.width,
     height: DEFAULT_SCREEN.height,
   })
-).catch(console.error);
+).then(os => { if (import.meta.env.DEV) installCompanionUI(os); }).catch(console.error);

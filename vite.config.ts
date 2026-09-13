@@ -44,6 +44,12 @@ function sharedRuntimeImportMap(): Plugin {
 }
 
 export default defineConfig({
+  // Babel 7 reads this Node-only feature flag. Empty strings are also falsy
+  // when Vite exposes defines to an SSR host through process.env.
+  define: {"process.env.BABEL_TYPES_8_BREAKING": '""', "process.env.BABEL_8_BREAKING": '""'},
+  // Prebundle the complete reactive runtime together. Late discovery of universal
+  // can otherwise serve the same Solid chunk under different cache identities.
+  optimizeDeps: {exclude: ["@rollup/browser"], include: ["solid-js", "solid-js/store", "solid-js/universal", "@babel/standalone", "babel-preset-solid", "typescript"]},
   plugins: [
     // Only transform files in packages/ui and apps that use Solid JSX.
     // Must use "universal" generate mode so JSX compiles to the custom
@@ -64,6 +70,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": __dirname,
+      // Solid’s Babel preset uses Node assertions inside the browser compiler.
+      "assert": "assert/",
     },
   },
   test: {
@@ -74,6 +82,7 @@ export default defineConfig({
       "packages/fs/tests/**/*.test.ts",
       "packages/print/tests/**/*.test.ts",
       "src/os/**/*.test.ts",
+      "src/shared/**/*.test.ts",
       "scripts/**/*.test.ts",
     ],
   },

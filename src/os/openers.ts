@@ -1,3 +1,4 @@
+import {diskPath} from "./projects/paths";
 /**
  * Openers — which app opens which file.
  *
@@ -31,6 +32,12 @@ export async function resolveOpenAction(fs: FileSystem, nodeId: string): Promise
   if (!node) return { kind: "none", reason: "not-found" };
 
   if (node.kind === "directory") {
+    const project = fs.child(node.id, "mockintosh.json");
+    if (project?.kind === "file") {
+      const manifest = await fs.readJSON<{id?: string}>(project.id);
+      if (manifest?.id && getApp(manifest.id)) return launchIfRegistered(manifest.id);
+      return {kind: "launch", appId: "source_editor", props: {path: diskPath(fs, node.id)}};
+    }
     return { kind: "folder", directoryId: node.id, title: node.name };
   }
 

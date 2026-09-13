@@ -2,6 +2,7 @@ import { createSignal, type JSX } from "solid-js";
 import type { Ink, LayoutStyle, PatternName } from "../nodes";
 
 export interface ButtonProps {
+  name?: string;
   label: string;
   onClick: () => void;
   disabled?: boolean;
@@ -22,6 +23,7 @@ export function Button(props: ButtonProps): JSX.Element {
 
   return (
     <box
+      semantic={{ name: props.name, role: "button",  enabled: !props.disabled }}
       width={props.width}
       alignSelf={props.alignSelf ?? "flex-start"}
       background={background()}

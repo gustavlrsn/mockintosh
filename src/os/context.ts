@@ -30,6 +30,11 @@ export interface DialogOptions {
 }
 
 export interface OSServices {
+  instances?: import("./instances").AppInstances;
+  projects?: import("./projects").ProjectService;
+  shell?: import("./shell").ShellManager;
+  kernel?: import("./kernel").Kernel;
+  desktopSettings?: import("./kernel/settings").DesktopSettings;
   sprites: SpriteRegistry;
   fs: FileSystem;
   resolution: { width: number; height: number };
@@ -56,7 +61,8 @@ export interface OSServices {
   openWindow: <P extends Record<string, unknown>>(
     appId: string,
     spec?: WindowSpec<P>,
-    fromRect?: IconScreenRect
+    fromRect?: IconScreenRect,
+    instanceId?: string
   ) => string;
   openFolderWindow: (title: string, directoryId: string, fromRect?: IconScreenRect) => void;
   openFSNode: (nodeId: string, fromRect?: IconScreenRect) => void;

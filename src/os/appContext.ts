@@ -15,6 +15,7 @@ export interface AppContextOptions {
    * so the rect is consumed by the first `openWindow` call.
    */
   fromRect?: IconScreenRect;
+  instanceId?: string;
 }
 
 export function createAppContext(
@@ -24,6 +25,8 @@ export function createAppContext(
 ): AppContext {
   let pendingFromRect = options.fromRect;
   return {
+    keepAlive: () => options.instanceId && os.instances ? os.instances.retain(options.instanceId) : () => {},
+    onCleanup: cleanup => { if (options.instanceId) os.instances?.own(options.instanceId, cleanup); },
     getSprite: (name) => os.sprites.get(name),
     storage: createAppStorage(os.fs, appId),
     fs: os.fs,
@@ -36,7 +39,7 @@ export function createAppContext(
     openWindow<P extends Record<string, unknown>>(spec?: WindowSpec<P>): string {
       const fromRect = pendingFromRect;
       pendingFromRect = undefined;
-      return os.openWindow(appId, spec, fromRect);
+      return os.openWindow(appId, spec, fromRect, options.instanceId);
     },
     env: os.env,
     capabilities: os.capabilities,

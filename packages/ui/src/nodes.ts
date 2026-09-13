@@ -186,7 +186,9 @@ export interface HitRect {
 /** A 1-bit pixel value: `0` = white, `1` = black. The screen has no other colours. */
 export type Ink = 0 | 1;
 
-export interface BoxProps extends LayoutStyle, EventHandlers {
+export interface SemanticProps { semantic?: import("./inspection").SemanticMetadata; }
+
+export interface BoxProps extends LayoutStyle, EventHandlers, SemanticProps {
   /** Solid ink or dither pattern name */
   background?: Ink | PatternName;
   borderColor?: Ink;
@@ -209,7 +211,7 @@ export interface BoxProps extends LayoutStyle, EventHandlers {
 export type TextAlign = "left" | "center" | "right";
 export type TextVerticalAlign = "top" | "middle" | "bottom";
 
-export interface TextProps extends LayoutStyle, EventHandlers {
+export interface TextProps extends LayoutStyle, EventHandlers, SemanticProps {
   font?: string;
   color?: Ink;
   /** Solid background behind the text */
@@ -232,7 +234,7 @@ export interface TextProps extends LayoutStyle, EventHandlers {
   children?: string;
 }
 
-export interface ImageProps extends LayoutStyle, EventHandlers {
+export interface ImageProps extends LayoutStyle, EventHandlers, SemanticProps {
   src: Sprite;
   mode?: "normal" | "inverted" | "outline";
 }
@@ -272,7 +274,7 @@ export interface RasterSurface {
 /** Immediate-mode paint callback for `<raster onPaint>`. */
 export type RasterPaintFn = (surface: RasterSurface) => void;
 
-export interface RasterProps extends LayoutStyle, EventHandlers {
+export interface RasterProps extends LayoutStyle, EventHandlers, SemanticProps {
   onPaint?: RasterPaintFn;
   /**
    * Bump to repaint. `onPaint` runs at paint time, outside any reactive scope,

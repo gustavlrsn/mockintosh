@@ -11,7 +11,7 @@ export function Desktop(): JSX.Element {
       top={os.menubarHeight}
       width={os.resolution.width}
       height={os.resolution.height - os.menubarHeight}
-      background="checker"
+      background={os.desktopSettings?.pattern() === "white" ? 0 : os.desktopSettings?.pattern() === "black" ? 1 : "checker"}
     >
       <FinderDesktop />
     </box>

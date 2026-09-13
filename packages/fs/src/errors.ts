@@ -1,4 +1,5 @@
 export type FSErrorCode =
+  | "conflict"
   | "not-found"
   | "exists"
   | "invalid-name"

@@ -105,6 +105,11 @@ export class FileSystem {
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private persistInFlight: Promise<void> | null = null;
   private batchDepth = 0;
+  private listeners = new Set<() => void>();
+  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+
+  private writes: Promise<unknown> = Promise.resolve();
+  private locked = new Set<NodeId>();
 
   private constructor(options: FileSystemOptions, doc: CatalogDocument) {
     this.backend = options.backend;
@@ -315,6 +320,7 @@ export class FileSystem {
       parentId: parent.id,
       createdAt: now,
       modifiedAt: now,
+      revision: 1,
     };
     if (options.role) {
       if (options.role === "root") throw new FSError("invalid-name", "Only the root has the root role");
@@ -347,6 +353,13 @@ export class FileSystem {
     content: FileContent,
     options: WriteFileOptions = {}
   ): Promise<FSFile> {
+    const bytes = typeof content === "string" ? textEncoder.encode(content) : content.slice();
+    const run = this.writes.then(() => this.writeFileLocked(parentId, name, bytes, options));
+    this.writes = run.catch(() => {});
+    return run;
+  }
+
+  private async writeFileLocked(parentId: NodeId, name: string, content: FileContent, options: WriteFileOptions): Promise<FSFile> {
     assertValidName(name);
     const parent = this.requireDirectory(parentId);
     const found = this.child(parent.id, name);
@@ -354,6 +367,9 @@ export class FileSystem {
       throw new FSError("exists", `A folder named "${name}" already exists`);
     }
     const existing = found as FSFile | undefined;
+    if (options.expectedRevision !== undefined && options.expectedRevision !== (existing?.revision ?? 0)) {
+      throw new FSError("conflict", "Resource revision changed");
+    }
     const bytes = typeof content === "string" ? textEncoder.encode(content) : content;
     const id = existing?.id ?? this.generateId();
     const now = this.now();
@@ -362,6 +378,7 @@ export class FileSystem {
       name,
       kind: "file",
       parentId: parent.id,
+      revision: (existing?.revision ?? 0) + 1,
       createdAt: existing?.createdAt ?? now,
       modifiedAt: now,
       type: options.type ?? existing?.type ?? inferMimeType(name),
@@ -369,7 +386,14 @@ export class FileSystem {
     };
     if (existing?.role) file.role = existing.role;
 
-    await this.backend.writeBlob(id, bytes);
+    this.locked.add(parentId);
+    this.locked.add(id);
+    try {
+      await this.backend.writeBlob(id, bytes);
+    } finally {
+      this.locked.delete(parentId);
+      this.locked.delete(id);
+    }
 
     this.commit((s) => {
       s.nodes[id] = file;
@@ -400,6 +424,7 @@ export class FileSystem {
       const n = s.nodes[id];
       n.name = name;
       n.modifiedAt = now;
+      n.revision++;
       if (n.kind === "file" && typeWasInferred) n.type = inferMimeType(name);
       touch(s, parentId, now);
     });
@@ -426,6 +451,7 @@ export class FileSystem {
       s.childIds[target.id].push(id);
       s.nodes[id].parentId = target.id;
       s.nodes[id].modifiedAt = now;
+      s.nodes[id].revision++;
       // Roles are per volume; re-index in case the move crossed volumes.
       for (const d of subtree) {
         unindexRole(s, d);
@@ -455,6 +481,7 @@ export class FileSystem {
     });
 
     // Catalog first, blobs second (see module comment).
+    await this.flush();
     await Promise.all(fileIds.map((f) => this.backend.deleteBlob(f)));
   }
 
@@ -464,7 +491,8 @@ export class FileSystem {
    */
   setAttributes(id: NodeId, patch: NodeAttributes): void {
     if (!this.state.nodes[id]) throw new FSError("not-found", `No such node: ${id}`);
-    this.commit((s) => mergeAttributes(s, id, patch));
+    this.assertUnlocked(id);
+    this.commit((s) => { mergeAttributes(s, id, patch); touch(s, id, this.now()); });
   }
 
   /**
@@ -504,6 +532,7 @@ export class FileSystem {
   private commit(mutate: (s: CatalogState) => void): void {
     this.setState(produce(mutate));
     this.markDirty();
+    for (const listener of this.listeners) listener();
   }
 
   private markDirty(): void {
@@ -515,7 +544,7 @@ export class FileSystem {
     if (this.persistTimer) return;
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      void this.persistNow();
+      void this.persistNow().catch(error => console.error("FileSystem: failed to persist catalog", error));
     }, this.persistDelayMs);
   }
 
@@ -523,15 +552,18 @@ export class FileSystem {
     if (this.persistInFlight) return this.persistInFlight;
     this.catalogDirty = false;
     const json = JSON.stringify(this.toJSON());
+    let failed = false;
     this.persistInFlight = this.backend
       .writeCatalog(json)
       .catch((err) => {
+        failed = true;
         this.catalogDirty = true;
-        console.error("FileSystem: failed to persist catalog", err);
+        throw err;
       })
       .finally(() => {
         this.persistInFlight = null;
-        if (this.catalogDirty) this.schedulePersist();
+        if (this.catalogDirty && !failed) this.schedulePersist();
+
       });
     return this.persistInFlight;
   }
@@ -540,7 +572,14 @@ export class FileSystem {
   // Internals
   // =========================================================================
 
+  private assertUnlocked(id: NodeId): void {
+    if ([...this.locked].some((locked) => this.isWithin(locked, id))) {
+      throw new FSError("conflict", "A content write is in progress");
+    }
+  }
+
   private requireDirectory(id: NodeId): FSDirectory {
+    this.assertUnlocked(id);
     const n = this.state.nodes[id];
     if (!n) throw new FSError("not-found", `No such directory: ${id}`);
     if (n.kind !== "directory") throw new FSError("not-a-directory", `"${n.name}" is not a folder`);
@@ -548,6 +587,7 @@ export class FileSystem {
   }
 
   private requireMutable(id: NodeId): FSNode {
+    this.assertUnlocked(id);
     const n = this.state.nodes[id];
     if (!n) throw new FSError("not-found", `No such node: ${id}`);
     if (n.parentId === null) throw new FSError("immutable", "The root cannot be changed");
@@ -570,7 +610,7 @@ const EMPTY_ATTRIBUTES: NodeAttributes = Object.freeze({});
 
 function touch(s: CatalogState, dirId: NodeId, now: number): void {
   const d = s.nodes[dirId];
-  if (d) d.modifiedAt = now;
+  if (d) { d.modifiedAt = now; d.revision++; }
 }
 
 function mergeAttributes(s: CatalogState, id: NodeId, patch: NodeAttributes): void {

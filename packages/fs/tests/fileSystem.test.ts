@@ -220,7 +220,7 @@ describe("FileSystem — persistence", () => {
     fs.setAttributes(f.id, { icon: "icon/file" });
     await fs.flush();
     const raw = await backend.readCatalog();
-    expect(raw).toContain('"version":2');
+    expect(raw).toContain('"version":3');
 
     const reopened = await FileSystem.open({ backend, persistDelayMs: 0 });
     expect(reopened.pathOf(f.id)).toBe("/Mockintosh HD/a.txt");
@@ -253,9 +253,9 @@ describe("FileSystem — persistence", () => {
 
     events.length = 0;
     await fs.remove(f.id);
-    // Entry gone from the in-memory catalog before the blob delete is issued.
+    // Catalog removal is persisted before the blob is deleted.
     expect(fs.node(f.id)).toBeUndefined();
-    expect(events).toEqual(["delete"]);
+    expect(events).toEqual(["catalog", "delete"]);
   });
 
   it("migrates a v1 FileManager catalog: roles, MIME types, attributes", async () => {
@@ -291,7 +291,7 @@ describe("FileSystem — persistence", () => {
     expect(fs.node("orphan")).toBeUndefined();
 
     await fs.flush();
-    expect(await backend.readCatalog()).toContain('"version":2');
+    expect(await backend.readCatalog()).toContain('"version":3');
   });
 
   it("a corrupt catalog yields a fresh root instead of throwing", async () => {

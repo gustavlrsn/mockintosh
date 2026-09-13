@@ -6,6 +6,9 @@ import { measureText } from "../fonts/bridge";
 import type { CanvasNode, Modifiers } from "../nodes";
 
 export interface TextInputProps {
+  name?: string;
+  onHistory?: (direction: -1 | 1) => void;
+  onInterrupt?: () => void;
   value: string;
   onChange: (value: string) => void;
   onSubmit?: (value: string) => void;
@@ -157,6 +160,8 @@ export function TextInput(props: TextInputProps): JSX.Element {
 
   // --- Keyboard ---
   function handleKeyDown(key: string, mod: Modifiers): void {
+    if (props.onInterrupt && mod.ctrl && key.toLowerCase() === "c") { props.onInterrupt(); return; }
+    if (!props.disabled && props.onHistory && (key === "ArrowUp" || key === "ArrowDown")) { props.onHistory(key === "ArrowUp" ? -1 : 1); setCursorPos(props.value.length); setSelStart(null); setSelEnd(null); resetBlink(); return; }
     if (props.disabled) return;
     resetBlink();
     const text = props.value;
@@ -329,6 +334,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
 
   return (
     <box
+      semantic={{ name: props.name, role: "textbox", value: props.value, password: props.password, enabled: !props.disabled }}
       ref={(el: CanvasNode) => { rootNode = el; }}
       width={props.width ?? 120}
       height={fieldHeight()}

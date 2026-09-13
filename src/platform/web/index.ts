@@ -17,6 +17,7 @@ import type {
   PlatformScheduler,
   PointerButton,
 } from "../types";
+import { browserBuilder } from "./builder";
 import { CanvasPresenter } from "./CanvasPresenter";
 
 export interface WebPlatformOptions {
@@ -99,6 +100,11 @@ export function createWebPlatform(options: WebPlatformOptions): Platform {
     clipboard,
     printer: isWebUSBAvailable() ? new WebUSBPrinterTransport() : undefined,
     fetch: globalThis.fetch.bind(globalThis),
+    builder: browserBuilder,
+    async loadArtifact(code) {
+      const url = URL.createObjectURL(new Blob([code], {type: "text/javascript"}));
+      try { return await import(/* @vite-ignore */ url); } finally { URL.revokeObjectURL(url); }
+    },
     loadModule: (url) => import(/* @vite-ignore */ url),
   };
 }

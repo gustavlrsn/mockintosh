@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["scripts/companion/**/*.ts", "scripts/builder/**/*.ts", "scripts/mockintosh-sh.ts", "vite-env.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}

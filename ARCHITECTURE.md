@@ -33,6 +33,35 @@ src/platform/<host>  ─ implements Platform ─▶  bootOS(platform)
 
 `createUI` is a **single-instance** renderer (`_setRepaintHook`, QuickDraw font globals). The OS is the only caller.
 
+## Kernel (Toolbox traps)
+
+Each `BootedOS` owns a `Kernel`: a trap dispatcher with an instance identity, boot generation, and caller sessions. Sessions identify the caller and own cleanup; they are not an ACL. `defineOperation` keeps each trap's input schema, result schema, and handler together. The same table is what MCP lists, what Terminal runs, and what Source Editor calls.
+
+Traps are grouped as managers in documentation only:
+
+| Manager | Traps |
+| --- | --- |
+| File | `stat`, `list`, `read` / `read_bytes`, `write` / `write_bytes`, `mkdir`, `remove`, `move`, `copy` |
+| Settings | `desktop_pattern` (Control Panel and Desktop use the same typed service; bytes live in Preferences) |
+| Window / Event | `apps`, `open`, `windows`, `activate`, `inspect`, `click`, `dblclick`, `drag`, `type`, `key`, `pointer`, `menu`, `render`, `screenshot` / `screenshot_save` |
+| Project | `project_create`, `source_open`, `build_submit`, `build_status`, `build_cancel`, `app_install`, `app_restart`, `app_restore`, `instances` |
+
+Finder and `useApp().fs` keep talking **node ids and roles**. File traps resolve a path through `Disk`: `/disk` is a shell prefix for the volume root, not a mount. Catalog v3 revisions and compare-and-swap writes make two writers (human + agent) safe.
+
+`@mockintosh/ui` exposes detached immutable inspection snapshots. Automation validates live targets and routes gestures through the same boot input handlers as human events. The S1 shell is an adapter over traps; `help` comes from the command table. The browser's opt-in companion, CLI, and MCP select an explicit boot and invoke traps. Disconnect never causes a headless fallback or automatic mutation replay.
+
+Handlers receive an `Execution` with the caller, cancellation, streams, the boot `Disk`, and nested `invoke`. See [toolbox-cut.md](docs/toolbox-cut.md) and [M1 operation](docs/m1-operation.md).
+
+## App projects, builds, and lifetimes
+
+`Kernel` caller lifetimes own cleanup; revocation releases shell sessions and cancels pending work. One `ShellManager` serves Terminal and RPC. Outcome history is independent from live sessions, whose idle retention is bounded.
+
+`src/os/projects` owns source snapshots, persisted immutable build records, selected/previous artifacts, and install/restart/recovery operations. The browser and companion implement the same `BuildProvider`: the browser defaults to a lazy module worker; the companion runs a cancellable worker process. Both typecheck and compile without executing project source. `src/shared/buildPolicy.ts` owns source limits, supported imports, and TypeScript options. The browser embeds the shipped SDK sources/declarations for typechecking; compiler code and assets stay out of the initial desktop load. Pairing can select the companion provider; disconnect restores the local provider for subsequent builds, without replaying in-flight work. `Platform.loadArtifact` loads persisted ESM in the host's shared runtime. Neither compilation nor Blob URLs belong in the kernel. Source Editor and shell commands use the same registered operations and revision checks.
+
+`AppInstances` owns actual launch lifetimes and window ids. The window store still owns geometry, ordering, and rendering. App contexts register cleanup and explicitly retain background work; restart disposes the old instance and launches the selected build. Component initialization errors are caught at the window and attributed to the instance. This is the lifecycle needed for app replacement, not a general process table.
+
+The shipped [M2 app-building slice](docs/m2-apps.md) creates, builds, runs, edits, restarts, restores, and reopens Counter after reboot. Shell S2 and a general multi-file editor remain planned.
+
 ## Platform layer
 
 Everything above the dashed line compiles **without DOM types**; `npm run check:core` (`tsconfig.core.json`, `lib: es2022`, no `@types`) enforces it. The only host globals the core assumes are the ones every engine we target provides — `console`, timers, `TextEncoder`/`TextDecoder` — listed exhaustively in `src/platform/core-env.d.ts`. Anything else the OS needs from the machine comes through one object:
@@ -56,7 +85,7 @@ Implementations:
 - `src/platform/web/` — `<canvas>` + `CanvasPresenter`, DOM events, `requestAnimationFrame`, `OPFSBackend`, `navigator.clipboard`, `WebUSBPrinterTransport`, `fetch`. The only OS-level code allowed to touch the DOM.
 - `src/platform/headless/` — in-memory display with frame read-back, synthetic input injection, a hand-advanced clock, `InMemoryBackend`. `src/os/boot.test.ts` boots the whole shell on it and drives menus, ⌘N, and the capability dialog from Node. It is the starting point for any new host: swap `present()` and the input injectors for real drivers.
 
-Which apps ship is the entry point's decision, not the OS's: `src/systemApps.ts` registers the web build's bundled apps; a device build imports a different list. Bundled apps are written against `@mockintosh/sdk` only — `export default defineApp(…)`, `useApp()` — so they are the same shape as a third-party bundle and could be moved out of the tree. Two are part of the shell and reach into `src/os` on purpose: the Finder (desktop, folder windows, opening files; the boot sequence depends on it) and the App Store (installing apps is an OS privilege, `OSServices.installer`, not an SDK power).
+Which apps ship is the entry point's decision, not the OS's: `src/systemApps.ts` registers the web build's bundled apps; a device build imports a different list. Bundled apps are written against `@mockintosh/sdk` only — `export default defineApp(…)`, `useApp()` — so they are the same shape as a third-party bundle and could be moved out of the tree. Five are OS-owned and reach into `src/os` on purpose: Finder (desktop and folder windows), Terminal (kernel shell sessions), Control Panel (persistent settings), and App Store (installation privileges). Source Editor owns project editing. Finder, Terminal, and Source Editor are registered by boot; other bundled apps are registered by the host.
 
 ### Capabilities
 
@@ -139,7 +168,7 @@ packages/markdown/          mdast → LayoutNode
 packages/print/             Print pages (QuickDraw ports) → ESC/POS → PrinterTransport
 packages/quickdraw/         GrafPort, CopyBits, BitBlt, packed 1-bit BitMap
 
-apps/                       Bundled apps (*.tsx), SDK-only except Finder and App Store
+apps/                       Bundled apps (*.tsx), SDK-only except OS-owned Finder, Terminal, Control Panel, App Store
   Finder.solid.tsx
   finder/attributes.ts      Icon position / zOrder / custom icon on FS attributes
   MarkdownView.tsx
@@ -251,7 +280,7 @@ apps/finder/attributes.ts      Finder's typed view of node attributes
 
 **Attributes.** Consumers (not the FS) own per-node metadata bags: the Finder's icon, free-form position and stacking order live there, typed only in `apps/finder/attributes.ts`; the installer keeps `appId` on manifest files. The FS persists them and removes them with the node.
 
-**Durability.** A body is written to the backend *before* its catalog entry appears; an entry is removed *before* its body is deleted. The catalog is debounced (500 ms) and versioned: `parseCatalog` migrates older documents (the v1 `FileManager` catalog → v2: MIME types, roles, attributes) and drops unreachable nodes rather than failing.
+**Durability.** A body is written to the backend *before* its catalog entry appears; an entry is removed *before* its body is deleted. The catalog is debounced (500 ms) and versioned: `parseCatalog` migrates older documents (the v1 `FileManager` catalog → v2: MIME types, roles, attributes → v3: persisted revisions) and drops unreachable nodes rather than failing.
 
 **Opening.** A double-click asks `resolveOpenAction`: directories open a Finder window; `MIME.appShortcut` / `MIME.app` launch the referenced app; other files launch the first registered app whose `fileTypes` includes the MIME type, with `FileDocumentProps` (`fileId`, `title`) as props. FileViewer opens `text/*`, Picture sprites and PNG/JPEG/GIF. Unknown types show a dialog, as does a shortcut or manifest whose app is no longer registered (`reason: "unknown-app"`).
 

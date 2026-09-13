@@ -18,7 +18,7 @@ import {
   type NodeRole,
 } from "./types";
 
-export const CURRENT_CATALOG_VERSION = 2;
+export const CURRENT_CATALOG_VERSION = 3;
 
 export interface CatalogDocument {
   version: typeof CURRENT_CATALOG_VERSION;
@@ -34,6 +34,7 @@ export function emptyCatalog(now: number): CatalogDocument {
     parentId: null,
     createdAt: now,
     modifiedAt: now,
+    revision: 1,
     role: "root",
   };
   return { version: CURRENT_CATALOG_VERSION, nodes: { [ROOT_ID]: root }, attributes: {} };
@@ -113,7 +114,7 @@ function v1FileType(node: V1Node): string {
   }
 }
 
-function migrateV1ToV2(input: unknown): CatalogDocument {
+function migrateV1ToV2(input: unknown): Omit<CatalogDocument, "version"> & { version: 2 } {
   const v1 = input as V1Document;
   const nodes: Record<NodeId, FSNode> = {};
   const attributes: Record<NodeId, NodeAttributes> = {};
@@ -126,6 +127,7 @@ function migrateV1ToV2(input: unknown): CatalogDocument {
       parentId: n.parentId,
       createdAt: n.createdAt,
       modifiedAt: n.modifiedAt,
+      revision: 1,
     };
     if (n.kind === "directory") {
       const dir: FSDirectory = { ...base, kind: "directory" };
@@ -170,11 +172,19 @@ function dedupeRoles(nodes: Record<NodeId, FSNode>): void {
 
 const MIGRATIONS: Readonly<Record<number, (doc: unknown) => unknown>> = {
   1: migrateV1ToV2,
+  2: (input) => {
+    const doc = input as CatalogDocument;
+    for (const node of Object.values(doc.nodes)) node.revision = 1;
+    return { ...doc, version: 3 };
+  },
 };
 
 // ---------------------------------------------------------------------------
 
 function ensureRoot(doc: CatalogDocument, now: number): CatalogDocument {
+  for (const node of Object.values(doc.nodes)) {
+    if (!Number.isSafeInteger(node.revision) || node.revision < 1) node.revision = 1;
+  }
   if (!doc.attributes) doc.attributes = {};
   const root = doc.nodes[ROOT_ID];
   if (!root) {

@@ -93,6 +93,9 @@ export interface Platform {
    * where the App Store then cannot install anything.
    */
   loadModule?: ModuleLoader;
+  /** Load persisted bundled ESM through this host's shared runtime. */
+  loadArtifact?: (code: string, identity: string) => Promise<unknown>;
+  builder?: import("../shared/buildContract").BuildProvider;
 }
 
 /** `import(url)` as a service — see {@link Platform.loadModule}. */

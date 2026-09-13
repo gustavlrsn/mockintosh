@@ -2,6 +2,7 @@ import { type JSX } from "solid-js";
 import { Show } from "solid-js";
 
 export interface CheckboxProps {
+  name?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   label?: string;
@@ -15,6 +16,7 @@ export function Checkbox(props: CheckboxProps): JSX.Element {
 
   return (
     <box
+      semantic={{ name: props.name, role: "checkbox", value: String(props.checked), enabled: !props.disabled }}
       flexDirection="row"
       gap={4}
       alignItems="center"

@@ -38,6 +38,7 @@ export interface WindowedState extends WindowBounds {
 }
 
 export interface OSWindow {
+  instanceId?: string;
   id: string;
   appId: string;
   title: string;

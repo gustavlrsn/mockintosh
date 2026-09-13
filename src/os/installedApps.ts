@@ -78,13 +78,13 @@ export function createAppInstaller(options: AppInstallerOptions): AppInstaller {
   };
 }
 
-function validateModule(appId: string, module: unknown): AppModule {
+export function validateModule(appId: string, module: unknown): AppModule {
   const m = module as Partial<AppModule> | null;
   const app = m?.default;
   if (!app || typeof app !== "object") {
     throw new Error(`Invalid app bundle for "${appId}": no default export`);
   }
-  if (!app.id || typeof app.Component !== "function") {
+  if (app.id !== appId || typeof app.Component !== "function") {
     throw new Error(`Invalid app bundle for "${appId}": expected defineApp({ Component })`);
   }
   if (!app.title || !app.icon || !app.defaultSize) {

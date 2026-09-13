@@ -41,6 +41,8 @@ export interface FSNodeBase {
   /** Epoch milliseconds. */
   createdAt: number;
   modifiedAt: number;
+  /** Monotonic resource revision, persisted with the catalog. */
+  revision: number;
   role?: NodeRole;
 }
 
@@ -71,6 +73,8 @@ export type NodeAttributes = Readonly<Record<string, AttributeValue>>;
 export type FileContent = string | Uint8Array;
 
 export interface WriteFileOptions {
+  /** Compare-and-swap; zero requires a new file. */
+  expectedRevision?: number;
   /** MIME type; defaults to the existing file's type, else inferred from the name. */
   type?: string;
   /** Attributes to merge into the node's attribute bag on write. */

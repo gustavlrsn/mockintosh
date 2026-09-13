@@ -679,7 +679,7 @@ export function FinderDesktop(): JSX.Element {
   // The desktop owns the Finder's app-level menus (shown when no window, or a
   // window without its own menus, is active). Folder windows override per window.
   createEffect(() => {
-    setAppMenus(FINDER_APP_ID, buildFinderMenus(os.fs));
+    setAppMenus(FINDER_APP_ID, buildFinderMenus(os.fs, undefined, {os, selected: [...selectedSet()]}));
   });
 
   const [selectedSet, setSelectedSet] = createSignal<Set<string>>(new Set());
@@ -798,7 +798,7 @@ export function FinderDesktop(): JSX.Element {
             onDoubleClick={() => {
               const { icon, pos } = item();
               setSelectedSet(new Set([icon.nodeId]));
-              if (icon.isDirectory) {
+              if (icon.isDirectory && !os.fs.child(icon.nodeId, "mockintosh.json")) {
                 openFolderWindow(icon, pos.x, pos.y + os.menubarHeight);
               } else {
                 os.openFSNode(icon.nodeId, {
@@ -965,7 +965,7 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
 
   // This window's menus reflect its folder (Clean Up) and the trash state.
   createEffect(() => {
-    windowApi.setMenus(buildFinderMenus(os.fs, dirId()));
+    windowApi.setMenus(buildFinderMenus(os.fs, dirId(), {os, selected: [...selectedSet()]}));
   });
 
   function handleScroll(dy: number): void {
@@ -1004,7 +1004,7 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
               const content = windowContentRect(win);
               const screenX = content.x + pos.x;
               const screenY = content.y + pos.y - win.scrollY;
-              if (icon.isDirectory) {
+              if (icon.isDirectory && !os.fs.child(icon.nodeId, "mockintosh.json")) {
                 openNested(icon, screenX, screenY);
               } else {
                 os.openFSNode(icon.nodeId, {
@@ -1154,7 +1154,9 @@ function IconCell(props: IconCellProps): JSX.Element {
   }
 
   return (
-    <box
+    <box semantic={{ name: icon().title, role: "icon" }}
+      tabIndex={0}
+      onKeyDown={(key) => { if (key === "Enter" && !props.isRenaming()) props.onStartRename(0); }}
       position="absolute"
       left={props.item().pos.x}
       top={props.item().pos.y}
@@ -1301,6 +1303,7 @@ function IconCell(props: IconCellProps): JSX.Element {
           return (
             <box position="absolute" left={renameInputLeft()} top={ICON_SIZE} width={renameInputW()}>
               <TextInput
+                name="rename"
                 value={renameValue()}
                 onChange={setRenameValue}
                 onSubmit={() => commit()}
@@ -1389,7 +1392,11 @@ export function FinderDragGhost(): JSX.Element {
  * Pure: callers install the result via `setAppMenus` / `useWindow().setMenus`
  * and rebuild it when the file system changes.
  */
-export function buildFinderMenus(fs: FileSystem, activeDirId?: string): MenubarDefinition[] {
+export function buildFinderMenus(fs: FileSystem, activeDirId?: string, selection?: {os: ReturnType<typeof useOS>; selected: readonly string[]}): MenubarDefinition[] {
+  const selected = selection?.selected.length === 1 ? fs.node(selection.selected[0]) : undefined;
+  const projectApp = selected && fs.attributes(selected.id).projectApp;
+  const projectId = selected?.kind === "directory" && fs.child(selected.id, "mockintosh.json") ? selected.id
+    : typeof projectApp === "string" ? selection?.os.projects?.projectIdForApp(projectApp) : undefined;
   const trashId = getTrashId(fs);
   const trashEmpty = !trashId || fs.childCount(trashId) === 0;
   // New folders go in the active folder window, or on the desktop.
@@ -1409,6 +1416,12 @@ export function buildFinderMenus(fs: FileSystem, activeDirId?: string): MenubarD
         },
         { type: "separator" },
         { label: "Open",  shortcut: "O", disabled: true },
+        { label: "Open Source", disabled: !projectId, onClick: () => {
+          if (projectId && selection) selection.os.openApp("source_editor", {path: selection.os.projects!.pathFor(projectId)});
+        } },
+        { label: "Show Package Contents", disabled: !projectId, onClick: () => {
+          if (projectId && selection) selection.os.openFolderWindow(fs.node(projectId)!.name, projectId);
+        } },
         { label: "Close", disabled: true },
       ],
     },

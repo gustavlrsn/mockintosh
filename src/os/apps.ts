@@ -20,7 +20,7 @@ const apps = new Map<string, SolidApp<any>>();
 
 export function registerApp<P extends Record<string, unknown>>(app: SolidApp<P>): void {
   apps.set(app.id, app);
-  if (app.menus) setAppMenus(app.id, app.menus);
+  setAppMenus(app.id, app.menus ?? []);
 }
 
 export function getApp(id: string): SolidApp<any> | undefined {
@@ -47,3 +47,5 @@ export function registerUnavailableApp(app: UnavailableApp): void {
 export function getUnavailableApp(id: string): UnavailableApp | undefined {
   return unavailable.get(id);
 }
+
+export function unregisterApp(id: string): void { apps.delete(id); setAppMenus(id, []); }

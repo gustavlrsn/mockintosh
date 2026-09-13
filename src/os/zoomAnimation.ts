@@ -25,6 +25,7 @@ function rectsEqual(a: AnimRect, b: AnimRect): boolean {
 }
 
 export interface ZoomAnimationOptions {
+  cancelled?: () => boolean;
   /** Port to draw the XOR frames into (the screen port). */
   port: GrafPort;
   /** Show the framebuffer after each frame. */
@@ -93,6 +94,7 @@ export function animateZoomRect(options: ZoomAnimationOptions): Promise<void> {
     onStart?.();
 
     function tick() {
+      if (options.cancelled?.()) { resolve(); return; }
       if (drawn) {
         xorRect(drawn);
         drawn = null;

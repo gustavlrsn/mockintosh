@@ -446,3 +446,25 @@ Installing from the App Store writes the manifest to `Applications/<title>` as a
 - **No DOM UI** — hidden `<video>`/`<audio>` for media is fine; do not render HTML into the screen.
 - **No direct fetch / localStorage / OPFS** — use `useApp().fetch`, `useApp().storage` and `useApp().fs`. Import file-system types and `MIME` from `@mockintosh/sdk`, not `@mockintosh/fs`. Anything else you need from the host is a [capability](#capabilities): declare it in `requires` or check it at the point of use.
 - `createUI` is a single-instance renderer inside the OS; third-party apps share that runtime via the import map.
+
+
+## Semantic controls and live operation (M1)
+
+Give controls stable developer names so Terminal and external tools can inspect and operate them through normal input dispatch:
+
+```tsx
+<Button name="save" label="Save" onClick={save} disabled={!canSave()} />
+<Checkbox name="enabled" label="Enabled" checked={enabled()} onChange={setEnabled} />
+<TextInput name="document-title" value={title()} onChange={setTitle} />
+<box semantic={{ name: "preview", role: "preview" }} width={64} height={64} />
+```
+
+Names are optional and scoped by the containing OS window. Duplicate names require a window scope or numeric node id. Snapshots expose detached lifetime ids, role, text/value, enabled/focused state, clipped bounds, and supported actions. `password` TextInputs mask values and aggregate text. Removed or replaced nodes invalidate their references; reload also invalidates the boot selection. An inactive window must be explicitly activated before a semantic click. A field must be focused before `type`.
+
+These metadata fields do not grant kernel privileges to third-party apps. OS-owned Terminal and Control Panel use internal services; ordinary app code continues to use the SDK. The host's `BootedOS.kernel` validates requests against the registered trap contracts (`kernel.describe()`). See [M1 operation guide](../../../docs/m1-operation.md) for live MCP/CLI setup, session lifetimes, shell syntax, and error semantics.
+
+## Editable project builds and instance cleanup
+
+Source Editor and the M2 project operations can compile SDK 2 source into an artifact loaded by the host. In the browser, Build & Run uses a local compiler worker without companion setup. A paired companion can optionally supply remote compilation through the same build-provider contract. Keep imports to the supported shared SDK/UI/Solid modules and relative project source modules. The OS shares one reactive runtime with installed apps. Compile errors preserve the working app; restart resets its instance and Restore selects the previous artifact without changing newer source.
+
+For resources created outside a component, register cleanup through `app.onCleanup?.(() => clearInterval(timer))` in `onOpen`. Solid computations created during `onOpen` also have an owned root. To keep an instance alive after its last window closes, explicitly call `const release = app.keepAlive?.()` and call `release?.()` when that work finishes. Component `onCleanup` continues to handle component-owned resources. These lifetimes are local and cooperative; they do not create durable server jobs or preempt infinite loops.

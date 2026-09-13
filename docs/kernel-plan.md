@@ -1,14 +1,16 @@
 # A programmable Mockintosh — build apps, operate the OS, then change the system
 
-Working plan, 9 September 2026; rewritten 10 September around the user's chosen experiences. This is a proposal, not a claim that the features below exist. It supersedes the earlier M1–M4 namespace/RPC/process/shell sequence. Existing platform and app/window changes should land separately before implementation starts.
+**Near-term cut (14 September 2026):** do not implement live mounts, `/dev` action files, or grant/namespace ACLs from this document. Experiences A and B still stand. The public face of the machine is a Toolbox (named traps) plus the File Manager. Follow [toolbox-cut.md](toolbox-cut.md) until that cut is done.
+
+Working plan, 9 September 2026; rewritten 10 September around the user's chosen experiences and extended with portable computer hosting. Future sections are proposals, not claims of shipped behavior. It supersedes the earlier M1–M4 namespace/RPC/process/shell sequence. The M1 implementation is present in the working tree; see the status below.
 
 ## Read this first
 
 Mockintosh should be a computer you can create things inside. You can ask an agent for an app, find the result on your desktop, open its source, and change it yourself. You can also ask an agent on your regular computer to operate the same Mockintosh you are looking at.
 
-The architecture serves those experiences. Plan 9 contributes two useful ideas: give running services discoverable file-like interfaces, and let familiar names refer to different providers. A build service might run on your laptop while its source and resulting app live inside Mockintosh. You do not need a distributed operating system before this becomes useful.
+The architecture serves those experiences. The public face of the machine is a Toolbox of named traps plus the File Manager. Terminal, ChatGippity, and external MCP clients call the same traps. A path is a convenience for humans and agents, not the OS's native address. Plan 9-style live mounts are deferred; see [toolbox-cut.md](toolbox-cut.md).
 
-The VFS and a real shell remain central to this direction. Terminal, shell scripts, ChatGippity, and external MCP clients operate the same machine. The shell is a planned interface for humans and agents, delivered in stages alongside the experiences rather than postponed until somebody proves it is useful.
+The shell is an adapter over those traps, delivered in stages alongside the experiences rather than postponed until somebody proves it is useful.
 
 Read the experience sections for what we are building; the walkthrough for where work happens; and the engineering sections when implementing. Terms used throughout:
 
@@ -74,9 +76,19 @@ A settings write changes data. Editing app source changes the next compiled prog
 
 Start after A and B with “fork a bundled app, edit it, run the fork, restore the original.” Then choose one concrete shell extension to expose. Core self-modification remains an experiment: keep a known-good boot path, and test changed shell code in a separate runtime/instance. The current renderer and QuickDraw globals do not support arbitrary nested boots in one realm.
 
-## What exists in this checkout
+## Implementation status, 10 September 2026
 
-The source is ahead of some earlier planning notes. Recheck these seams when implementation starts; do not implement against historical descriptions.
+M1 now has a shared kernel/VFS, named UI operations, persistent desktop pattern, Terminal/S1, host CLI, and a paired local companion with a stdio MCP adapter. Current automated verification: 219 tests, TypeScript checks, and production build. Earlier live-browser MCP/CLI/Terminal demonstrations covered reload persistence and Finder rename; they were not rerun for the architecture consolidation. See [M1 operation and verification](m1-operation.md).
+
+The S1 presentation follow-up is implemented: `ls` lists sorted names with directory suffixes, metadata/UI commands provide readable output, and successful mutations are quiet. A leading `--json` opts into full operation results; direct MCP tools remain structured. `cat` preserves file bytes. This is functional evidence, not blanket completion of every future shell feature. The later M2/M3 scope and durable server hosting remain planned. The kernel review follow-up preserves caller context across live mounts, makes pending render waits cancellable through shutdown, bounds retained outcomes, and validates nested operation schemas.
+
+The architecture consolidation is implemented: operation definitions colocate schemas and typed handlers; boot composes storage outside the dispatcher; caller-scoped VFS access replaces permission checks based on argument names. S1 commands now own syntax, execution, and presentation in one table, while all bridge peers share validated wire envelopes. These adapters preserve readable shell output and structured direct operations. See `ARCHITECTURE.md` for ownership and `docs/m1-operation.md` for the execution contract.
+
+The next app-building slice is now implemented: caller lifetime cleanup, shared Terminal/RPC shell management, editable Counter source, browser and companion compilers, immutable artifacts, install/launch, instance restart, restore, and reboot persistence. Source Editor and shell/direct tools share the project operations. See [M2 apps](m2-apps.md) for setup, contracts, limits, and evidence. This is the complete Counter workflow, not completion of shell S2 or every planned M2 editor feature; M3 and durable server execution remain future work.
+
+### Pre-M1 baseline and remaining seams
+
+The following table records the starting point of the experience rewrite. Its M1 missing-work entries have since been substantially implemented as described above; recheck the code before using it as a task list.
 
 | Existing piece | Useful foundation | Missing work |
 | --- | --- | --- |
@@ -114,9 +126,55 @@ External AI client → MCP adapter → the same shared Mockintosh tools
 
 The gateway holds model credentials and requests model responses. The live OS owns its local files, UI, and action execution. The builder accepts source and returns artifacts; it does not need direct access to the whole OS.
 
-Start with a build provider on the regular computer using the app template's compilation configuration. That is the first useful remote computation service. Keep the provider replaceable so a hosted server or browser worker can implement the same contract later. The first browser demo may require that companion process; say so in setup. A self-contained public web deployment needs a hosted or in-browser provider before it can promise the same experience without the companion.
+Start with a build provider on the regular computer using the app template's compilation configuration. That is the first useful remote computation service. The browser now also implements that contract with a local compiler worker, so both development and public web builds support app building without a companion. A hosted compiler can implement the same contract later.
 
 An immutable source snapshot crosses this boundary, not an OPFS handle or a browser-local filesystem path. A remote service cannot dereference those. Returned artifacts are written into the app package in the live OS.
+
+## One computer, multiple hosts
+
+Running in a browser, on a server, and on a capable device are first-class deployment goals. A display can be attached locally or over a network. Preserve local browser operation without an account or hosted dependency. Host-specific capabilities remain explicit; a small device may be a remote terminal even if it cannot run the JavaScript/Solid runtime itself.
+
+| Mode | Runtime and authoritative disk | Display/input |
+| --- | --- | --- |
+| Local browser | Browser runtime and local storage | Same browser |
+| Server computer | Isolated server runtime and durable storage | Browser or device attaches remotely |
+| Local device | Compatible device runtime and storage adapter | Attached hardware |
+| Remote terminal | Another host runs the computer | Device only displays frames and sends input |
+
+These modes share kernel operations and filesystem semantics. They do not imply automatic live migration, offline merging of a running desktop, or identical peripheral support.
+
+The kernel/host boundary must establish:
+
+1. **Persistent computer identity.** A host supplies a durable computer id; each start has a globally unambiguous boot id or persisted generation. Caller sessions and display connections are separate identities. The current realm-local instance/generation is insufficient as a durable computer identity. Restoring a backup must not revive old boot references.
+2. **Independent lifetimes.** Disconnecting a client releases its input state and cancels connection-owned work. The host controls computer shutdown and any idle-stop policy. Explicitly detached jobs require ownership contracts; closing a viewer must not implicitly destroy a server disk or imply that all jobs survive.
+3. **Attachable display and input.** Add versioned frame delivery, keyframes/resynchronization, bounded queues, input ordering, and a clear single-controller/multiple-viewer policy. Start with fixed resolution and client scaling. Use the existing human input path; remote controls respect the same modal/focus policy.
+4. **Durable host storage.** Browser, server, and device adapters must report successful durable writes and failures consistently. Keep a single writer for each disk until a stronger multiwriter service is implemented. A transferable snapshot contains catalog, bodies, schema/runtime compatibility metadata, and checksums, not live pointers or JavaScript memory.
+5. **Isolated execution.** Retain one UI runtime per realm. Hosts create separate runtimes and own resource limits, termination, recovery, and code isolation. Kernel namespace grants are not a security sandbox for imported JavaScript.
+6. **Explicit handoff.** Initially export/import a stopped or consistently snapshotted disk. Forks receive new computer identities. Moving one computer requires revoking the old writer before enabling the new one; disconnected browser copies cannot silently become competing authorities.
+
+Accounts, API-key/OAuth handling, placement, billing, provider APIs, and remote connection routing belong around the kernel. Provider details and data-layer research live in the [server infrastructure plan](server-infrastructure-plan.md). Collaborative documents may use a local-first provider later; clicks, execution ownership, and VFS catalog consistency retain their own contracts.
+
+### H1 — Persistent server computer and remote terminal
+
+Retain this optional portability milestone alongside M2/M3 without renumbering them. Local execution with durable synchronized data, and remotely owned build/agent jobs, are the preferred next experiments. A continuously hosted desktop is not required for either. Establish identity/lifetime/storage seams before any server-computer implementation; a full hosting product is not a prerequisite for app creation.
+
+Acceptance: start a server-hosted computer, attach a browser, create a file and change the desktop, disconnect all viewers, reconnect to the same running boot, then stop/restart the runtime and verify the same computer and disk with a new boot identity. Operate the visible remote desktop through both human input and MCP. Reject stale boot references; recover a dropped frame stream; ensure two boot attempts cannot write the same disk. Verify browser-local operation still works independently. Disk persistence does not promise restoration of unsaved app memory or open windows.
+
+H1 proves browser/server portability. A device host is validated separately against a chosen device's actual runtime and peripherals; a remote display client alone does not prove native device execution.
+
+### Local computer, synchronized data, optional remote helper
+
+The emerging preference is a responsive local computer whose saved data follows its owner, with remote work continuing when the device closes. Evaluate Evolu for selected persistent app/project data; keep rendering, input, windows, and live execution local. Syncing saved data does not restore unsaved memory or migrate a running process. Folder/file conflict semantics remain explicit work before whole-disk replication.
+
+A remote helper can operate on a shared project while the local computer remains interactive. It needs a build worker or agent execution environment, not necessarily a permanently running desktop. An isolated headless Mockintosh may be useful for testing generated apps; an interactive remote desktop remains a separate capability. Shared encrypted data must be explicitly accessible to the worker that processes it.
+
+For the first close-your-device experience, submit work remotely from the outset. Before saying it will continue, persist an immutable input snapshot and obtain a durable job acceptance with a job id. The remote job owns execution independently of the viewer connection; local UI reconnects to progress and results. Synchronized data alone does not prove acceptance. A request still queued locally cannot promise remote progress while offline.
+
+Keep build jobs (compile/test one snapshot) distinct from agent runs (conversation and repeated edit/build/test steps). Extend the M2 build-service lifecycle and M3 agent ownership accordingly. Record inputs, source revision, toolchain/model configuration as applicable, progress, budgets, cancellation and terminal outcome. Publish results as a separate revision if the human has edited meanwhile; never silently replace newer source or install a stale result.
+
+Later, an explicit “Continue on server” may transfer checkpointed work: conversation, completed action ids/outcomes, source snapshot, and pending steps. It does not transfer JavaScript memory. Use an ownership epoch and acknowledged checkpoint to prevent simultaneous execution. Reconcile in-flight side effects before resuming; a timeout is not permission to repeat them. Browser-close callbacks are not a reliable transfer mechanism.
+
+Acceptance for remotely owned work: start from the local UI, observe accepted job id, close the device, complete remotely, reconnect and inspect/install the resulting app. Also test disconnect before acceptance, server restart, cancellation from another client, and concurrent local edits. This complements M2/M3; H1 is optional unless the desired job needs a persistent remote OS.
 
 ## Build next, leave room for, explore later
 
@@ -153,6 +211,7 @@ Terminal / CLI / run_shell → Shell ────┤
 5. **Runtime identity and source revision are explicit.** Tool results identify the selected OS session; actions identify their target; builds identify their source. Stale references must not silently operate on a different target.
 6. **A successful transport response is not proof of the user outcome.** Re-read state or inspect the UI after a change. Build success, app launch, and tested behavior are separate results.
 7. **The VFS is the common resource namespace.** Persistent files and public live resources are mounted trees with common stat/list/read/write operations. MCP convenience tools must not grow an independent resource model. Actions have documented control endpoints or kernel lifecycle operations, and shell commands use those same contracts. An accepted capability must be usable from both tools and the shell; neither gets private mutations.
+8. **Mount aliases resolve at boot.** The operation registry owns action contracts; live mount tables bind existing operations and fail immediately when a target is missing. Dynamic per-window/app projections stay providers. Settings are public files backed by typed local services, not parallel setting RPCs; diagnostics are file resources too.
 
 Suggested homes: `src/os/kernel/` for session/operations and OS synthetic services; `packages/fs/` for generic namespace types/adapters; `src/os/build/` for project/build contracts; a host-side service module for compilation; `scripts/mockintosh-mcp.ts` for the MCP entry point. Split packages only where a second consumer needs them.
 
@@ -324,7 +383,7 @@ Submission returns a job reference. Status, diagnostics, cancellation, and the f
 
 The first provider reuses [the app template](../templates/app/vite.config.ts): Solid universal compilation targeting `@mockintosh/ui/renderer`, with the runtime imports and their subpaths externalized to the OS's shared runtime. This preserves familiar source and avoids a second Solid runtime. Type-check against the served SDK contract and report diagnostics; compilation alone is not type-checking. Source maps connect runtime errors to editable source.
 
-A browser worker compiler is a later provider. A small device can use the same remote builder only if its runtime can load and execute the resulting app; remote compilation does not make unsupported Solid/ESM execution possible. Do not replace the chosen Solid authoring experience with a DSL merely to meet a hypothetical device budget.
+A browser worker compiler now ships as the browser default; the companion remains an optional remote provider. A small device can use the same remote builder only if its runtime can load and execute the resulting app; remote compilation does not make unsupported Solid/ESM execution possible. Do not replace the chosen Solid authoring experience with a DSL merely to meet a hypothetical device budget.
 
 Build outputs are immutable and tied to the submitted source revision. If the source changes while a build runs, keep the output as that revision's result rather than silently presenting it as the newest code.
 
@@ -374,6 +433,7 @@ These milestone numbers replace the old sequence. Product priority is A then B; 
 | --- | --- | --- |
 | **M0 — Baseline and contracts** | Land current refactor separately; confirm SDK/import map and app context; freeze example scenarios and chat contract | Core checks and existing tests pass; current seams documented accurately |
 | **M1 — Operate the visible OS** | VFS, shared tools, named UI, render barrier, persistent desktop setting, live MCP bridge, shell S1 | External client opens Control Panel, changes/verifies the pattern after reload; Terminal and `run_shell` explore/control the same browser |
+| **H1 — Optional persistent server computer** | Durable computer/boot identities, isolated host, persistent disk, remote display/input | Disconnect/reconnect and restart preserve the computer and disk; stale boots fail; browser-local mode still works |
 | **M2 — Make and edit a real app** | Project folders, source editor, first build provider, package loader/shortcut, instance restart/recovery, shell S2 | Human builds Counter, edits/rebuilds it, reopens after reboot; saved scripts and pipelines exercise the same operations |
 | **M3 — Ask the agent to build it** | Repeated ChatGippity tool loop, runtime SDK context, progress/cancel, source conflicts, shell S3 | ChatGippity creates/tests/repairs Counter and changes settings; agents can use direct tools or shell scripts; running jobs are inspectable and cancellable |
 | **M4 — First system modification experiment** | Fork/restore one bundled app, then one chosen extension contract | Agent and human can inspect, run, and undo the modification; core remains recoverable |
@@ -417,6 +477,8 @@ A small terminal can keep UI/input local and use remote builds/agents. A device 
 
 ## Decisions and rationale
 
+- 2026-09-10 — Multiple hosts are an explicit product goal. Add H1 alongside M2/M3, keep host infrastructure outside the kernel, and separate persistent computers from boots and client connections. Provider selection and local-first data research are tracked in the server infrastructure plan.
+
 - 2026-09-09 — Original plan proposed namespace, RPC, processes, and shell as four phases.
 - 2026-09-10 — Earlier review established named UI access, shared typed input, a stable disk mount, and the kernel as the common operation boundary. These principles are retained.
 - 2026-09-10 — User selected in-OS agent app creation with editable Solid source, and agent control through MCP or in-OS chat, as the first compelling experiences. System hacking is a potential follow-on.
@@ -428,6 +490,9 @@ A small terminal can keep UI/input local and use remote builds/agents. A device 
 - 2026-09-10 — User reaffirmed the shell and VFS direction. The experience rewrite had removed too much shell detail. Restored Terminal, CLI, command modules, scripts, pipes/redirection, process commands, and shell tests as a staged S1–S3 commitment within M1–M3. Named the VFS explicitly and strengthened tool/shell parity. Full shell-language compatibility still need not precede the first demonstration.
 
 ## References
+
+- [Server infrastructure plan](server-infrastructure-plan.md) — hosting, deployment, data ownership, and H1 delivery.
+- [Server data-layer research](server-data-research.md) — traditional, local-first, and multiplayer options.
 
 - [Plan 9 research and earlier kernel review](plan9-research.md) — primary sources and fuller discussion of namespaces, service protocols, Acme, plumbing, and pitfalls.
 - [Plan 9 from Bell Labs](https://9p.io/sys/doc/9.html) — file interfaces, private namespaces, and terminal/compute/storage separation.

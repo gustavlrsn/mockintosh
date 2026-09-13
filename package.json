@@ -11,14 +11,24 @@
     "preview": "vite preview",
     "dev:api": "tsx scripts/dev-api.ts",
     "build:content": "tsx scripts/build-content.ts && tsx scripts/build-chat-context.ts",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.core.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.core.json && tsc -p tsconfig.host.json",
     "check:core": "tsc -p tsconfig.core.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "knip": "knip"
+    "knip": "knip",
+    "companion": "tsx scripts/companion/main.ts",
+    "mockintosh-sh": "tsx scripts/mockintosh-sh.ts",
+    "mcp": "tsx scripts/companion/mcp.ts",
+    "test:m1": "tsx scripts/companion/demo.ts",
+    "test:browser-build": "npm run build && tsx scripts/builder/browser-demo.ts"
   },
   "dependencies": {
+    "@babel/standalone": "^7.29.8",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@paulmillr/qr": "^0.3.0",
+    "@rollup/browser": "^4.63.1",
+    "assert": "^2.1.0",
+    "babel-preset-solid": "^1.9.15",
     "dayjs": "^1.11.11",
     "defuddle": "^0.14.0",
     "gray-matter": "^4.0.2",
@@ -31,6 +41,7 @@
     "three": "^0.183.2"
   },
   "devDependencies": {
+    "@types/babel__standalone": "^7.1.9",
     "@types/lodash": "^4.17.0",
     "@types/node": "20.12.8",
     "@types/sharp": "^0.31.1",

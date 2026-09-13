@@ -1,3 +1,4 @@
+import { appleMenu, runMenuItem, runRadioItem } from "../kernel/menus";
 import { JSX, For, Show, createMemo } from "solid-js";
 import { measureText, COMMAND_KEY, CHECK_MARK } from "@mockintosh/ui";
 import { useOS } from "../context";
@@ -80,21 +81,6 @@ function computeMenuXOffsets(menus: MenubarDefinition[]): number[] {
 // ---------------------------------------------------------------------------
 // Apple menu items (static — not part of the per-app menu set)
 // ---------------------------------------------------------------------------
-function appleMenu(openApp: (id: string) => void): MenubarDefinition {
-  return {
-    label: "\uF8FF",
-    items: [
-      { label: "About Mockintosh", onClick: () => openApp("about") },
-      { type: "separator" },
-      { label: "Control Panel", onClick: () => openApp("control_panel") },
-      { label: "Chooser",        disabled: true },
-      { label: "Find File",      disabled: true },
-      { label: "Scrapbook",      disabled: true },
-      { type: "separator" },
-      { label: "Puzzle",         disabled: true },
-    ],
-  };
-}
 
 export function Menubar(props: MenubarProps): JSX.Element {
   const os = useOS();
@@ -121,7 +107,7 @@ export function Menubar(props: MenubarProps): JSX.Element {
 
   function runItem(item: MenubarActionItem) {
     closeMenu();
-    if (!item.disabled) item.onClick?.();
+    if (!item.disabled && item.onClick) runMenuItem(item);
   }
 
   const appleSprite = os.sprites.get("eaten_apple");
@@ -155,6 +141,7 @@ export function Menubar(props: MenubarProps): JSX.Element {
         justifyContent="center"
         alignItems="center"
         background={openIdx() === -1 ? 1 : 0}
+        semantic={{ name: "Apple", role: "menu" }}
         onClick={() => toggleMenu(-1)}
       >
         <Show
@@ -189,6 +176,7 @@ export function Menubar(props: MenubarProps): JSX.Element {
               height={MENUBAR_H - 1}
               justifyContent="center"
               background={isOpen() ? 1 : 0}
+              semantic={{ name: menu.label, role: "menu" }}
               onClick={() => toggleMenu(idx())}
             >
               <text
@@ -277,7 +265,7 @@ function MenuDropdown(props: MenuDropdownProps): JSX.Element {
             onMouseLeave={() => setHighlightedMenuItem(null)}
             onClick={() => {
               props.onClose();
-              rg.onValueChange(riSelf.value);
+              runRadioItem(rg, riSelf.value);
             }}
           >
             <Show when={riSelf.value === rg.value}>

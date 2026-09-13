@@ -190,6 +190,10 @@ export interface WindowSpec<P extends Record<string, unknown> = Record<string, u
  * mounted in.
  */
 export interface AppContext {
+  /** Cleanup on app instance stop/restart. Solid component cleanup remains automatic. */
+  onCleanup?(cleanup: () => void): void;
+  /** Explicitly retain an instance for background work; release when it finishes. */
+  keepAlive?(): () => void;
   getSprite(name: string): Sprite | undefined;
   storage: AppStorage;
   fs: AppFileSystem;

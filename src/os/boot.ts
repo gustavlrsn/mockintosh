@@ -1,3 +1,8 @@
+import {createRoot} from "solid-js";
+import SourceEditor from "../../apps/SourceEditor";
+import { registerProjects } from "./projects";
+import { AppInstances } from "./instances";
+import { registerFileOperations } from "./kernel/files";
 /**
  * bootOS — bring the operating system up on a `Platform`.
  *
@@ -46,6 +51,15 @@ import {
 } from "./capabilities";
 import { createPrintService } from "./printing";
 
+import { createDesktopSettings, registerDesktopSettings } from "./kernel/settings";
+import { runMenuItem } from "./kernel/menus";
+import { registerShell } from "./shell";
+import { registerUIOperations } from "./kernel/uiService";
+import { Cancellation } from "./kernel/cancellation";
+import { ServiceError } from "./kernel";
+import Terminal from "../../apps/Terminal";
+import { Kernel } from "./kernel";
+
 const MENUBAR_HEIGHT = 20;
 const SPLASH_MS = 800;
 
@@ -59,6 +73,9 @@ function defaultOnOpen(app: AppContext, props: Record<string, unknown>): void {
 }
 
 export interface BootedOS {
+  kernel: Kernel;
+  input: { pointer(event: PlatformPointerEvent): void; key(event: PlatformKeyEvent): void };
+  render(cancellation?: Cancellation): Promise<void>;
   /** The running OS, for hosts that open apps or dialogs themselves (kiosk mode, tests). */
   services: OSServices;
   /** Force a repaint on the next frame. */
@@ -68,13 +85,14 @@ export interface BootedOS {
 }
 
 export async function bootOS(platform: Platform): Promise<BootedOS> {
+  let stopped = false;
   const { display, scheduler } = platform;
   const resolution = { width: display.width, height: display.height };
 
   // --- QuickDraw framebuffer ---
   InitGraf({ width: display.width, height: display.height, bits: display.framebuffer });
   const screen = qd.screenBits;
-  const present = () => display.present(screen);
+  const present = () => { if (!stopped) display.present(screen); };
 
   InitCursor();
 
@@ -101,6 +119,10 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   // --- File system ---
   const fs = await FileSystem.open({ backend: platform.storage });
   await bootstrapFileSystem(fs);
+  const kernel = new Kernel();
+  registerFileOperations(kernel, fs);
+  const instances = new AppInstances(id => closeOSWindow(id));
+  const desktopSettings = await createDesktopSettings(fs);
 
   // --- Installed third-party apps (manifests live in /Applications) ---
   const capabilities = platformCapabilities(platform);
@@ -114,6 +136,9 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
 
   // --- OS services (passed to Solid components via context) ---
   const osServices: OSServices = {
+    kernel,
+    instances,
+    desktopSettings,
     sprites,
     fs,
     resolution,
@@ -147,11 +172,12 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
         return;
       }
       // The app's `main`: it decides which windows to open, if any.
-      const context = createAppContext(osServices, appId, { fromRect });
+      const instanceId = instances.create(appId, osServices.projects?.selectedBuild(appId));
+      const context = createAppContext(osServices, appId, { fromRect, instanceId });
       const onOpen = app.onOpen ?? defaultOnOpen;
-      onOpen(context, props);
+      try { createRoot(dispose => { instances.own(instanceId, dispose); onOpen(context, props); }); instances.finishOpen(instanceId); } catch (error) { instances.stop(instanceId); throw error; }
     },
-    openWindow(appId, spec = {}, fromRect?) {
+    openWindow(appId, spec = {}, fromRect?, instanceId?) {
       const app = getApp(appId);
       if (!app) throw new Error(`Cannot open a window for unknown app: ${appId}`);
       const win = buildAppWindow(app, spec, {
@@ -159,8 +185,11 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
         menubarHeight: MENUBAR_HEIGHT,
         openWindowCount: getWindows().length,
       });
+      win.Component ??= app.Component;
+      win.instanceId = instanceId ?? instances.create(appId, osServices.projects?.selectedBuild(appId));
+      instances.addWindow(win.instanceId, win.id);
       win.openedFromRect = fromRect;
-      const doOpen = () => openOSWindow(win);
+      const doOpen = () => { if (!win.instanceId || instances.alive(win.instanceId)) openOSWindow(win); };
       if (fromRect) {
         renderFrame();
         playZoomAnimation(fromRect, windowOuterRect(win), doOpen);
@@ -190,7 +219,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
         height: Math.min(200, resolution.height - MENUBAR_HEIGHT - 60),
         openedFromRect: fromRect,
       });
-      const doOpen = () => openOSWindow(win);
+      const doOpen = () => { if (!win.instanceId || instances.alive(win.instanceId)) openOSWindow(win); };
       if (fromRect) {
         renderFrame(); // snapshot current screen into port
         playZoomAnimation(fromRect, windowOuterRect(win), doOpen);
@@ -206,6 +235,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
       const fromRect: AnimRect | null = win ? windowOuterRect(win) : null;
       const toRect: AnimRect | null = win?.openedFromRect ?? null;
       closeOSWindow(id);
+      instances.removeWindow(id);
       if (fromRect && toRect) {
         renderFrame(); // render state without the closed window
         playZoomAnimation(fromRect, toRect);
@@ -268,11 +298,15 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     }
   }
 
+  registerApp(Terminal);
+  registerApp(SourceEditor);
+
   // --- Mount Solid tree ---
   const unmount = ui.render(makeOSRoot(osServices, MENUBAR_HEIGHT));
 
   // --- Boot: dismiss splash after a short delay ---
-  setTimeout(() => setSplashVisible(false), SPLASH_MS);
+  let splashPending = true;
+  const splashTimer = setTimeout(() => { splashPending = false; if (!stopped) setSplashVisible(false); }, SPLASH_MS);
 
   // --- Cursor position (plain vars — not signals, cursor drawn directly) ---
   let cursorX = Math.floor(resolution.width / 2);
@@ -280,6 +314,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
 
   // --- Frame loop ---
   function renderFrame() {
+    if (stopped) return;
     ui.frame();
     drawCursor(ui.port, cursorX, cursorY);
     present();
@@ -299,7 +334,9 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
       present,
       from,
       to,
+      cancelled: () => stopped,
       onEnd: () => {
+        if (stopped) return;
         animating = false;
         scheduleRepaint();
         onDone?.();
@@ -308,6 +345,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   }
 
   function frameLoop() {
+    if (stopped) return;
     scheduler.requestFrame(frameLoop);
     if (!screenDirty || animating) return;
     screenDirty = false;
@@ -321,6 +359,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   let lastClickY = 0;
 
   function onPointer(e: PlatformPointerEvent): void {
+    if (stopped) throw new ServiceError("disconnect", "Boot has ended");
     switch (e.type) {
       case "move":
         cursorX = e.x;
@@ -364,7 +403,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
       for (const item of menu.items) {
         const ai = item as MenubarActionItem;
         if (ai.shortcut && ai.shortcut.toLowerCase() === key.toLowerCase() && !ai.disabled) {
-          ai.onClick?.();
+          if (ai.onClick) runMenuItem(ai);
           setOpenMenuIndex(null);
           return true;
         }
@@ -377,6 +416,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     platform.clipboard
       ?.readText()
       .then((text) => {
+        if (stopped) return;
         for (const ch of text) ui.dispatchKeyboard("keypress", ch, {});
         scheduleRepaint();
       })
@@ -386,6 +426,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   }
 
   function onKey(e: PlatformKeyEvent): void {
+    if (stopped) throw new ServiceError("disconnect", "Boot has ended");
     const mods: Modifiers = e.modifiers;
     if (e.type === "up") {
       ui.dispatchKeyboard("keyup", e.key, mods);
@@ -410,12 +451,49 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   const offPointer = platform.input.onPointer(onPointer);
   const offKey = platform.input.onKey(onKey);
 
+  const renderWaits = new Set<Cancellation>();
+  async function renderBarrier(token = new Cancellation()) {
+    token.check();
+    if (stopped) throw new ServiceError("disconnect", "Boot has ended");
+    renderWaits.add(token);
+    try {
+      while (animating || splashPending) await token.delay(8);
+      await token.wait(desktopSettings.settled());
+      token.check();
+      if (stopped) throw new ServiceError("disconnect", "Boot has ended");
+      screenDirty = false;
+      renderFrame();
+    } catch (error) {
+      if (stopped) throw new ServiceError("disconnect", "Boot has ended");
+      throw error;
+    } finally {
+      renderWaits.delete(token);
+    }
+  }
+  registerUIOperations(kernel, osServices, { ui, beginGesture: () => { lastClickTime = -Infinity; }, pointer: onPointer, key: onKey, render: renderBarrier,
+    capture: () => ({ width: resolution.width, height: resolution.height, rowBytes: screen.rowBytes, bytes: Array.from(screen.baseAddr) }) });
+
+  registerDesktopSettings(kernel, desktopSettings);
+  osServices.projects = await registerProjects(kernel, osServices, platform, renderBarrier);
+  osServices.shell = registerShell(kernel);
+
   return {
+    input: { pointer: onPointer, key: onKey },
+    render: renderBarrier,
+    kernel,
     services: osServices,
     scheduleRepaint,
     shutdown() {
+      if (stopped) return;
+      stopped = true;
+      clearTimeout(splashTimer);
+      for (const token of renderWaits) token.cancel();
+      kernel.shutdown();
+      osServices.projects?.close();
+      desktopSettings.shutdown();
       offPointer();
       offKey();
+      instances.close();
       unmount();
       closeAllWindows();
     },

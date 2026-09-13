@@ -1,9 +1,13 @@
-import type { JSX } from "solid-js";
-import type { Ink } from "@mockintosh/ui";
+import { desktopPatternName } from "../src/os/kernel/settings";
+import { createSignal, For, type JSX } from "solid-js";
+import { Checkbox } from "@mockintosh/ui";
+import { useOS } from "../src/os/context";
 import { defineApp, useApp } from "@mockintosh/sdk";
 
 function ControlPanel(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
+  const settings = useOS().desktopSettings!;
+  const [error, setError] = createSignal("");
   const win = app.window;
   const computer = app.getSprite("icon/computer");
 
@@ -25,17 +29,13 @@ function ControlPanel(_props: Record<string, unknown>): JSX.Element {
       <box width={1} background={1} />
       <box padding={8} flexGrow={1} flexDirection="column" gap={8}>
         <text font="body">Desktop pattern</text>
-        <raster
-          width={48}
-          height={48}
-          onPaint={({ rect, setPixel }) => {
-            for (let y = 0; y < rect.height; y++) {
-              for (let x = 0; x < rect.width; x++) {
-                setPixel(x, y, (((x >> 1) + (y >> 1)) % 2) as Ink);
-              }
-            }
-          }}
-        />
+        <box semantic={{ name: `${desktopPatternName}-preview`, role: "preview" }} width={48} height={48}
+          background={settings.pattern() === "white" ? 0 : settings.pattern() === "black" ? 1 : "checker"} borderColor={1} />
+        <For each={["checker", "white", "black"]}>{pattern =>
+          <Checkbox name={`${desktopPatternName}-${pattern}`} label={pattern} checked={settings.pattern() === pattern}
+            onChange={() => { void settings.set(pattern).then(() => setError(""), e => setError(String(e))); }} />
+        }</For>
+        <text>{error()}</text>
       </box>
     </box>
   );

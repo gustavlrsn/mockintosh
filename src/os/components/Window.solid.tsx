@@ -1,3 +1,4 @@
+import { ErrorBoundary } from "solid-js";
 import { For, JSX, Show, createSignal, createMemo } from "solid-js";
 import { useOS } from "../context";
 import {
@@ -182,6 +183,7 @@ export function Window(props: WindowProps): JSX.Element {
         borderColor={1}
         borderWidth={frame()}
         overflow="hidden"
+        semantic={{ name: "window", role: "window", windowId: props.win.id }}
         focusScope
         onMouseDownCapture={handleActivationPress}
       >
@@ -202,6 +204,7 @@ export function Window(props: WindowProps): JSX.Element {
             top={0}
             width={innerW()}
             height={titleBarInnerH}
+            semantic={{ name: "titlebar", role: "titlebar" }}
             onMouseDown={(lx, ly) => {
               dragOffsetX = lx;
               dragOffsetY = ly;
@@ -271,6 +274,7 @@ export function Window(props: WindowProps): JSX.Element {
                   height={CLOSE_SIZE}
                   borderColor={1}
                   borderWidth={1}
+                  semantic={{ name: "close", role: "button" }}
                   onMouseDown={() => setClosePressed(true)}
                   onMouseUp={(lx, ly) => {
                     const inBox = lx >= 0 && lx < CLOSE_SIZE && ly >= 0 && ly < CLOSE_SIZE;
@@ -288,6 +292,7 @@ export function Window(props: WindowProps): JSX.Element {
                   width={s().width}
                   height={s().height}
                   src={spriteSrc(s())}
+                  semantic={{ name: "close", role: "button" }}
                   onMouseDown={() => setClosePressed(true)}
                   onMouseUp={(lx, ly) => {
                     const inBox = lx >= 0 && lx < CLOSE_SIZE && ly >= 0 && ly < CLOSE_SIZE;
@@ -320,6 +325,7 @@ export function Window(props: WindowProps): JSX.Element {
                   height={ZOOM_SIZE}
                   borderColor={1}
                   borderWidth={1}
+                  semantic={{ name: "zoom", role: "button" }}
                   onMouseDown={() => setZoomPressed(true)}
                   onMouseUp={() => {
                     setZoomPressed(false);
@@ -336,6 +342,7 @@ export function Window(props: WindowProps): JSX.Element {
                   width={s().width}
                   height={s().height}
                   src={spriteSrc(s())}
+                  semantic={{ name: "zoom", role: "button" }}
                   onMouseDown={() => setZoomPressed(true)}
                   onMouseUp={() => {
                     setZoomPressed(false);
@@ -650,7 +657,7 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
   // SDK-facing services for this window: the app context plus the window.
   // Provided via context so every window's components see their own instance.
   const services: AppServices = {
-    ...createAppContext(os, props.win.appId),
+    ...createAppContext(os, props.win.appId, {instanceId: props.win.instanceId}),
     window: {
       id: api.id,
       width: api.width,
@@ -670,9 +677,14 @@ function WindowContent(props: { win: OSWindow }): JSX.Element {
     <WindowCtx.Provider value={api}>
       <AppServicesContext.Provider value={services}>
       <box width="100%" height="100%" inert={modalFront()}>
+        <ErrorBoundary fallback={error => {
+          if (props.win.instanceId) os.instances?.fail(props.win.instanceId, error);
+          return <text wrap>{`Application failed: ${String(error)}`}</text>;
+        }}>
         <Show when={component()} keyed>
           {(Comp) => <Comp {...props.win.props} />}
         </Show>
+        </ErrorBoundary>
       </box>
       </AppServicesContext.Provider>
     </WindowCtx.Provider>

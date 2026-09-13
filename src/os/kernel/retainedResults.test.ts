@@ -1,0 +1,20 @@
+import {expect, it} from "vitest";
+import {RetainedResults} from "../../shared/retainedResults";
+it("bounds serialized retention by age, size and count and returns detached values", () => {
+  let now = 0;
+  const journal = new RetainedResults<{text: string}>({maxEntries: 2, maxBytes: 40, ttlMs: 10}, () => now);
+  journal.set("a", {text: "one"});
+  journal.get("a")!.text = "changed";
+  expect(journal.get("a")).toEqual({text: "one"});
+  journal.set("b", {text: "two"});
+  journal.set("c", {text: "three"});
+  expect(journal.has("a")).toBe(false);
+  expect(journal.has("b")).toBe(true);
+  journal.set("large", {text: "x".repeat(100)});
+  expect(journal.has("large")).toBe(false);
+  now = 10;
+  expect(journal.entries()).toEqual([]);
+  journal.set("new", {text: "small"});
+  journal.clear();
+  expect(journal.has("new")).toBe(false);
+});
