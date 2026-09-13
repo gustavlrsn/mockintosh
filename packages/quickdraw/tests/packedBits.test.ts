@@ -6,6 +6,13 @@ import {
   CopyBits,
   ScrollRect,
   GetPixel,
+  globals,
+  srcCopy,
+  srcXor,
+  type GrafPort,
+  type RgnHandle,
+} from "../src";
+import {
   makeRect,
   newBitMap,
   rowBytesFor,
@@ -13,12 +20,7 @@ import {
   setBit,
   bitMapFromPixels,
   pixelsFromBitMap,
-  globals,
-  srcCopy,
-  srcXor,
-  type GrafPort,
-  type RgnHandle,
-} from "../src";
+} from "../src/bits";
 
 /** Render a bitmap as rows of `#` / `.` for readable assertions. */
 function art(bm: ReturnType<typeof newBitMap>): string[] {
@@ -32,7 +34,7 @@ function art(bm: ReturnType<typeof newBitMap>): string[] {
 }
 
 function openScreenPort(width: number, height: number): GrafPort {
-  InitGraf({ width, height });
+  InitGraf(newBitMap(width, height));
   const port = {} as GrafPort;
   OpenPort(port);
   return port;
@@ -81,14 +83,14 @@ describe("packed BitMap layout", () => {
 
 describe("InitGraf", () => {
   it("allocates the screen bitmap when none is supplied", () => {
-    InitGraf({ width: 20, height: 4 });
+    InitGraf(newBitMap(20, 4));
     expect(globals.screenBits.rowBytes).toBe(4);
     expect(globals.screenBits.baseAddr.length).toBe(16);
   });
 
   it("uses a host-supplied framebuffer", () => {
     const bits = newBitMap(16, 2);
-    InitGraf({ width: 16, height: 2, bits });
+    InitGraf(bits);
     expect(globals.screenBits).toBe(bits);
     const port = {} as GrafPort;
     OpenPort(port);
@@ -123,7 +125,7 @@ describe("drawing into packed bits", () => {
     const port = openScreenPort(16, 4);
     PaintRect(makeRect(1, 1, 2, 4)); // ###
     PaintRect(makeRect(2, 9, 3, 10)); //          #
-    const update: RgnHandle = { rgn: { rgnSize: 10, rgnBBox: makeRect(0, 0, 0, 0) } };
+    const update: RgnHandle = { rgn: { rgnSize: 10, rgnBBox: makeRect(0, 0, 0, 0), data: new Int16Array(0) } };
 
     ScrollRect(makeRect(0, 0, 4, 16), 3, 1, update);
     expect(art(port.portBits)).toEqual([

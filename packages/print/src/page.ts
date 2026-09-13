@@ -11,11 +11,10 @@ import {
   OpenPort,
   SetPort,
   SetPortBits,
-  makeRect,
-  newBitMap,
   type BitMap,
   type GrafPort,
 } from "@mockintosh/quickdraw";
+import { makeRect, newBitMap } from "@mockintosh/quickdraw/bits";
 
 export interface PrintPage {
   /** Port whose `portRect` is `(0, 0, width, height)`. */
@@ -41,9 +40,7 @@ export function createPrintPage(width: number, height: number): PrintPage {
   SetPortBits(bits);
   port.portRect = makeRect(0, 0, h, w);
   port.visRgn.rgn.rgnBBox = makeRect(0, 0, h, w);
-  port.visRgn.rgn.scanlines = undefined;
   port.clipRgn.rgn.rgnBBox = makeRect(0, 0, h, w);
-  port.clipRgn.rgn.scanlines = undefined;
   EraseRect(port.portRect);
   if (previous) SetPort(previous);
 

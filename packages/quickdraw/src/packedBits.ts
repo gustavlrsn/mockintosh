@@ -39,7 +39,7 @@ export function bitMapHeight(bm: BitMap): number {
 
 /**
  * Read the pixel at `(h, v)` in `bm`'s coordinate space. No bounds check —
- * callers clip first; use {@link bmGetPixel} for a checked read.
+ * callers clip first; out-of-bounds reads belong at the call site.
  */
 export function getBit(bm: BitMap, h: number, v: number): 0 | 1 {
   const x = h - bm.bounds.left;
@@ -135,6 +135,44 @@ export function fillRowBits(bm: BitMap, v: number, h0: number, h1: number, srcBy
  * bounds; the destination span inside `dst`'s. Safe for self-copies within
  * a row (the source bits are read before any destination byte is written).
  */
+/**
+ * Apply a row of 0/1 samples `[h0, h1)` into `dst` at `v`, packing into
+ * destination bytes. `bits[h - origin]` is the source sample.
+ */
+export function applyBitRow(
+  dst: BitMap,
+  v: number,
+  h0: number,
+  h1: number,
+  bits: Uint8Array,
+  origin: number,
+  invert: boolean,
+  mode: number
+): void {
+  if (h1 <= h0) return;
+  const d = dst.baseAddr;
+  const row = (v - dst.bounds.top) * dst.rowBytes;
+  let h = h0;
+  while (h < h1) {
+    const x = h - dst.bounds.left;
+    const byteIndex = row + (x >> 3);
+    const bitInByte = x & 7;
+    const n = Math.min(8 - bitInByte, h1 - h);
+    let srcByte = 0;
+    let mask = 0;
+    for (let i = 0; i < n; i++) {
+      const b = 0x80 >> (bitInByte + i);
+      mask |= b;
+      const idx = h + i - origin;
+      let bit = idx >= 0 && idx < bits.length ? bits[idx]! : 0;
+      if (invert) bit = bit ? 0 : 1;
+      if (bit) srcByte |= b;
+    }
+    combineByte(d, byteIndex, srcByte, mask, mode);
+    h += n;
+  }
+}
+
 export function blitRowBits(
   src: BitMap,
   sv: number,

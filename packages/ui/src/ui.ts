@@ -6,7 +6,7 @@
  * installs the font bridge, and returns a UIInstance ready to render.
  *
  * Single-instance constraint: `_setRepaintHook` and QuickDraw's
- * `globals._fontMeasure` are module-level. One createUI() per process.
+ * `installFontManager` are module-level. One createUI() per process.
  */
 
 import { render, _setRepaintHook } from "./renderer";
@@ -22,7 +22,8 @@ import { measureText } from "./fonts/bridge";
 import { createPointerDispatcher, type PointerDispatcher, type PointerType } from "./pointer";
 import type { CanvasNode, Modifiers } from "./nodes";
 import type { FocusManager } from "./focus";
-import { bitMapHeight, bitMapWidth, type BitMap, type GrafPort } from "@mockintosh/quickdraw";
+import { type BitMap, type GrafPort } from "@mockintosh/quickdraw";
+import { bitMapHeight, bitMapWidth } from "@mockintosh/quickdraw/bits";
 import type { JSX } from "solid-js";
 import { createComponent as solidCreateComponent } from "solid-js";
 import { UIServicesContext, type UIServices } from "./services";

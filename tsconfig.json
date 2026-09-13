@@ -13,7 +13,9 @@
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@mockintosh/quickdraw": ["./packages/quickdraw/src/index.ts"],
+      "@mockintosh/quickdraw/bits": ["./packages/quickdraw/src/bits.ts"]
     },
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "bundler"

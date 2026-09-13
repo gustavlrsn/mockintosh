@@ -12,10 +12,9 @@ import {
   PaintRect,
   SetCursor,
   ShowCursor,
-  makeRect,
-  newGrafPort,
   type GrafPort,
 } from "@mockintosh/quickdraw";
+import { makeRect, newBitMap } from "@mockintosh/quickdraw/bits";
 import { drawCursor } from "./cursor";
 import { cursors } from "./cursors";
 
@@ -30,8 +29,8 @@ describe("drawCursor", () => {
   let port: GrafPort;
 
   beforeEach(() => {
-    InitGraf({ width: WIDTH, height: HEIGHT });
-    port = newGrafPort();
+    InitGraf(newBitMap(WIDTH, HEIGHT));
+    port = {} as GrafPort;
     OpenPort(port);
     InitCursor();
   });

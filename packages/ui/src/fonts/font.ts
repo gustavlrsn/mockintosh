@@ -74,6 +74,20 @@ export function getGlyphPixel(
   return (byte & bit) !== 0;
 }
 
+/** Advance of one character, including trailing `spacing` (matches the FM width table). */
+export function charAdvance(font: DeckerFont, ch: string): number {
+  const glyphIndex = getGlyphIndexForChar(font, ch);
+  if (glyphIndex < 0) return 0;
+  return getGlyphWidth(font, glyphIndex) + font.spacing;
+}
+
+/** Sum of {@link charAdvance} over `text` (no newline handling). */
+export function textAdvance(font: DeckerFont, text: string): number {
+  let w = 0;
+  for (let i = 0; i < text.length; i++) w += charAdvance(font, text[i]!);
+  return w;
+}
+
 export function measureDeckerText(font: DeckerFont, text: string): DeckerTextSize {
   let cursorX = 0;
   let maxWidth = 0;

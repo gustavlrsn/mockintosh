@@ -64,6 +64,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": __dirname,
+      "@mockintosh/quickdraw/bits": resolve(__dirname, "packages/quickdraw/src/bits.ts"),
+      "@mockintosh/quickdraw": resolve(__dirname, "packages/quickdraw/src/index.ts"),
+      "@mockintosh/ui/renderer": resolve(__dirname, "packages/ui/src/renderer.ts"),
+      "@mockintosh/ui": resolve(__dirname, "packages/ui/src/index.ts"),
+      "@mockintosh/print": resolve(__dirname, "packages/print/src/index.ts"),
     },
   },
   test: {

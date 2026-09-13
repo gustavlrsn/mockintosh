@@ -1,42 +1,25 @@
 /**
- * Polygon routines — from `QuickDraw.p` Polygon Routines section and
- * `reference/QuickDraw/Polygons.a` implementation.
+ * Polygon routines — `Polygons.a`.
  *
- * Polygons are recorded as a sequence of {@link LineTo} calls bracketed by
- * {@link OpenPoly} and {@link ClosePoly}, then drawn with the `Frame/Paint/…Poly`
- * family.  Filling uses an even-odd scanline rasterizer that matches the
- * behaviour of the original QuickDraw.
+ * FRAME → `FrPoly` (`MoveTo` first point, `DoLine` the rest, pen stays).
+ * Other verbs → `RSect` of bbox/vis/clip, then `DrawPoly` =
+ * `OpenRgn; FrPoly; DoLine(p0); CloseRgn; DrawRgn`.
  */
 
-import { Polygon, PolyHandle, Rect, Pattern, Point, cloneRect } from "./types";
-import { globals } from "./globals";
-import { drawHSpan, drawRectToPort } from "./bitblt";
-import {
-  patCopy,
-  patXor,
-  FRAME,
-  PAINT,
-  ERASE,
-  INVERT,
-  FILL,
-} from "./constants";
-import { StdLine } from "./lines";
+import type { Pattern, Point, PolyHandle, Polygon, Rect } from "./types";
+import { globals, requirePort } from "./globals";
+import { asInt16 } from "./fixmath";
+import { DoLine, HidePen, MoveTo, ShowPen } from "./lines";
+import { EmptyRect, MapRect, OffsetRect, PushVerb } from "./rects";
+import { MapPt } from "./points";
+import { CloseRgn, DrawRgn, NewRgn, OpenRgn } from "./regions";
+import { rsect } from "./bitBltCore";
+import { ERASE, FILL, FRAME, INVERT, PAINT } from "./constants";
+import { CheckPic, PutPicByte, PutPicPoly, PutPicVerb } from "./picSave";
 
-// -------------------------------------------------------------------------
-// OpenPoly / ClosePoly / KillPoly
-// -------------------------------------------------------------------------
-
-/**
- * Begin recording a polygon.  All subsequent {@link LineTo} calls add
- * vertices to the polygon instead of (or in addition to) drawing pixels.
- * Call {@link ClosePoly} to finalise.
- *
- * `FUNCTION OpenPoly: PolyHandle`.
- *
- * @returns A handle to the new polygon being recorded.
- */
 export function OpenPoly(): PolyHandle {
-  const port = globals.thePort;
+  const port = requirePort();
+  HidePen();
   const poly: Polygon = {
     polySize: 10,
     polyBBox: { top: 0, left: 0, bottom: 0, right: 0 },
@@ -44,21 +27,14 @@ export function OpenPoly(): PolyHandle {
   };
   const handle: PolyHandle = { poly };
   globals.thePoly = handle;
-  if (port) port.polySave = handle;
+  port.polySave = true;
   return handle;
 }
 
-/**
- * Finish recording the current polygon.  Recomputes the bounding box from
- * the accumulated vertices and clears `port.polySave`.
- * `PROCEDURE ClosePoly`.
- */
 export function ClosePoly(): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   const h = globals.thePoly;
   if (!h) return;
-  // Recompute bounding box
   if (h.poly.polyPoints.length > 0) {
     let minH = Infinity,
       maxH = -Infinity,
@@ -73,226 +49,105 @@ export function ClosePoly(): void {
     h.poly.polyBBox = {
       top: minV,
       left: minH,
-      bottom: maxV + 1,
-      right: maxH + 1,
+      bottom: maxV,
+      right: maxH,
     };
+    h.poly.polySize = 10 + 4 * h.poly.polyPoints.length;
   }
-  port.polySave = null;
+  port.polySave = false;
   globals.thePoly = null;
+  ShowPen();
 }
 
-/**
- * Release a polygon handle.  In JS this is a no-op — the GC reclaims memory.
- * `PROCEDURE KillPoly(poly: PolyHandle)`.
- */
-export function KillPoly(_poly: PolyHandle): void {
-  // GC handles memory in JS
-}
+export function KillPoly(_poly: PolyHandle): void {}
 
-// -------------------------------------------------------------------------
-// Geometric transformations
-// -------------------------------------------------------------------------
-
-/**
- * Translate all vertices of `poly` by `(dh, dv)` pixels and update the
- * bounding box.  `PROCEDURE OffsetPoly(poly: PolyHandle; dh, dv: INTEGER)`.
- */
 export function OffsetPoly(poly: PolyHandle, dh: number, dv: number): void {
-  poly.poly.polyBBox.top += dv;
-  poly.poly.polyBBox.left += dh;
-  poly.poly.polyBBox.bottom += dv;
-  poly.poly.polyBBox.right += dh;
+  OffsetRect(poly.poly.polyBBox, dh, dv);
   for (const p of poly.poly.polyPoints) {
-    p.h += dh;
-    p.v += dv;
+    p.h = asInt16(p.h + dh);
+    p.v = asInt16(p.v + dv);
   }
 }
 
-/**
- * Map all vertices of `poly` from the coordinate space of `fromRect` to
- * `toRect`, proportionally scaling and translating each point.
- * `PROCEDURE MapPoly(poly: PolyHandle; fromRect, toRect: Rect)`.
- */
 export function MapPoly(poly: PolyHandle, fromRect: Rect, toRect: Rect): void {
-  const fW = fromRect.right - fromRect.left;
-  const fH = fromRect.bottom - fromRect.top;
-  const tW = toRect.right - toRect.left;
-  const tH = toRect.bottom - toRect.top;
-  const mapH = (x: number) =>
-    fW ? toRect.left + Math.round(((x - fromRect.left) * tW) / fW) : x;
-  const mapV = (y: number) =>
-    fH ? toRect.top + Math.round(((y - fromRect.top) * tH) / fH) : y;
-
-  for (const p of poly.poly.polyPoints) {
-    p.h = mapH(p.h);
-    p.v = mapV(p.v);
-  }
-  poly.poly.polyBBox = {
-    top: mapV(poly.poly.polyBBox.top),
-    left: mapH(poly.poly.polyBBox.left),
-    bottom: mapV(poly.poly.polyBBox.bottom),
-    right: mapH(poly.poly.polyBBox.right),
-  };
+  for (const p of poly.poly.polyPoints) MapPt(p, fromRect, toRect);
+  MapRect(poly.poly.polyBBox, fromRect, toRect);
 }
 
-// -------------------------------------------------------------------------
-// Polygon scanline rasterizer
-// Converts polyPoints to a sorted list of scanline spans using
-// the even-odd fill rule (same as original QuickDraw).
-// -------------------------------------------------------------------------
-
-function polyToScanlines(poly: Polygon): Map<number, number[]> {
-  const pts = poly.polyPoints;
-  if (pts.length < 2) return new Map();
-
-  const map = new Map<number, number[]>();
-
-  const addIntersection = (y: number, x: number) => {
-    if (!map.has(y)) map.set(y, []);
-    map.get(y)!.push(x);
-  };
-
-  // Edge-scan: for each edge, record x-intersections at each scanline
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i];
-    const p1 = pts[i + 1];
-    const minY = Math.min(p0.v, p1.v);
-    const maxY = Math.max(p0.v, p1.v);
-    if (minY === maxY) continue; // horizontal edges don't contribute
-
-    for (let y = minY; y < maxY; y++) {
-      const t = (y - p0.v) / (p1.v - p0.v);
-      const x = p0.h + t * (p1.h - p0.h);
-      addIntersection(y, x);
-    }
-  }
-
-  // Sort each scanline's x values and pair them
-  const result = new Map<number, number[]>();
-  map.forEach((xs, y) => {
-    const sorted = xs.slice().sort((a, b) => a - b);
-    result.set(y, sorted);
-  });
-  return result;
+function polyPoints(poly: Polygon): Point[] {
+  const n = (asInt16(poly.polySize) - 10) >> 2;
+  if (n <= 0) return [];
+  return poly.polyPoints.slice(0, n);
 }
 
-// -------------------------------------------------------------------------
-// Frame polygon (outline only, using LineTo for each edge)
-// -------------------------------------------------------------------------
-
-function framePolyImpl(poly: Polygon, port: import("./types").GrafPort): void {
-  const pts = poly.polyPoints;
-  if (pts.length < 2) return;
-
-  const savedLoc = { h: port.pnLoc.h, v: port.pnLoc.v };
-  for (let i = 0; i < pts.length - 1; i++) {
-    port.pnLoc.h = pts[i].h;
-    port.pnLoc.v = pts[i].v;
-    StdLine(port, pts[i + 1]);
-  }
-  port.pnLoc.h = savedLoc.h;
-  port.pnLoc.v = savedLoc.v;
+/** `PROCEDURE FrPoly` (`Polygons.a:342-372`). Pen is left at the last vertex. */
+export function FrPoly(poly: PolyHandle): void {
+  const pts = polyPoints(poly.poly);
+  if (pts.length === 0) return;
+  MoveTo(pts[0]!.h, pts[0]!.v);
+  for (let i = 1; i < pts.length; i++) DoLine(pts[i]!);
 }
 
-// -------------------------------------------------------------------------
-// Fill polygon
-// -------------------------------------------------------------------------
-
-function fillPolyImpl(
-  poly: Polygon,
-  pat: Pattern,
-  mode: number,
-  port: import("./types").GrafPort
-): void {
-  const scanlines = polyToScanlines(poly);
-  scanlines.forEach((xs, y) => {
-    for (let i = 0; i + 1 < xs.length; i += 2) {
-      const x0 = Math.round(xs[i]);
-      const x1 = Math.round(xs[i + 1]);
-      if (x0 < x1) drawHSpan(x0, x1, y, pat, mode, port);
-    }
-  });
+/** `PROCEDURE DrawPoly` (`Polygons.a:376-413`). */
+export function DrawPoly(poly: PolyHandle, mode: number, pat: Pattern): void {
+  const port = requirePort();
+  if (asInt16(port.pnVis) < 0) return;
+  const pts = polyPoints(poly.poly);
+  OpenRgn();
+  FrPoly(poly);
+  if (pts.length > 0) DoLine(pts[0]!);
+  const temp = NewRgn();
+  CloseRgn(temp);
+  DrawRgn(temp, mode, pat);
 }
-
-// -------------------------------------------------------------------------
-// Verb dispatch
-// -------------------------------------------------------------------------
 
 function callPoly(verb: number, poly: PolyHandle, fillPat?: Pattern): void {
-  const port = globals.thePort;
-  if (!port) return;
-  if (port.grafProcs && port.grafProcs.polyProc) {
-    if (fillPat) port.fillPat = new Uint8Array(fillPat);
-    port.grafProcs.polyProc(verb as any, poly);
+  const port = requirePort();
+  if (fillPat) port.fillPat = new Uint8Array(fillPat);
+  if (port.grafProcs?.polyProc) {
+    port.grafProcs.polyProc(verb as 0 | 1 | 2 | 3 | 4, poly);
     return;
   }
-  StdPoly(verb, poly, fillPat);
+  StdPoly(verb, poly);
 }
 
 /**
- * Default polygon rasterizer.  Called by the `Frame/Paint/…Poly` family.
- *
- * @param verb     Drawing operation (FRAME=0, PAINT=1, ERASE=2, INVERT=3, FILL=4).
- * @param poly     The polygon to draw.
- * @param fillPat  Pattern to use for FILL; ignored for other verbs.
+ * `PROCEDURE StdPoly(verb, poly)` (`Polygons.a:15-71`).
  */
-export function StdPoly(
-  verb: number,
-  poly: PolyHandle,
-  fillPat?: Pattern
-): void {
-  const port = globals.thePort;
-  if (!port) return;
-  const p = poly.poly;
-
+export function StdPoly(verb: number, poly: PolyHandle, fillPat?: Pattern): void {
+  const port = requirePort();
+  if (fillPat) port.fillPat = new Uint8Array(fillPat);
+  if (CheckPic()) {
+    PutPicVerb(verb);
+    PutPicByte(0x70 + verb);
+    PutPicPoly(poly);
+  }
   if (verb === FRAME) {
-    framePolyImpl(p, port);
+    FrPoly(poly);
     return;
   }
-
-  let pat: Pattern;
-  let mode: number;
-  switch (verb) {
-    case PAINT:
-      pat = port.pnPat;
-      mode = port.pnMode;
-      break;
-    case ERASE:
-      pat = port.bkPat;
-      mode = patCopy;
-      break;
-    case INVERT:
-      pat = globals.black;
-      mode = patXor;
-      break;
-    case FILL:
-      pat = fillPat ?? port.fillPat;
-      mode = patCopy;
-      break;
-    default:
-      pat = port.pnPat;
-      mode = port.pnMode;
+  if (
+    !rsect([poly.poly.polyBBox, port.visRgn.rgn.rgnBBox, port.clipRgn.rgn.rgnBBox])
+  ) {
+    return;
   }
-  fillPolyImpl(p, pat, mode, port);
+  if (EmptyRect(poly.poly.polyBBox)) return;
+  const { mode, pat } = PushVerb(verb);
+  DrawPoly(poly, mode, pat);
 }
 
-/** Draw the outline of `poly` using the current pen. `PROCEDURE FramePoly`. */
 export function FramePoly(poly: PolyHandle): void {
   callPoly(FRAME, poly);
 }
-/** Fill `poly` with the current pen pattern. `PROCEDURE PaintPoly`. */
 export function PaintPoly(poly: PolyHandle): void {
   callPoly(PAINT, poly);
 }
-/** Fill `poly` with the background pattern. `PROCEDURE ErasePoly`. */
 export function ErasePoly(poly: PolyHandle): void {
   callPoly(ERASE, poly);
 }
-/** Invert every pixel inside `poly`. `PROCEDURE InvertPoly`. */
 export function InvertPoly(poly: PolyHandle): void {
   callPoly(INVERT, poly);
 }
-/** Fill `poly` with the explicit pattern `pat`. `PROCEDURE FillPoly`. */
 export function FillPoly(poly: PolyHandle, pat: Pattern): void {
   callPoly(FILL, poly, pat);
 }

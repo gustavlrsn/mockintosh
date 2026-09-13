@@ -4,7 +4,10 @@
  * bounds do not start at a byte boundary, and overlapping self-copies.
  */
 import { describe, expect, it } from "vitest";
-import { BitBlt, BitBltSlow, newBitMap, pixelsFromBitMap, makeRect, type BitMap, type Rect } from "../src";
+import type { BitMap, Rect } from "../src";
+import { newBitMap, pixelsFromBitMap, makeRect } from "../src/bits";
+import { BitBltSlow } from "../src/bitblt";
+import { BitBlt } from "../src/bitBltCore";
 
 /** Small deterministic PRNG so failures reproduce. */
 function rng(seed: number): () => number {

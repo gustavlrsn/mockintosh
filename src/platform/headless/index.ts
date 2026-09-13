@@ -8,7 +8,8 @@
  * input injectors with real drivers.
  */
 import { InMemoryBackend } from "@mockintosh/fs";
-import { pixelsFromBitMap, type BitMap } from "@mockintosh/quickdraw";
+import type { BitMap } from "@mockintosh/quickdraw";
+import { pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
 import type {
   Platform,
   PlatformKeyEvent,

@@ -1,156 +1,53 @@
-import type { BitMap, GrafPort } from "@mockintosh/quickdraw";
+import type { GrafPort } from "@mockintosh/quickdraw";
 import {
-  __injectFontFunctions,
-  setBit,
-  DrawString,
+  DrawText,
+  ForeColor,
   GetPort,
   MoveTo,
   SetPort,
-  globals,
+  TextFace,
+  TextFont,
+  TextMode,
+  TextSize,
+  blackColor,
+  installFontManager,
+  srcBic,
+  srcOr,
+  whiteColor,
 } from "@mockintosh/quickdraw";
-import {
-  getGlyphIndexForChar,
-  getGlyphPixel,
-  measureDeckerText,
-} from "./font";
-import { initBuiltinFonts, requireFont } from "./registry";
+import { requireFont } from "./registry";
+import { initBuiltinFonts } from "./registry";
+import { encodeUiText, fontAscent, fontFamilyId, hostSwapFont, uiFontMetrics } from "./strike";
+import { textAdvance } from "./font";
 
 let bridgeInstalled = false;
 
 /**
- * Install the font measurement and rendering callbacks into QuickDraw.
- * Call once during createUI() initialization.
+ * Install the Font Manager seam. Call once during createUI().
  */
 export function installFontBridge(): void {
   if (bridgeInstalled) return;
   initBuiltinFonts();
-
-  const measure = (text: string): number => {
-    const port = globals.thePort;
-    const fontName = port
-      ? (port as GrafPort & { _uiFontName?: string })._uiFontName ?? "body"
-      : "body";
-    const font = requireFont(fontName);
-    return measureDeckerText(font, text).width;
-  };
-
-  const draw = (text: string, x: number, y: number, port: GrafPort): void => {
-    const fontName =
-      (port as GrafPort & { _uiFontName?: string })._uiFontName ?? "body";
-    const color = (port as GrafPort & { _uiTextColor?: number })._uiTextColor ?? 1;
-    const font = requireFont(fontName);
-    const bounds = port.portBits.bounds;
-    const cl = port.clipRgn?.rgn.rgnBBox;
-    const vis = port.visRgn?.rgn.rgnBBox;
-    const pr = port.portRect;
-
-    const clipLeft = Math.max(
-      cl?.left ?? bounds.left,
-      vis?.left ?? bounds.left,
-      pr.left,
-      bounds.left
-    );
-    const clipTop = Math.max(
-      cl?.top ?? bounds.top,
-      vis?.top ?? bounds.top,
-      pr.top,
-      bounds.top
-    );
-    const clipRight = Math.min(
-      cl?.right ?? bounds.right,
-      vis?.right ?? bounds.right,
-      pr.right,
-      bounds.right
-    );
-    const clipBottom = Math.min(
-      cl?.bottom ?? bounds.bottom,
-      vis?.bottom ?? bounds.bottom,
-      pr.bottom,
-      bounds.bottom
-    );
-
-    drawTextToBitMap(
-      port.portBits,
-      clipLeft,
-      clipTop,
-      clipRight,
-      clipBottom,
-      text,
-      x,
-      y,
-      fontName,
-      color
-    );
-  };
-
-  __injectFontFunctions(measure, draw);
+  installFontManager(hostSwapFont);
   bridgeInstalled = true;
 }
 
-function drawTextToBitMap(
-  bits: BitMap,
-  clipLeft: number,
-  clipTop: number,
-  clipRight: number,
-  clipBottom: number,
-  text: string,
-  x: number,
-  y: number,
-  fontName: string,
-  color: number
-): void {
-  if (!text) return;
-  const font = requireFont(fontName);
-  let cx = x;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === "\n") {
-      cx = x;
-      y += font.glyphHeight;
-      continue;
-    }
-
-    const glyphIndex = getGlyphIndexForChar(font, ch);
-    const charWidth = glyphIndex >= 0 ? (font.glyphWidths[glyphIndex] ?? 0) : 0;
-    if (glyphIndex >= 0 && charWidth > 0) {
-      const gx = cx | 0;
-      const gy = y | 0;
-
-      const x0 = Math.max(0, clipLeft - gx);
-      const y0 = Math.max(0, clipTop - gy);
-      const x1 = Math.min(charWidth, clipRight - gx);
-      const y1 = Math.min(font.glyphHeight, clipBottom - gy);
-
-      for (let gy2 = y0; gy2 < y1; gy2++) {
-        for (let gx2 = x0; gx2 < x1; gx2++) {
-          if (getGlyphPixel(font, glyphIndex, gx2, gy2)) {
-            setBit(bits, gx + gx2, gy + gy2, color);
-          }
-        }
-      }
-    }
-    cx += charWidth + font.spacing;
-  }
-}
-
 /**
- * Measure text width for a given font name.
+ * Measure text width for a given font name. Same advances as `TextWidth`
+ * when that font is selected and no style/scale is applied.
  */
 export function measureText(text: string, fontName: string = "body"): number {
-  const font = requireFont(fontName);
-  return measureDeckerText(font, text).width;
+  return textAdvance(requireFont(fontName), text);
 }
 
-/** Line height of a named font, in pixels. */
+/** Line height of a named font, in pixels (the Decker cell, not ascent+descent). */
 export function fontLineHeight(fontName: string = "body"): number {
   return requireFont(fontName).glyphHeight;
 }
 
 /**
- * Draw one line of text on `port` with a named UI font, `(x, y)` being the
- * top-left of the line — the same origin `<text>` nodes use. For hosts that
- * paint outside the node tree (print pages, rasters); clipped to the port.
+ * Draw one line on `port`. `(x, y)` is the **top-left** of the line — the
+ * helper adds ascent so QuickDraw's baseline `pnLoc.v` sits at the cell bottom.
  */
 export function drawString(
   port: GrafPort,
@@ -160,16 +57,23 @@ export function drawString(
   fontName: string = "body",
   color: number = 1
 ): void {
-  const meta = port as GrafPort & { _uiFontName?: string; _uiTextColor?: number };
   const previous = GetPort();
-  const savedFont = meta._uiFontName;
-  const savedColor = meta._uiTextColor;
   SetPort(port);
-  meta._uiFontName = fontName;
-  meta._uiTextColor = color;
-  MoveTo(x, y);
-  DrawString(text);
-  meta._uiFontName = savedFont;
-  meta._uiTextColor = savedColor;
+  const font = requireFont(fontName);
+  TextFont(fontFamilyId(fontName));
+  TextSize(0);
+  TextFace(0);
+  if (color) {
+    ForeColor(blackColor);
+    TextMode(srcOr);
+  } else {
+    ForeColor(whiteColor);
+    TextMode(srcBic);
+  }
+  const bytes = encodeUiText(font, text);
+  MoveTo(x, y + uiFontMetrics(font).ascent);
+  DrawText(bytes, 0, bytes.length);
   if (previous) SetPort(previous);
 }
+
+export { fontAscent, fontFamilyId, encodeUiText };

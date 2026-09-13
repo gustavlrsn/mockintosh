@@ -8,7 +8,8 @@
  * transport knows how the bytes reach the paper.
  */
 import { createSignal } from "solid-js";
-import { CopyBits, bitMapFromPixels, makeRect, srcCopy, type GrafPort } from "@mockintosh/quickdraw";
+import { CopyBits, srcCopy, type GrafPort } from "@mockintosh/quickdraw";
+import { bitMapFromPixels, makeRect } from "@mockintosh/quickdraw/bits";
 import { drawString, fontLineHeight, measureText } from "@mockintosh/ui";
 import {
   EscPosEncoder,

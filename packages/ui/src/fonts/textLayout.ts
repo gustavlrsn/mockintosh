@@ -6,7 +6,7 @@
  * drawn geometry can never disagree.
  */
 
-import { measureDeckerText, type DeckerFont } from "./font";
+import { textAdvance, type DeckerFont } from "./font";
 
 export interface TextLine {
   text: string;
@@ -58,7 +58,7 @@ export function layoutText(
 }
 
 function makeLine(font: DeckerFont, text: string): TextLine {
-  return { text, width: text ? measureDeckerText(font, text).width : 0 };
+  return { text, width: text ? textAdvance(font, text) : 0 };
 }
 
 function wrapParagraph(
@@ -77,17 +77,17 @@ function wrapParagraph(
 
   for (const word of words) {
     const candidate = line ? `${line} ${word}` : word;
-    if (measureDeckerText(font, candidate).width <= maxWidth) {
+    if (textAdvance(font, candidate) <= maxWidth) {
       line = candidate;
       continue;
     }
     if (line) flush();
     // Word alone overflows: break it between characters.
-    if (measureDeckerText(font, word).width > maxWidth) {
+    if (textAdvance(font, word) > maxWidth) {
       let chunk = "";
       for (const ch of word) {
         const next = chunk + ch;
-        if (chunk && measureDeckerText(font, next).width > maxWidth) {
+        if (chunk && textAdvance(font, next) > maxWidth) {
           out.push(makeLine(font, chunk));
           chunk = ch;
         } else {

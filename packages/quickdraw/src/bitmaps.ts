@@ -1,42 +1,151 @@
 /**
- * BitMap operations — from `QuickDraw.p` Graphical Operations on BitMaps
- * section.
+ * BitMap operations — `Bitmaps.a` CopyBits / StdBits / ScrollRect.
  *
- * {@link CopyBits} is the primary entry point for blitting between bitmaps
- * (or from an offscreen buffer to the screen) with scaling and clipping.
- * {@link ScrollRect} provides hardware-scroll semantics with automatic
- * update-region tracking.
+ * StdBits records `$90`/`$91`/`$98`/`$99` (PackBits when `rowBytes ≥ 8`).
  */
 
-import { BitMap, Rect, RgnHandle, GrafPort, Pattern, cloneRect, makeRect } from "./types";
-import { globals } from "./globals";
-import { BitBlt, drawRectToPort, pointInRegion } from "./bitblt";
-import { getBit, setBit } from "./packedBits";
-import { srcCopy } from "./constants";
-import { SetRectRgn } from "./regions";
+import type { BitMap, Rect, RgnHandle } from "./types";
+import { globals, requirePort } from "./globals";
+import { asInt16 } from "./fixmath";
+import { withCursorShield } from "./cursors";
+import { RgnBlt } from "./rgnBlt";
+import { StretchBits } from "./stretchBits";
+import { PackBits } from "./packBits";
+import {
+  CheckPic,
+  PutPicByte,
+  PutPicData,
+  PutPicRgn,
+  PutPicWord,
+} from "./picSave";
+import {
+  CopyRgn,
+  DiffRgn,
+  NewRgn,
+  OffsetRgn,
+  RectRgn,
+  SectRgn,
+  SetEmptyRgn,
+} from "./regions";
+import { patCopy, srcCopy } from "./constants";
 
-// -------------------------------------------------------------------------
-// CopyBits
-// -------------------------------------------------------------------------
+function sameTopLeft(a: Rect, b: Rect): boolean {
+  return a.top === b.top && a.left === b.left;
+}
+
+/** `baseAddr && bounds.topLeft` (`Bitmaps.a:228-237`). Odd-port check is N/A. */
+function isToPort(dstBits: BitMap): boolean {
+  const port = globals.thePort;
+  if (!port) return false;
+  if (port.portBits.baseAddr !== dstBits.baseAddr) return false;
+  return sameTopLeft(port.portBits.bounds, dstBits.bounds);
+}
+
+function putRectBytes(r: Rect): void {
+  const words = [r.top, r.left, r.bottom, r.right];
+  const out = new Uint8Array(8);
+  for (let i = 0; i < 4; i++) {
+    const w = asInt16(words[i]!);
+    out[i * 2] = (w >> 8) & 0xff;
+    out[i * 2 + 1] = w & 0xff;
+  }
+  PutPicData(out);
+}
 
 /**
- * Copy (and optionally scale) pixels from `srcBits[srcRect]` to
- * `dstBits[dstRect]` using the given transfer `mode`.
- *
- * - Supports arbitrary scaling (nearest-neighbour interpolation).
- * - Clips to `port.visRgn`, `port.clipRgn`, and `port.portRect` when
- *   `dstBits` is the current port's bitmap.
- * - If `maskRgn` is non-null, only pixels inside the mask are updated.
- *
- * `PROCEDURE CopyBits(srcBits, dstBits: BitMap; srcRect, dstRect: Rect;
- *                     mode: INTEGER; maskRgn: RgnHandle)`.
- *
- * @param srcBits  Source bitmap.
- * @param dstBits  Destination bitmap (may equal the current port's portBits).
- * @param srcRect  Source area in `srcBits` coordinates.
- * @param dstRect  Destination area in `dstBits` coordinates.
- * @param mode     QuickDraw transfer mode (0–7).
- * @param maskRgn  Optional mask region; `null` means no mask.
+ * `PROCEDURE StdBits` (`Bitmaps.a:18-185`).
+ * CheckPic + `$90`/`$91`/`$98`/`$99`, then StretchBits if `pnVis ≥ 0`.
+ */
+export function StdBits(
+  srcBits: BitMap,
+  srcRect: Rect,
+  dstRect: Rect,
+  mode: number,
+  maskRgn: RgnHandle | null
+): void {
+  const port = requirePort();
+  if (CheckPic()) {
+    let top = asInt16(srcBits.bounds.top);
+    let left = asInt16(srcBits.bounds.left);
+    let bottom = asInt16(srcBits.bounds.bottom);
+    let right = asInt16(srcBits.bounds.right);
+    const oldRow = asInt16(srcBits.rowBytes);
+    let base = 0;
+
+    const skipTop = asInt16(asInt16(srcRect.top) - top);
+    if (skipTop > 0) {
+      top = asInt16(srcRect.top);
+      base += skipTop * oldRow;
+    }
+    if (asInt16(srcRect.bottom) < bottom) bottom = asInt16(srcRect.bottom);
+
+    const skipLeft = asInt16(asInt16(srcRect.left) - left);
+    if (skipLeft > 0) {
+      const skipBytes = skipLeft >>> 3;
+      base += skipBytes;
+      left = asInt16(left + (skipBytes << 3));
+    }
+
+    let newRight = asInt16(srcRect.right) - left;
+    newRight = ((newRight + 7) >>> 3) << 3;
+    newRight = asInt16(newRight + left);
+    if (newRight < right) right = newRight;
+
+    let newRow = asInt16(right - left);
+    newRow = (newRow + 15) >>> 4;
+    if (newRow > 0) {
+      newRow = newRow << 1;
+      let op = 0x90;
+      if (maskRgn) op += 1;
+      if (newRow >= 8) op += 8;
+      PutPicByte(op);
+      PutPicWord(newRow);
+      PutPicWord(top);
+      PutPicWord(left);
+      PutPicWord(bottom);
+      PutPicWord(right);
+      putRectBytes(srcRect);
+      putRectBytes(dstRect);
+      PutPicWord(mode);
+      if (maskRgn) PutPicRgn(maskRgn);
+
+      const height = asInt16(bottom - top);
+      const src = srcBits.baseAddr;
+      if (newRow >= 8) {
+        const packBuf = new Uint8Array(Math.max(16, newRow * 2 + 16));
+        for (let row = 0; row < height; row++) {
+          const srcPtr = { value: base + row * oldRow };
+          const dstPtr = { value: 0 };
+          PackBits(src, srcPtr, packBuf, dstPtr, newRow);
+          PutPicByte(dstPtr.value);
+          PutPicData(packBuf.subarray(0, dstPtr.value));
+        }
+      } else {
+        for (let row = 0; row < height; row++) {
+          const off = base + row * oldRow;
+          PutPicData(src.subarray(off, off + newRow));
+        }
+      }
+    }
+  }
+
+  if ((port.pnVis | 0) < 0) return; // Bitmaps.a:170-171
+  StretchBits(
+    srcBits,
+    port.portBits,
+    srcRect,
+    dstRect,
+    mode,
+    port.clipRgn,
+    port.visRgn,
+    maskRgn ?? globals.wideOpen
+  );
+}
+
+/**
+ * `PROCEDURE CopyBits` (`Bitmaps.a:189-275`).
+ * Screen source → `ShieldCursor`; to-port → `bitsProc ?? StdBits`;
+ * else `StretchBits(…, wideOpen, wideOpen, mask ?? wideOpen)`.
  */
 export function CopyBits(
   srcBits: BitMap,
@@ -46,136 +155,36 @@ export function CopyBits(
   mode: number,
   maskRgn: RgnHandle | null
 ): void {
-  const port = globals.thePort;
-
-  const sw = srcRect.right - srcRect.left;
-  const sh = srcRect.bottom - srcRect.top;
-  const dw = dstRect.right - dstRect.left;
-  const dh = dstRect.bottom - dstRect.top;
-
-  if (sw === 0 || sh === 0 || dw === 0 || dh === 0) return;
-
-  // Clip destination to port (if port provided and dstBits matches portBits)
-  let clipLeft = dstRect.left;
-  let clipTop = dstRect.top;
-  let clipRight = dstRect.right;
-  let clipBottom = dstRect.bottom;
-
-  if (port && dstBits.baseAddr === port.portBits.baseAddr) {
-    const vis = port.visRgn.rgn.rgnBBox;
-    const clip = port.clipRgn.rgn.rgnBBox;
-    clipLeft = Math.max(clipLeft, vis.left, clip.left, port.portRect.left);
-    clipTop = Math.max(clipTop, vis.top, clip.top, port.portRect.top);
-    clipRight = Math.min(clipRight, vis.right, clip.right, port.portRect.right);
-    clipBottom = Math.min(
-      clipBottom,
-      vis.bottom,
-      clip.bottom,
-      port.portRect.bottom
-    );
-  }
-
-  // Clamp to destination bitmap bounds
-  const dstBnd = dstBits.bounds;
-  clipLeft = Math.max(clipLeft, dstBnd.left);
-  clipTop = Math.max(clipTop, dstBnd.top);
-  clipRight = Math.min(clipRight, dstBnd.right);
-  clipBottom = Math.min(clipBottom, dstBnd.bottom);
-
-  if (clipLeft >= clipRight || clipTop >= clipBottom) return;
-
-  // Scale factors
-  const xScale = sw / dw;
-  const yScale = sh / dh;
-
-  const hasMask = maskRgn !== null;
-  const hasComplexClip =
-    port &&
-    ((port.visRgn.rgn.scanlines && port.visRgn.rgn.scanlines.length > 0) ||
-      (port.clipRgn.rgn.scanlines && port.clipRgn.rgn.scanlines.length > 0));
-
-  // Unscaled, unmasked, rectangular clip: move whole bytes. The source span
-  // that corresponds to the clipped destination must lie inside the source.
-  if (xScale === 1 && yScale === 1 && !hasMask && !hasComplexClip) {
-    const sLeft = srcRect.left + (clipLeft - dstRect.left);
-    const sTop = srcRect.top + (clipTop - dstRect.top);
-    const w = clipRight - clipLeft;
-    const h = clipBottom - clipTop;
-    const sb = srcBits.bounds;
-    if (sLeft >= sb.left && sLeft + w <= sb.right && sTop >= sb.top && sTop + h <= sb.bottom) {
-      BitBlt(
+  const fromScreen = srcBits.baseAddr === globals.screenBits.baseAddr;
+  const copy = (): void => {
+    if (isToPort(dstBits)) {
+      const port = globals.thePort!;
+      const proc = port.grafProcs?.bitsProc ?? StdBits;
+      proc(srcBits, srcRect, dstRect, mode, maskRgn);
+    } else {
+      StretchBits(
         srcBits,
         dstBits,
-        makeRect(sTop, sLeft, sTop + h, sLeft + w),
-        makeRect(clipTop, clipLeft, clipBottom, clipRight),
+        srcRect,
+        dstRect,
         mode,
-        globals.black
+        globals.wideOpen,
+        globals.wideOpen,
+        maskRgn ?? globals.wideOpen
       );
-      return;
     }
-  }
-
-  for (let dy = clipTop; dy < clipBottom; dy++) {
-    if (hasMask && maskRgn && !pointInRegion(maskRgn, 0, dy)) continue;
-
-    const sy = (srcRect.top + (dy - dstRect.top) * yScale) | 0;
-    const syInside = sy >= srcBits.bounds.top && sy < srcBits.bounds.bottom;
-
-    for (let dx = clipLeft; dx < clipRight; dx++) {
-      if (hasMask && maskRgn && !pointInRegion(maskRgn, dx, dy)) continue;
-      if (hasComplexClip && port) {
-        if (!pointInRegion(port.visRgn, dx, dy)) continue;
-        if (!pointInRegion(port.clipRgn, dx, dy)) continue;
-      }
-
-      const sx = (srcRect.left + (dx - dstRect.left) * xScale) | 0;
-      const srcPx =
-        syInside && sx >= srcBits.bounds.left && sx < srcBits.bounds.right
-          ? getBit(srcBits, sx, sy)
-          : 0;
-      const dstPx = getBit(dstBits, dx, dy);
-
-      // Modes 4–7 invert the source before the boolean operation
-      // (matching the EOR D7,D0 step in the original 68k BitBlt.a).
-      const s = mode & 4 ? 1 - srcPx : srcPx;
-      let result: number;
-      switch (mode & 3) {
-        case 0:
-          result = s;
-          break; // copy
-        case 1:
-          result = s | dstPx;
-          break; // or
-        case 2:
-          result = s ^ dstPx;
-          break; // xor
-        case 3:
-          result = (1 - s) & dstPx;
-          break; // bic: (NOT src) AND dst
-        default:
-          result = s;
-      }
-
-      setBit(dstBits, dx, dy, result);
-    }
+  };
+  if (fromScreen) {
+    withCursorShield(srcRect, { h: srcBits.bounds.left, v: srcBits.bounds.top }, copy);
+  } else {
+    copy();
   }
 }
 
-// -------------------------------------------------------------------------
-// ScrollRect
-// -------------------------------------------------------------------------
-
 /**
- * Scroll the pixels inside `dstRect` by `(dh, dv)` pixels, erase the
- * exposed strip using the port's background pattern, and record the exposed
- * area in `updateRgn`.
- *
- * `PROCEDURE ScrollRect(dstRect: Rect; dh, dv: INTEGER; updateRgn: RgnHandle)`.
- *
- * @param dstRect   The rectangle to scroll (in local port coordinates).
- * @param dh        Horizontal scroll amount (positive = right).
- * @param dv        Vertical scroll amount (positive = down).
- * @param updateRgn Receives the bounding rectangle of the newly exposed area.
+ * `PROCEDURE ScrollRect` (`Bitmaps.a:759-884`).
+ * `pnVis < 0` or `(dh,dv) = 0` → empty `updateRgn`. Else two `RgnBlt`s:
+ * copy through src∩dst, then erase the update with `bkPat`.
  */
 export function ScrollRect(
   dstRect: Rect,
@@ -183,84 +192,53 @@ export function ScrollRect(
   dv: number,
   updateRgn: RgnHandle
 ): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
+  dh = asInt16(dh);
+  dv = asInt16(dv);
+  if ((port.pnVis | 0) < 0 || (dh === 0 && dv === 0)) {
+    SetEmptyRgn(updateRgn); // Bitmaps.a:880-881
+    return;
+  }
 
-  const bm = port.portBits;
-  const dstR: Rect = {
-    top: dstRect.top + dv,
-    left: dstRect.left + dh,
-    bottom: dstRect.bottom + dv,
-    right: dstRect.right + dh,
+  const srcRgn = NewRgn();
+  const dstRgn = NewRgn();
+  RectRgn(srcRgn, dstRect);
+  SectRgn(srcRgn, port.visRgn, srcRgn);
+  SectRgn(srcRgn, port.clipRgn, srcRgn);
+  CopyRgn(srcRgn, dstRgn);
+  OffsetRgn(dstRgn, dh, dv);
+
+  const srcRect: Rect = {
+    top: (dstRect.top - dv) | 0,
+    left: (dstRect.left - dh) | 0,
+    bottom: (dstRect.bottom - dv) | 0,
+    right: (dstRect.right - dh) | 0,
   };
 
-  // Clip dstR to dstRect
-  const cdLeft = Math.max(dstR.left, dstRect.left);
-  const cdTop = Math.max(dstR.top, dstRect.top);
-  const cdRight = Math.min(dstR.right, dstRect.right);
-  const cdBottom = Math.min(dstR.bottom, dstRect.bottom);
+  DiffRgn(srcRgn, dstRgn, updateRgn);
 
-  if (cdLeft < cdRight && cdTop < cdBottom) {
-    // A self-copy; BitBlt orders the rows so none is overwritten before it
-    // is read, and blitRowBits snapshots a row that shifts onto itself.
-    BitBlt(
-      bm,
-      bm,
-      makeRect(cdTop - dv, cdLeft - dh, cdBottom - dv, cdRight - dh),
-      makeRect(cdTop, cdLeft, cdBottom, cdRight),
+  withCursorShield(dstRect, { h: port.portBits.bounds.left, v: port.portBits.bounds.top }, () => {
+    RgnBlt(
+      port.portBits,
+      port.portBits,
+      srcRect,
+      dstRect,
       srcCopy,
-      globals.black
+      globals.white,
+      dstRgn,
+      srcRgn,
+      globals.wideOpen
     );
-  }
-
-  // Erase the revealed (update) region using bkPat
-  // Compute the update region as dstRect minus the scrolled destination
-  // Simplified: fill exposed strips
-  if (dv > 0) {
-    // Top strip exposed
-    drawRectToPort(
-      dstRect.left,
-      dstRect.top,
-      dstRect.right,
-      dstRect.top + dv,
+    RgnBlt(
+      port.portBits,
+      port.portBits,
+      dstRect,
+      dstRect,
+      patCopy,
       port.bkPat,
-      8,
-      port
+      updateRgn,
+      globals.wideOpen,
+      globals.wideOpen
     );
-  } else if (dv < 0) {
-    drawRectToPort(
-      dstRect.left,
-      dstRect.bottom + dv,
-      dstRect.right,
-      dstRect.bottom,
-      port.bkPat,
-      8,
-      port
-    );
-  }
-  if (dh > 0) {
-    drawRectToPort(
-      dstRect.left,
-      dstRect.top,
-      dstRect.left + dh,
-      dstRect.bottom,
-      port.bkPat,
-      8,
-      port
-    );
-  } else if (dh < 0) {
-    drawRectToPort(
-      dstRect.right + dh,
-      dstRect.top,
-      dstRect.right,
-      dstRect.bottom,
-      port.bkPat,
-      8,
-      port
-    );
-  }
-
-  // Record the update region (simplified: the exposed strip(s))
-  updateRgn.rgn.rgnBBox = cloneRect(dstRect);
-  updateRgn.rgn.scanlines = undefined;
+  });
 }

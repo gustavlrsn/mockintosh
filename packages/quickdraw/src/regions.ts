@@ -1,134 +1,56 @@
 /**
- * Region routines — from `QuickDraw.p` Region Calculations and Graphical
- * Operations on Regions sections, implementing the QuickDraw scanline-
- * compressed region format.
- *
- * ## Region encoding
- * - **Rectangular region**: `rgnSize=10`, `rgnBBox` set, `scanlines` absent.
- *   The region exactly equals its bounding box.
- * - **Complex region**: `scanlines = [{y, xs}, …]`.  Each entry covers one
- *   horizontal row.  A pixel `(h, v)` is inside the region if the count of
- *   `xs[i] <= h` on that row is **odd** (even-odd / XOR rule).
- *
- * ## Boolean operations
- * `SectRgn`, `UnionRgn`, `DiffRgn`, and `XorRgn` are implemented via
- * scanline merging using the inversion-point model.
+ * Region calculations — `QuickDraw.p` / `Regions.a`, on the packed
+ * XOR-delta encoding (`PackRgn.a`).
  */
 
+import { Region, RgnHandle, Rect, Point, Pattern, cloneRect } from "./types";
+import { globals, requirePort } from "./globals";
+import { asInt16 } from "./fixmath";
+import { HidePen, ShowPen } from "./lines";
+import { MapPt } from "./points";
+import { EmptyRect, EqualRect, MapRect, OffsetRect, PushVerb } from "./rects";
+import { ERASE, FILL, FRAME, INVERT, PAINT } from "./constants";
+import { RgnBlt } from "./rgnBlt";
 import {
-  Region,
-  RgnHandle,
-  Rect,
-  Point,
-  Pattern,
-  GrafPort,
-  cloneRect,
-} from "./types";
-import { globals } from "./globals";
-import { drawHSpan, drawRectToPort, pointInRegion } from "./bitblt";
-import {
-  patCopy,
-  patXor,
-  FRAME,
-  PAINT,
-  ERASE,
-  INVERT,
-  FILL,
-} from "./constants";
+  cloneRegionInto,
+  emptyRegion,
+  ptInPacked,
+  rectRegion,
+} from "./regionData";
+import { rgnByteSize } from "./regionData";
+import { isRectRgn } from "./regionTypes";
+import { CullPoints, SortPoints } from "./sortPoints";
+import { PackRgn } from "./packRgn";
+import { PutRgn } from "./putRgn";
+import { CheckPic, PutPicByte, PutPicRgn, PutPicVerb } from "./picSave";
+import { InitRgn, SeekRgn, type RGNREC } from "./seekRgn";
+import { RgnOp } from "./rgnOp";
 
-// -------------------------------------------------------------------------
-// Internal helpers
-// -------------------------------------------------------------------------
+const OP_SECT = 0;
+const OP_DIFF = 2;
+const OP_UNION = 4;
+const OP_XOR = 6;
+const OP_INSET = 8;
 
-function makeRgn(
-  bbox: Rect,
-  scanlines?: Array<{ y: number; xs: number[] }>
-): RgnHandle {
-  return {
-    rgn: {
-      rgnSize:
-        scanlines && scanlines.length > 0 ? 10 + scanlines.length * 8 : 10,
-      rgnBBox: cloneRect(bbox),
-      scanlines,
-    },
-  };
+function handleFrom(rgn: Region): RgnHandle {
+  return { rgn };
 }
 
-function isRect(rgn: RgnHandle): boolean {
-  return !rgn.rgn.scanlines || rgn.rgn.scanlines.length === 0;
-}
-
-// Recompute rgnBBox from scanline data
-function recomputeBBox(rgn: Region): void {
-  if (!rgn.scanlines || rgn.scanlines.length === 0) return;
-  let top = 0x7fff;
-  let bottom = -0x7fff;
-  let left = 0x7fff;
-  let right = -0x7fff;
-  for (const sl of rgn.scanlines) {
-    if (sl.xs.length === 0) continue;
-    if (sl.y < top) top = sl.y;
-    if (sl.y + 1 > bottom) bottom = sl.y + 1;
-    if (sl.xs[0] < left) left = sl.xs[0];
-    if (sl.xs[sl.xs.length - 1] > right) right = sl.xs[sl.xs.length - 1];
-  }
-  rgn.rgnBBox = { top, left, bottom, right };
-}
-
-// -------------------------------------------------------------------------
-// NewRgn / DisposeRgn / CopyRgn
-// -------------------------------------------------------------------------
-
-/**
- * Allocate an empty region (bounding box = `{0,0,0,0}`, rectangular).
- * `FUNCTION NewRgn: RgnHandle`.
- */
 export function NewRgn(): RgnHandle {
-  return {
-    rgn: { rgnSize: 10, rgnBBox: { top: 0, left: 0, bottom: 0, right: 0 } },
-  };
+  return handleFrom(emptyRegion());
 }
 
-/**
- * Release a region handle.  In JS this is a no-op — the GC reclaims memory.
- * `PROCEDURE DisposeRgn(rgn: RgnHandle)`.
- */
-export function DisposeRgn(_rgn: RgnHandle): void {
-  // GC handles memory in JS
-}
+export function DisposeRgn(_rgn: RgnHandle): void {}
 
-/**
- * Deep-copy `srcRgn` into `dstRgn`.
- * `PROCEDURE CopyRgn(srcRgn, dstRgn: RgnHandle)`.
- */
 export function CopyRgn(srcRgn: RgnHandle, dstRgn: RgnHandle): void {
-  dstRgn.rgn = {
-    rgnSize: srcRgn.rgn.rgnSize,
-    rgnBBox: cloneRect(srcRgn.rgn.rgnBBox),
-    scanlines: srcRgn.rgn.scanlines
-      ? srcRgn.rgn.scanlines.map((sl) => ({ y: sl.y, xs: [...sl.xs] }))
-      : undefined,
-  };
+  if (srcRgn === dstRgn) return;
+  cloneRegionInto(srcRgn.rgn, dstRgn.rgn);
 }
 
-// -------------------------------------------------------------------------
-// SetEmptyRgn / SetRectRgn / RectRgn
-// -------------------------------------------------------------------------
-
-/**
- * Set `rgn` to the empty region.
- * `PROCEDURE SetEmptyRgn(rgn: RgnHandle)`.
- */
 export function SetEmptyRgn(rgn: RgnHandle): void {
-  rgn.rgn.rgnSize = 10;
-  rgn.rgn.rgnBBox = { top: 0, left: 0, bottom: 0, right: 0 };
-  rgn.rgn.scanlines = undefined;
+  cloneRegionInto(emptyRegion(), rgn.rgn);
 }
 
-/**
- * Set `rgn` to the rectangle described by `(left, top, right, bottom)`.
- * `PROCEDURE SetRectRgn(rgn: RgnHandle; left, top, right, bottom: INTEGER)`.
- */
 export function SetRectRgn(
   rgn: RgnHandle,
   left: number,
@@ -136,619 +58,310 @@ export function SetRectRgn(
   right: number,
   bottom: number
 ): void {
-  rgn.rgn.rgnSize = 10;
-  rgn.rgn.rgnBBox = { top, left, bottom, right };
-  rgn.rgn.scanlines = undefined;
+  cloneRegionInto(rectRegion({ top, left, bottom, right }), rgn.rgn);
 }
 
-/**
- * Set `rgn` to the rectangle `r`.
- * `PROCEDURE RectRgn(rgn: RgnHandle; r: Rect)`.
- */
 export function RectRgn(rgn: RgnHandle, r: Rect): void {
   SetRectRgn(rgn, r.left, r.top, r.right, r.bottom);
 }
 
-// -------------------------------------------------------------------------
-// OpenRgn / CloseRgn
-// Used to build a complex region from drawing operations.
-// During OpenRgn, line draws record inversion points.
-// -------------------------------------------------------------------------
-
-/**
- * Begin recording line drawing calls into a region.
- *
- * While a region is open, every call to `LineTo` / `StdLine` records
- * x-inversion points instead of (or in addition to) drawing pixels.
- * Call {@link CloseRgn} to finalise the region.
- *
- * `PROCEDURE OpenRgn`.
- */
+/** `PROCEDURE OpenRgn` — flag, new point buffer, HidePen (`Regions.a:266-286`). */
 export function OpenRgn(): void {
-  const port = globals.thePort;
-  if (!port) return;
-  // Create a new empty region handle as the accumulator
-  const h = NewRgn();
-  port.rgnSave = h;
+  const port = requirePort();
+  port.rgnSave = true;
   globals.rgnBuf = [];
   globals.rgnIndex = 0;
   globals.rgnMax = 0;
+  HidePen();
 }
 
-/**
- * Finish recording and store the accumulated shape into `dstRgn`.
- *
- * The accumulated x-inversion points (recorded since {@link OpenRgn}) are
- * collapsed using the XOR rule: each edge crossing toggles inside/outside.
- * The resulting scanline list is stored in `dstRgn` and the bounding box
- * is recomputed.
- *
- * `PROCEDURE CloseRgn(dstRgn: RgnHandle)`.
- */
+/** `PROCEDURE CloseRgn` — ShowPen, Sort/Cull/Pack (`Regions.a:289-329`). */
 export function CloseRgn(dstRgn: RgnHandle): void {
-  const port = globals.thePort;
-  if (!port) return;
-  const acc = port.rgnSave;
-  port.rgnSave = null;
-
-  if (!acc) return;
-
-  // Convert accumulated line inversion points into scanline data
-  // globals.rgnBuf holds pairs [x, y] recorded by DoLine
-  const scanMap = new Map<number, number[]>();
-  const buf = globals.rgnBuf ?? [];
-  for (let i = 0; i + 1 < buf.length; i += 2) {
-    const x = buf[i];
-    const y = buf[i + 1];
-    if (!scanMap.has(y)) scanMap.set(y, []);
-    scanMap.get(y)!.push(x);
-  }
-
-  const scanlines: Array<{ y: number; xs: number[] }> = [];
-  scanMap.forEach((xs, y) => {
-    // XOR: if a point appears an even number of times, remove it
-    const counts = new Map<number, number>();
-    for (const x of xs) counts.set(x, (counts.get(x) ?? 0) + 1);
-    const filtered: number[] = [];
-    counts.forEach((cnt, x) => {
-      if (cnt % 2 === 1) filtered.push(x);
-    });
-    filtered.sort((a, b) => a - b);
-    if (filtered.length > 0) scanlines.push({ y, xs: filtered });
-  });
-
-  scanlines.sort((a, b) => a.y - b.y);
-  dstRgn.rgn.scanlines = scanlines;
-  recomputeBBox(dstRgn.rgn);
+  const port = requirePort();
+  if (!port.rgnSave) return;
+  port.rgnSave = false;
+  ShowPen();
+  const pts = globals.rgnBuf ?? [];
+  SortPoints(pts, pts.length);
+  const n = CullPoints(pts, pts.length);
+  PackRgn(pts, n, dstRgn.rgn);
   globals.rgnBuf = null;
 }
 
-// -------------------------------------------------------------------------
-// Geometric transformations
-// -------------------------------------------------------------------------
-
-/**
- * Translate all points in `rgn` by `(dh, dv)` pixels.
- * `PROCEDURE OffsetRgn(rgn: RgnHandle; dh, dv: INTEGER)`.
- */
+/** `PROCEDURE OffsetRgn` — walk the stream (`Regions.a:440-479`). */
 export function OffsetRgn(rgn: RgnHandle, dh: number, dv: number): void {
-  rgn.rgn.rgnBBox.top += dv;
-  rgn.rgn.rgnBBox.left += dh;
-  rgn.rgn.rgnBBox.bottom += dv;
-  rgn.rgn.rgnBBox.right += dh;
-  if (rgn.rgn.scanlines) {
-    for (const sl of rgn.rgn.scanlines) {
-      sl.y += dv;
-      sl.xs = sl.xs.map((x) => x + dh);
+  OffsetRect(rgn.rgn.rgnBBox, dh, dv);
+  if (isRectRgn(rgn.rgn)) return;
+  const data = rgn.rgn.data;
+  let i = 0;
+  while (i < data.length) {
+    if (data[i] === 32767) break;
+    data[i] = (data[i] + dv) | 0;
+    i++;
+    while (i < data.length && data[i] !== 32767) {
+      data[i] = (data[i] + dh) | 0;
+      i++;
     }
+    if (i < data.length && data[i] === 32767) i++;
   }
 }
 
 /**
- * Inset (shrink) `rgn` by `dh` pixels on each horizontal side and `dv`
- * pixels on each vertical side.  Scanlines outside the new bounding box are
- * removed.
- * `PROCEDURE InsetRgn(rgn: RgnHandle; dh, dv: INTEGER)`.
+ * `PROCEDURE InsetRgn` (`Regions.a:483-595`): rect → InsetRect;
+ * complex → two HINSET passes with V/H swap.
  */
 export function InsetRgn(rgn: RgnHandle, dh: number, dv: number): void {
-  rgn.rgn.rgnBBox.top += dv;
-  rgn.rgn.rgnBBox.left += dh;
-  rgn.rgn.rgnBBox.bottom -= dv;
-  rgn.rgn.rgnBBox.right -= dh;
-  // For complex regions, remove scanlines outside new bbox
-  if (rgn.rgn.scanlines) {
-    rgn.rgn.scanlines = rgn.rgn.scanlines
-      .filter(
-        (sl) => sl.y >= rgn.rgn.rgnBBox.top && sl.y < rgn.rgn.rgnBBox.bottom
-      )
-      .map((sl) => ({
-        y: sl.y,
-        xs: sl.xs.filter(
-          (x) => x >= rgn.rgn.rgnBBox.left && x <= rgn.rgn.rgnBBox.right
-        ),
-      }))
-      .filter((sl) => sl.xs.length > 0);
+  if (dh === 0 && dv === 0) return;
+  if (isRectRgn(rgn.rgn)) {
+    const b = rgn.rgn.rgnBBox;
+    b.top += dv;
+    b.left += dh;
+    b.bottom -= dv;
+    b.right -= dh;
+    if (b.left >= b.right || b.top >= b.bottom) SetEmptyRgn(rgn);
+    return;
   }
+  hinset(rgn.rgn, dh);
+  swapVH(rgn.rgn);
+  hinset(rgn.rgn, dv);
+  swapVH(rgn.rgn);
 }
 
-/**
- * Map `rgn` from the coordinate space of `fromRect` to `toRect`.
- * `PROCEDURE MapRgn(rgn: RgnHandle; fromRect, toRect: Rect)`.
- */
+function hinset(rgn: Region, dh: number): void {
+  const pts: Point[] = [];
+  const n = RgnOp(rgn, rgn, pts, 4096, OP_INSET, dh, true);
+  SortPoints(pts, n);
+  PackRgn(pts, n, rgn);
+}
+
+function swapVH(rgn: Region): void {
+  const tmp = rgn.rgnBBox.top;
+  rgn.rgnBBox.top = rgn.rgnBBox.left;
+  rgn.rgnBBox.left = tmp;
+  const tmp2 = rgn.rgnBBox.bottom;
+  rgn.rgnBBox.bottom = rgn.rgnBBox.right;
+  rgn.rgnBBox.right = tmp2;
+  if (isRectRgn(rgn)) return;
+  const pts: Point[] = [];
+  PutRgn(rgn, pts);
+  for (const p of pts) {
+    const h = p.h;
+    p.h = p.v;
+    p.v = h;
+  }
+  SortPoints(pts, pts.length);
+  PackRgn(pts, pts.length, rgn);
+}
+
+/** `PROCEDURE MapRgn` (`Regions.a:1076-1165`). */
 export function MapRgn(rgn: RgnHandle, fromRect: Rect, toRect: Rect): void {
-  const fW = fromRect.right - fromRect.left;
-  const fH = fromRect.bottom - fromRect.top;
-  const tW = toRect.right - toRect.left;
-  const tH = toRect.bottom - toRect.top;
-  const mapH = (x: number) =>
-    fW !== 0 ? toRect.left + Math.round(((x - fromRect.left) * tW) / fW) : x;
-  const mapV = (y: number) =>
-    fH !== 0 ? toRect.top + Math.round(((y - fromRect.top) * tH) / fH) : y;
-
-  rgn.rgn.rgnBBox = {
-    top: mapV(rgn.rgn.rgnBBox.top),
-    left: mapH(rgn.rgn.rgnBBox.left),
-    bottom: mapV(rgn.rgn.rgnBBox.bottom),
-    right: mapH(rgn.rgn.rgnBBox.right),
-  };
-  if (rgn.rgn.scanlines) {
-    rgn.rgn.scanlines = rgn.rgn.scanlines.map((sl) => ({
-      y: mapV(sl.y),
-      xs: sl.xs.map(mapH),
-    }));
+  if (EqualRect(fromRect, toRect)) return;
+  if (isRectRgn(rgn.rgn)) {
+    MapRect(rgn.rgn.rgnBBox, fromRect, toRect);
+    return;
   }
+  const pts: Point[] = [];
+  PutRgn(rgn.rgn, pts);
+  for (const p of pts) MapPt(p, fromRect, toRect);
+  SortPoints(pts, pts.length);
+  const n = CullPoints(pts, pts.length);
+  PackRgn(pts, n, rgn.rgn);
 }
 
-// -------------------------------------------------------------------------
-// Region predicates
-// -------------------------------------------------------------------------
+export function EmptyRgn(rgn: RgnHandle): boolean {
+  return EmptyRect(rgn.rgn.rgnBBox);
+}
 
-/**
- * Return `true` if `rgnA` and `rgnB` describe the same pixel set.
- * `FUNCTION EqualRgn(rgnA, rgnB: RgnHandle): BOOLEAN`.
- */
+/** Byte compare of canonical form (`Regions.a:613-645`). */
 export function EqualRgn(rgnA: RgnHandle, rgnB: RgnHandle): boolean {
-  const a = rgnA.rgn;
-  const b = rgnB.rgn;
-  if (
-    a.rgnBBox.top !== b.rgnBBox.top ||
-    a.rgnBBox.left !== b.rgnBBox.left ||
-    a.rgnBBox.bottom !== b.rgnBBox.bottom ||
-    a.rgnBBox.right !== b.rgnBBox.right
-  )
-    return false;
-  const aSL = a.scanlines ?? [];
-  const bSL = b.scanlines ?? [];
-  if (aSL.length !== bSL.length) return false;
-  for (let i = 0; i < aSL.length; i++) {
-    if (aSL[i].y !== bSL[i].y) return false;
-    if (aSL[i].xs.length !== bSL[i].xs.length) return false;
-    for (let j = 0; j < aSL[i].xs.length; j++) {
-      if (aSL[i].xs[j] !== bSL[i].xs[j]) return false;
-    }
+  if (rgnA.rgn.rgnSize !== rgnB.rgn.rgnSize) return false;
+  if (!EqualRect(rgnA.rgn.rgnBBox, rgnB.rgn.rgnBBox)) return false;
+  if (rgnA.rgn.data.length !== rgnB.rgn.data.length) return false;
+  for (let i = 0; i < rgnA.rgn.data.length; i++) {
+    if (rgnA.rgn.data[i] !== rgnB.rgn.data[i]) return false;
   }
   return true;
 }
 
-/**
- * Return `true` if `rgn` contains no pixels.
- * `FUNCTION EmptyRgn(rgn: RgnHandle): BOOLEAN`.
- */
-export function EmptyRgn(rgn: RgnHandle): boolean {
-  const r = rgn.rgn.rgnBBox;
-  return r.top >= r.bottom || r.left >= r.right;
+function makeSeek(rgn: Region, minH: number, maxH: number): RGNREC {
+  const state = {
+    rgnPtr: rgn,
+    dataPtr: 0,
+    scanBuf: new Uint16Array(0),
+    scanSize: 0,
+    thisV: 0,
+    nextV: 0,
+    minH: 0,
+    maxH: 0,
+    leftH: 0,
+  };
+  InitRgn(rgn, state, minH, maxH, minH);
+  return state;
 }
 
-/**
- * Return `true` if point `pt` lies inside `rgn`.
- * `FUNCTION PtInRgn(pt: Point; rgn: RgnHandle): BOOLEAN`.
- */
+function scanHasInk(state: RGNREC): boolean {
+  for (let i = 0; i < state.scanBuf.length; i++) if (state.scanBuf[i]) return true;
+  return false;
+}
+
 export function PtInRgn(pt: Point, rgn: RgnHandle): boolean {
-  return pointInRegion(rgn, pt.h, pt.v);
+  return ptInPacked(rgn.rgn, pt);
 }
 
-/**
- * Return `true` if any pixel in rect `r` is also inside `rgn`.
- * Uses a fast bounding-box pre-check; for complex regions falls back to a
- * per-pixel scan.
- * `FUNCTION RectInRgn(r: Rect; rgn: RgnHandle): BOOLEAN`.
- */
+/** `RectInRgn` via SeekRgn (`Regions.a:907-1002`). */
 export function RectInRgn(r: Rect, rgn: RgnHandle): boolean {
-  // Quick bounding-box check
   const b = rgn.rgn.rgnBBox;
-  if (
-    r.right <= b.left ||
-    r.left >= b.right ||
-    r.bottom <= b.top ||
-    r.top >= b.bottom
-  )
+  if (r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom) {
     return false;
-  if (isRect(rgn)) return true;
-  // Check if any pixel in r is inside rgn
-  for (let y = r.top; y < r.bottom; y++) {
-    for (let x = r.left; x < r.right; x++) {
-      if (pointInRegion(rgn, x, y)) return true;
-    }
+  }
+  if (isRectRgn(rgn.rgn)) return true;
+  const state = makeSeek(rgn.rgn, r.left, r.right);
+  for (let v = r.top; v < r.bottom; v++) {
+    SeekRgn(state, v);
+    if (scanHasInk(state)) return true;
   }
   return false;
 }
 
-// -------------------------------------------------------------------------
-// Boolean region operations (SectRgn, UnionRgn, DiffRgn, XorRgn)
-// Implemented via scanline merging using the XOR-based inversion point model.
-// -------------------------------------------------------------------------
-
-// Convert a rectangular region to scanline representation
-function rgnToScanlines(rgn: RgnHandle): Map<number, number[]> {
-  const map = new Map<number, number[]>();
-  if (rgn.rgn.scanlines && rgn.rgn.scanlines.length > 0) {
-    for (const sl of rgn.rgn.scanlines) {
-      map.set(sl.y, [...sl.xs]);
-    }
-  } else {
-    // Rectangular region — generate two inversion points per row
-    const { top, left, bottom, right } = rgn.rgn.rgnBBox;
-    for (let y = top; y < bottom; y++) {
-      map.set(y, [left, right]);
-    }
-  }
-  return map;
-}
-
-// Rebuild a region from a scanline map
-function scanlinesToRgn(map: Map<number, number[]>): RgnHandle {
-  const scanlines: Array<{ y: number; xs: number[] }> = [];
-  map.forEach((xs, y) => {
-    const sorted = [...xs].sort((a, b) => a - b);
-    if (sorted.length > 0 && sorted.length % 2 === 0) {
-      scanlines.push({ y, xs: sorted });
-    }
-  });
-  scanlines.sort((a, b) => a.y - b.y);
-  const handle: RgnHandle = {
-    rgn: { rgnSize: 10, rgnBBox: { top: 0, left: 0, bottom: 0, right: 0 } },
-  };
-  handle.rgn.scanlines = scanlines;
-  recomputeBBox(handle.rgn);
-  // If scanlines exactly describe a rectangle, clear them
-  const b = handle.rgn.rgnBBox;
-  let isRectResult = true;
-  for (const sl of scanlines) {
-    if (sl.xs.length !== 2 || sl.xs[0] !== b.left || sl.xs[1] !== b.right) {
-      isRectResult = false;
-      break;
-    }
-  }
-  if (isRectResult && scanlines.length === b.bottom - b.top) {
-    handle.rgn.scanlines = undefined;
-  }
-  return handle;
-}
-
-// XOR-merge two inversion point lists (union of odd-parity sets)
-function xorInvPoints(a: number[], b: number[]): number[] {
-  const counts = new Map<number, number>();
-  for (const x of [...a, ...b]) counts.set(x, (counts.get(x) ?? 0) + 1);
-  const result: number[] = [];
-  counts.forEach((cnt, x) => {
-    if (cnt % 2 === 1) result.push(x);
-  });
-  return result.sort((a, b) => a - b);
-}
-
-// Intersect two inversion point lists (AND of coverage)
-function andInvPoints(aXs: number[], bXs: number[]): number[] {
-  // Convert both to coverage ranges, intersect, convert back
-  function toRanges(xs: number[]): Array<[number, number]> {
-    const ranges: Array<[number, number]> = [];
-    for (let i = 0; i + 1 < xs.length; i += 2) ranges.push([xs[i], xs[i + 1]]);
-    return ranges;
-  }
-  const aRanges = toRanges(aXs);
-  const bRanges = toRanges(bXs);
-  const result: number[] = [];
-  for (const [a0, a1] of aRanges) {
-    for (const [b0, b1] of bRanges) {
-      const lo = Math.max(a0, b0);
-      const hi = Math.min(a1, b1);
-      if (lo < hi) {
-        result.push(lo);
-        result.push(hi);
-      }
-    }
-  }
-  return result.sort((a, b) => a - b);
-}
-
-// Subtract bXs coverage from aXs coverage
-function diffInvPoints(aXs: number[], bXs: number[]): number[] {
-  function toRanges(xs: number[]): Array<[number, number]> {
-    const ranges: Array<[number, number]> = [];
-    for (let i = 0; i + 1 < xs.length; i += 2) ranges.push([xs[i], xs[i + 1]]);
-    return ranges;
-  }
-  const aRanges = toRanges(aXs);
-  const bRanges = toRanges(bXs);
-  const result: number[] = [];
-  for (const [a0, a1] of aRanges) {
-    let cur = a0;
-    for (const [b0, b1] of bRanges) {
-      if (b0 >= a1) break;
-      if (b1 <= cur) continue;
-      if (b0 > cur) {
-        result.push(cur);
-        result.push(b0);
-      }
-      cur = Math.max(cur, b1);
-    }
-    if (cur < a1) {
-      result.push(cur);
-      result.push(a1);
-    }
-  }
-  return result;
-}
-
-/**
- * Store the intersection of `srcRgnA` and `srcRgnB` in `dstRgn`.
- * `PROCEDURE SectRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle)`.
- */
-export function SectRgn(
-  srcRgnA: RgnHandle,
-  srcRgnB: RgnHandle,
-  dstRgn: RgnHandle
-): void {
-  const aMap = rgnToScanlines(srcRgnA);
-  const bMap = rgnToScanlines(srcRgnB);
-  const result = new Map<number, number[]>();
-  aMap.forEach((aXs, y) => {
-    const bXs = bMap.get(y);
-    if (!bXs) return;
-    const xs = andInvPoints(aXs, bXs);
-    if (xs.length > 0) result.set(y, xs);
-  });
-  const h = scanlinesToRgn(result);
-  CopyRgn(h, dstRgn);
-}
-
-/**
- * Store the union of `srcRgnA` and `srcRgnB` in `dstRgn`.
- * `PROCEDURE UnionRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle)`.
- */
-export function UnionRgn(
-  srcRgnA: RgnHandle,
-  srcRgnB: RgnHandle,
-  dstRgn: RgnHandle
-): void {
-  const aMap = rgnToScanlines(srcRgnA);
-  const bMap = rgnToScanlines(srcRgnB);
-
-  // Collect all rows
-  const allYs = new Set<number>([...aMap.keys(), ...bMap.keys()]);
-  const result = new Map<number, number[]>();
-  allYs.forEach((y) => {
-    const aXs = aMap.get(y) ?? [];
-    const bXs = bMap.get(y) ?? [];
-    // Union = XOR of the two inversion point lists, then collapse
-    const xs = unionInvPoints(aXs, bXs);
-    if (xs.length > 0) result.set(y, xs);
-  });
-  const h = scanlinesToRgn(result);
-  CopyRgn(h, dstRgn);
-}
-
-function unionInvPoints(aXs: number[], bXs: number[]): number[] {
-  // Union of two coverage sets (result is ranges in A or B)
-  function toRanges(xs: number[]): Array<[number, number]> {
-    const r: Array<[number, number]> = [];
-    for (let i = 0; i + 1 < xs.length; i += 2) r.push([xs[i], xs[i + 1]]);
-    return r;
-  }
-  // Merge all ranges
-  const all = [...toRanges(aXs), ...toRanges(bXs)].sort((a, b) => a[0] - b[0]);
-  if (all.length === 0) return [];
-  const merged: Array<[number, number]> = [all[0]];
-  for (let i = 1; i < all.length; i++) {
-    const top = merged[merged.length - 1];
-    if (all[i][0] <= top[1]) top[1] = Math.max(top[1], all[i][1]);
-    else merged.push(all[i]);
-  }
-  const result: number[] = [];
-  for (const [a, b] of merged) {
-    result.push(a);
-    result.push(b);
-  }
-  return result;
-}
-
-/**
- * Store `srcRgnA` minus `srcRgnB` in `dstRgn` (pixels in A but not in B).
- * `PROCEDURE DiffRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle)`.
- */
-export function DiffRgn(
-  srcRgnA: RgnHandle,
-  srcRgnB: RgnHandle,
-  dstRgn: RgnHandle
-): void {
-  const aMap = rgnToScanlines(srcRgnA);
-  const bMap = rgnToScanlines(srcRgnB);
-  const result = new Map<number, number[]>();
-  aMap.forEach((aXs, y) => {
-    const bXs = bMap.get(y);
-    const xs = bXs ? diffInvPoints(aXs, bXs) : [...aXs];
-    if (xs.length > 0) result.set(y, xs);
-  });
-  const h = scanlinesToRgn(result);
-  CopyRgn(h, dstRgn);
-}
-
-/**
- * Store the symmetric difference (XOR) of `srcRgnA` and `srcRgnB` in
- * `dstRgn` (pixels in A or B but not both).
- * `PROCEDURE XorRgn(srcRgnA, srcRgnB, dstRgn: RgnHandle)`.
- */
-export function XorRgn(
-  srcRgnA: RgnHandle,
-  srcRgnB: RgnHandle,
-  dstRgn: RgnHandle
-): void {
-  const aMap = rgnToScanlines(srcRgnA);
-  const bMap = rgnToScanlines(srcRgnB);
-  const allYs = new Set<number>([...aMap.keys(), ...bMap.keys()]);
-  const result = new Map<number, number[]>();
-  allYs.forEach((y) => {
-    const aXs = aMap.get(y) ?? [];
-    const bXs = bMap.get(y) ?? [];
-    const xs = xorInvPoints(aXs, bXs);
-    if (xs.length > 0) result.set(y, xs);
-  });
-  const h = scanlinesToRgn(result);
-  CopyRgn(h, dstRgn);
-}
-
-// -------------------------------------------------------------------------
-// Graphical operations on regions
-// -------------------------------------------------------------------------
-
-function drawRegion(verb: number, rgn: RgnHandle, fillPat?: Pattern): void {
-  const port = globals.thePort;
-  if (!port) return;
-  if (port.grafProcs && port.grafProcs.rgnProc) {
-    if (fillPat) port.fillPat = new Uint8Array(fillPat);
-    port.grafProcs.rgnProc(verb as any, rgn);
+function doRgnOp(srcA: RgnHandle, srcB: RgnHandle, dst: RgnHandle, op: number): void {
+  const a = srcA.rgn;
+  const b = srcB.rgn;
+  if (EqualRgn(srcA, srcB)) {
+    if (op === OP_SECT || op === OP_UNION) CopyRgn(srcA, dst);
+    else SetEmptyRgn(dst);
     return;
   }
-  StdRgn(verb, rgn, fillPat);
-}
-
-export function StdRgn(verb: number, rgn: RgnHandle, fillPat?: Pattern): void {
-  const port = globals.thePort;
-  if (!port) return;
-
-  let pat: Pattern;
-  let mode: number;
-  switch (verb) {
-    case FRAME:
-      pat = port.pnPat;
-      mode = port.pnMode;
-      break;
-    case PAINT:
-      pat = port.pnPat;
-      mode = port.pnMode;
-      break;
-    case ERASE:
-      pat = port.bkPat;
-      mode = patCopy;
-      break;
-    case INVERT:
-      pat = globals.black;
-      mode = patXor;
-      break;
-    case FILL:
-      pat = fillPat ?? port.fillPat;
-      mode = patCopy;
-      break;
-    default:
-      pat = port.pnPat;
-      mode = port.pnMode;
+  if (op === OP_DIFF && EmptyRgn(srcB)) {
+    CopyRgn(srcA, dst);
+    return;
   }
-
-  const r = rgn.rgn;
-
-  if (verb === FRAME) {
-    // Frame: draw outline pixels (edge pixels only)
-    // For rectangular regions, use rect framing
-    if (isRect(rgn)) {
-      const pw = Math.max(1, port.pnSize.h);
-      const ph = Math.max(1, port.pnSize.v);
-      const b = r.rgnBBox;
-      drawRectToPort(
-        b.left,
-        b.top,
-        b.right,
-        b.top + ph,
-        port.pnPat,
-        port.pnMode,
-        port
-      );
-      drawRectToPort(
-        b.left,
-        b.bottom - ph,
-        b.right,
-        b.bottom,
-        port.pnPat,
-        port.pnMode,
-        port
-      );
-      drawRectToPort(
-        b.left,
-        b.top + ph,
-        b.left + pw,
-        b.bottom - ph,
-        port.pnPat,
-        port.pnMode,
-        port
-      );
-      drawRectToPort(
-        b.right - pw,
-        b.top + ph,
-        b.right,
-        b.bottom - ph,
-        port.pnPat,
-        port.pnMode,
-        port
-      );
+  if (op === OP_SECT || op === OP_DIFF) {
+    const t: Rect = { top: 0, left: 0, bottom: 0, right: 0 };
+    t.top = Math.max(a.rgnBBox.top, b.rgnBBox.top);
+    t.left = Math.max(a.rgnBBox.left, b.rgnBBox.left);
+    t.bottom = Math.min(a.rgnBBox.bottom, b.rgnBBox.bottom);
+    t.right = Math.min(a.rgnBBox.right, b.rgnBBox.right);
+    if (t.top >= t.bottom || t.left >= t.right) {
+      if (op === OP_SECT) SetEmptyRgn(dst);
+      else CopyRgn(srcA, dst);
       return;
     }
-    // Complex region framing: pixel is on the frame if it's inside the region
-    // but at least one of its 4-neighbours is outside.
-    const b = r.rgnBBox;
-    for (let y = b.top; y < b.bottom; y++) {
-      for (let x = b.left; x < b.right; x++) {
-        if (!pointInRegion(rgn, x, y)) continue;
-        const edge =
-          !pointInRegion(rgn, x - 1, y) ||
-          !pointInRegion(rgn, x + 1, y) ||
-          !pointInRegion(rgn, x, y - 1) ||
-          !pointInRegion(rgn, x, y + 1);
-        if (edge) drawHSpan(x, x + 1, y, pat, mode, port);
-      }
+    if (op === OP_SECT && isRectRgn(a) && isRectRgn(b)) {
+      RectRgn(dst, t);
+      return;
     }
+  }
+  if (op === OP_UNION || op === OP_XOR) {
+    if (EmptyRgn(srcB)) {
+      CopyRgn(srcA, dst);
+      return;
+    }
+    if (EmptyRgn(srcA)) {
+      CopyRgn(srcB, dst);
+      return;
+    }
+  }
+  const pts: Point[] = [];
+  const n = RgnOp(a, b, pts, 4096, op, 0, true);
+  PackRgn(pts, n, dst.rgn);
+}
+
+export function SectRgn(srcA: RgnHandle, srcB: RgnHandle, dst: RgnHandle): void {
+  doRgnOp(srcA, srcB, dst, OP_SECT);
+}
+
+export function UnionRgn(srcA: RgnHandle, srcB: RgnHandle, dst: RgnHandle): void {
+  doRgnOp(srcA, srcB, dst, OP_UNION);
+}
+
+export function DiffRgn(srcA: RgnHandle, srcB: RgnHandle, dst: RgnHandle): void {
+  doRgnOp(srcA, srcB, dst, OP_DIFF);
+}
+
+export function XorRgn(srcA: RgnHandle, srcB: RgnHandle, dst: RgnHandle): void {
+  doRgnOp(srcA, srcB, dst, OP_XOR);
+}
+
+/**
+ * `PROCEDURE DrawRgn(rgn, mode, pat)` (`Regions.a:146-174`).
+ * Quits if `pnVis < 0`. Blits portBits through clip / vis / rgn.
+ */
+export function DrawRgn(rgn: RgnHandle, mode: number, pat: Pattern): void {
+  const port = requirePort();
+  if (asInt16(port.pnVis) < 0) return;
+  RgnBlt(
+    port.portBits,
+    port.portBits,
+    port.portBits.bounds,
+    port.portBits.bounds,
+    mode,
+    pat,
+    port.clipRgn,
+    port.visRgn,
+    rgn
+  );
+}
+
+/**
+ * `PROCEDURE FrRgn(rgn, mode, pat)` (`Regions.a:178-228`).
+ * CopyRgn → InsetRgn(pnSize) → DiffRgn → DrawRgn. Rectangular FrRect
+ * fast path omitted (same pixels; would ignore the passed mode/pat).
+ */
+export function FrRgn(rgn: RgnHandle, mode: number, pat: Pattern): void {
+  const port = requirePort();
+  if (asInt16(port.pnVis) < 0) return;
+  const temp = NewRgn();
+  CopyRgn(rgn, temp);
+  InsetRgn(temp, port.pnSize.h, port.pnSize.v);
+  DiffRgn(rgn, temp, temp);
+  DrawRgn(temp, mode, pat);
+}
+
+function drawRegion(verb: number, rgn: RgnHandle, fillPat?: Pattern): void {
+  const port = requirePort();
+  if (fillPat) port.fillPat = new Uint8Array(fillPat);
+  if (port.grafProcs?.rgnProc) {
+    port.grafProcs.rgnProc(verb as 0 | 1 | 2 | 3 | 4, rgn);
     return;
   }
+  StdRgn(verb, rgn);
+}
 
-  // Paint/Erase/Invert/Fill: scanline fill
-  if (isRect(rgn)) {
-    const b = r.rgnBBox;
-    drawRectToPort(b.left, b.top, b.right, b.bottom, pat, mode, port);
-    return;
+/** `PROCEDURE StdRgn(verb, rgn)` (`Regions.a:18-63`). */
+export function StdRgn(verb: number, rgn: RgnHandle, fillPat?: Pattern): void {
+  const port = requirePort();
+  if (fillPat) port.fillPat = new Uint8Array(fillPat);
+  if (CheckPic()) {
+    PutPicVerb(verb);
+    PutPicByte(0x80 + verb);
+    PutPicRgn(rgn);
   }
-
-  if (!r.scanlines) return;
-  for (const sl of r.scanlines) {
-    for (let i = 0; i + 1 < sl.xs.length; i += 2) {
-      drawHSpan(sl.xs[i], sl.xs[i + 1], sl.y, pat, mode, port);
+  const { mode, pat } = PushVerb(verb);
+  if (verb === FRAME) {
+    if (port.rgnSave) {
+      if (!globals.rgnBuf) globals.rgnBuf = [];
+      PutRgn(rgn.rgn, globals.rgnBuf);
     }
+    FrRgn(rgn, mode, pat);
+  } else {
+    DrawRgn(rgn, mode, pat);
   }
 }
 
-/** Draw the outline of `rgn` using the current pen. `PROCEDURE FrameRgn`. */
 export function FrameRgn(rgn: RgnHandle): void {
   drawRegion(FRAME, rgn);
 }
-/** Fill `rgn` with the current pen pattern. `PROCEDURE PaintRgn`. */
 export function PaintRgn(rgn: RgnHandle): void {
   drawRegion(PAINT, rgn);
 }
-/** Fill `rgn` with the background pattern. `PROCEDURE EraseRgn`. */
 export function EraseRgn(rgn: RgnHandle): void {
   drawRegion(ERASE, rgn);
 }
-/** Invert every pixel inside `rgn`. `PROCEDURE InvertRgn`. */
 export function InvertRgn(rgn: RgnHandle): void {
   drawRegion(INVERT, rgn);
 }
-/** Fill `rgn` with the explicit pattern `pat`. `PROCEDURE FillRgn`. */
 export function FillRgn(rgn: RgnHandle, pat: Pattern): void {
   drawRegion(FILL, rgn, pat);
 }
+
+export { isRectRgn, rgnByteSize };

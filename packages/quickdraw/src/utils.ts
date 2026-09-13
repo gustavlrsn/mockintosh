@@ -1,49 +1,55 @@
 /**
- * Miscellaneous utility routines — from `QuickDraw.p` Misc Utility Routines
- * section and `reference/QuickDraw/Util.a`.
+ * Miscellaneous utility routines — from `QuickDraw.p` / `Util.a`.
  */
 
-import { globals } from "./globals";
-import { bmGetPixel } from "./bitblt";
+import { globals, requirePort } from "./globals";
+import { getBit } from "./packedBits";
+import { asInt16 } from "./fixmath";
+import { HideCursor, ShowCursor } from "./cursors";
 
 /**
- * Read a single pixel from the current port at `(h, v)`.
- * Returns `true` if the pixel is black (value `1`), `false` if white or
- * out of bounds.
+ * Read a single pixel from the current port at `(h, v)` in local coords.
+ * `HideCursor` / `ShowCursor` around the read (`Util.a:489-507`).
+ * Bounds-checked (returns white outside) — §4.4 memory safety.
  * `FUNCTION GetPixel(h, v: INTEGER): BOOLEAN`.
  */
 export function GetPixel(h: number, v: number): boolean {
-  const port = globals.thePort;
-  if (!port) return false;
-  return bmGetPixel(port.portBits, h, v) === 1;
+  HideCursor();
+  try {
+    const bm = requirePort().portBits;
+    if (
+      v < bm.bounds.top ||
+      v >= bm.bounds.bottom ||
+      h < bm.bounds.left ||
+      h >= bm.bounds.right
+    ) {
+      return false;
+    }
+    return getBit(bm, h, v) === 1;
+  } finally {
+    ShowCursor();
+  }
 }
 
 /**
- * Return a pseudo-random signed 16-bit integer and advance `globals.randSeed`.
- *
- * Uses the Park-Miller multiplicative congruential generator:
- * `randSeed := (randSeed × 16807) MOD 2147483647`
- * implemented via Schrage's method to avoid 32-bit overflow.
- *
- * `FUNCTION Random: INTEGER` from `reference/QuickDraw/Util.a`.
+ * Park–Miller `randSeed := (randSeed × 16807) MOD 2147483647`, transcribed
+ * from the 16-bit-word decomposition in `Util.a:119-178`. The low word
+ * `−32768` is replaced with `0`.
  */
 export function Random(): number {
   const A = 16807;
-  const M = 2147483647; // 2^31 - 1
-  const seed = globals.randSeed;
-
-  // Schrage's method for overflow-free computation
-  const q = (M / A) | 0;
-  const r = M % A;
-  const hi = (seed / q) | 0;
-  const lo = seed % q;
-  let next = A * lo - r * hi;
-  if (next <= 0) next += M;
-  globals.randSeed = next;
-
-  // Return as signed 16-bit integer (low word)
-  const result = next & 0xffff;
-  return result >= 0x8000 ? result - 0x10000 : result;
+  const P = 0x7fffffff;
+  const seed = globals.randSeed | 0;
+  const lo = seed & 0xffff;
+  const hi = (seed >>> 16) & 0xffff;
+  const xalo = Math.imul(A, lo) >>> 0;
+  const fhi = (Math.imul(A, hi) + (xalo >>> 16)) >>> 0;
+  const k = ((fhi << 1) >>> 16) & 0xffff;
+  let next = (xalo & 0xffff) - P + ((fhi & 0x7fff) << 16) + k;
+  if (next < 0) next += P;
+  globals.randSeed = next | 0;
+  const result = asInt16(next);
+  return result === -32768 ? 0 : result;
 }
 
 /**
@@ -78,9 +84,7 @@ export function StuffHex(thingPtr: Uint8Array, s: string): void {
  * (`blackColor`, `whiteColor`, etc.) from `constants.ts`.
  */
 export function ForeColor(color: number): void {
-  const port = globals.thePort;
-  if (!port) return;
-  port.fgColor = color;
+  requirePort().fgColor = color;
 }
 
 /**
@@ -88,9 +92,7 @@ export function ForeColor(color: number): void {
  * `PROCEDURE BackColor(color: LongInt)`.
  */
 export function BackColor(color: number): void {
-  const port = globals.thePort;
-  if (!port) return;
-  port.bkColor = color;
+  requirePort().bkColor = color;
 }
 
 /**
@@ -99,7 +101,5 @@ export function BackColor(color: number): void {
  * on colour QuickDraw systems.  Has no effect in 1-bpp mode.
  */
 export function ColorBit(whichBit: number): void {
-  const port = globals.thePort;
-  if (!port) return;
-  port.colrBit = whichBit;
+  requirePort().colrBit = whichBit;
 }

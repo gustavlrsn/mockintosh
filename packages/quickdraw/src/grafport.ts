@@ -1,127 +1,64 @@
 /**
- * GrafPort management routines — from `QuickDraw.p` GrafPort Routines section
- * and `GrafAsm.a` implementation.
- *
- * A **GrafPort** is the drawing context for all QuickDraw operations.  You
- * must call {@link InitGraf} once at start-up (providing the screen bitmap),
- * then {@link OpenPort} or {@link newGrafPort} to create a port and
- * {@link SetPort} to make it current before drawing anything.
+ * GrafPort management routines — `QuickDraw.p` / `GrafAsm.a`.
  */
 
-import {
-  GrafPort,
-  GrafPtr,
-  BitMap,
-  Pattern,
-  RgnHandle,
-  Region,
-  Rect,
-  makeRect,
-  cloneRect,
-} from "./types";
-import { globals, QDScreen } from "./globals";
+import { GrafPort, BitMap, Pattern, RgnHandle, cloneRect } from "./types";
+import { globals, requirePort, resetPrivateGlobals } from "./globals";
 import { patCopy, blackColor, whiteColor } from "./constants";
-import { SectRect } from "./rects";
-import { newBitMap } from "./packedBits";
+import { CopyRgn, NewRgn, OffsetRgn, RectRgn } from "./regions";
 
-// -------------------------------------------------------------------------
-// Helpers
-// -------------------------------------------------------------------------
-
-function makeRegion(r: Rect): RgnHandle {
-  return { rgn: { rgnSize: 10, rgnBBox: cloneRect(r) } };
+function copyPatternInto(dst: Pattern, src: Pattern): void {
+  dst.set(src.subarray(0, 8));
 }
-
-function copyPattern(src: Pattern): Pattern {
-  return new Uint8Array(src);
-}
-
-// -------------------------------------------------------------------------
-// InitGraf
-// -------------------------------------------------------------------------
 
 /**
- * Initialise the QuickDraw global state.
+ * Initialise QuickDraw. Must be called once before any other routine.
+ * The original filled `screenBits` via `_GetScrnBits`; the host passes the
+ * screen {@link BitMap} directly (§4.5).
  *
- * Must be called **once** at system start-up before any other QuickDraw
- * routine.  Provides the pixel buffer the OS will use as the screen.
- * Matches `PROCEDURE InitGraf(globalPtr: QDPtr)` from `QuickDraw.p`.
- *
- * @param screen  Screen size, optionally with a host-owned packed framebuffer.
+ * `PROCEDURE InitGraf(globalPtr: QDPtr)`.
  */
-export function InitGraf(screen: QDScreen): void {
-  globals._screen = screen;
-  globals.screenBits = screen.bits ?? newBitMap(screen.width, screen.height);
-  globals.randSeed = 1;
-  globals.thePort = null;
+export function InitGraf(screenBits: BitMap): void {
+  resetPrivateGlobals();
+  globals.screenBits = screenBits;
 }
 
-// -------------------------------------------------------------------------
-// OpenPort / InitPort / ClosePort
-// -------------------------------------------------------------------------
-
 /**
- * Allocate fresh clip and vis regions for `port`, then call {@link InitPort}.
- *
- * `PROCEDURE OpenPort(port: GrafPtr)` from `QuickDraw.p`.
- * The visRgn is set to the current screen bounds; clipRgn is set wide-open.
- *
- * @param port  An uninitialised {@link GrafPort} object to set up in place.
+ * Allocate clipRgn and visRgn, then {@link InitPort}.
+ * `PROCEDURE OpenPort(port: GrafPtr)` (`GrafAsm.a:89-103`).
  */
 export function OpenPort(port: GrafPort): void {
-  const bounds = cloneRect(globals.screenBits.bounds);
-  port.visRgn = makeRegion(bounds);
-  port.clipRgn = makeRegion(makeRect(-32767, -32767, 32767, 32767));
+  port.visRgn = NewRgn();
+  port.clipRgn = NewRgn();
   InitPort(port);
 }
 
 /**
- * Reset all fields of `port` to their standard defaults and make it the
- * current port (`globals.thePort`).
- *
- * `PROCEDURE InitPort(port: GrafPtr)` from `QuickDraw.p` / `GrafAsm.a`.
- * Pen is set to 1×1 black, mode `patCopy`; text is system font, size 0;
- * background is white; foreground is black.
- *
- * @param port  The port to initialise.  Existing clip/vis regions are reused.
+ * Reset every field of an existing port and make it current.
+ * `PROCEDURE InitPort(port: GrafPtr)` (`GrafAsm.a:106-158`).
  */
 export function InitPort(port: GrafPort): void {
   globals.thePort = port;
 
   port.device = 0;
-
-  // portBits := screenBits
   port.portBits = {
     baseAddr: globals.screenBits.baseAddr,
     rowBytes: globals.screenBits.rowBytes,
     bounds: cloneRect(globals.screenBits.bounds),
   };
-
-  // portRect := screenBits.bounds
   port.portRect = cloneRect(globals.screenBits.bounds);
 
-  // visRgn := portRect (rectangular)
-  if (port.visRgn) {
-    port.visRgn.rgn.rgnBBox = cloneRect(port.portRect);
-    port.visRgn.rgn.scanlines = undefined;
-  } else {
-    port.visRgn = makeRegion(port.portRect);
-  }
+  if (!port.visRgn) port.visRgn = NewRgn();
+  if (!port.clipRgn) port.clipRgn = NewRgn();
+  RectRgn(port.visRgn, port.portRect);
+  CopyRgn(globals.wideOpen, port.clipRgn);
 
-  // clipRgn := wideOpen
-  if (port.clipRgn) {
-    port.clipRgn.rgn.rgnBBox = cloneRect(globals.wideOpen.rgn.rgnBBox);
-    port.clipRgn.rgn.scanlines = undefined;
-  } else {
-    port.clipRgn = makeRegion(cloneRect(globals.wideOpen.rgn.rgnBBox));
-  }
-
-  port.bkPat = copyPattern(globals.white);
-  port.fillPat = copyPattern(globals.black);
+  port.bkPat = new Uint8Array(globals.white);
+  port.fillPat = new Uint8Array(globals.black);
   port.pnLoc = { v: 0, h: 0 };
   port.pnSize = { v: 1, h: 1 };
   port.pnMode = patCopy;
-  port.pnPat = copyPattern(globals.black);
+  port.pnPat = new Uint8Array(globals.black);
   port.pnVis = 0;
   port.txFont = 0;
   port.txFace = 0;
@@ -133,83 +70,58 @@ export function InitPort(port: GrafPort): void {
   port.colrBit = 0;
   port.patStretch = 0;
   port.picSave = null;
-  port.rgnSave = null;
-  port.polySave = null;
+  port.rgnSave = false;
+  port.polySave = false;
   port.grafProcs = null;
 }
 
 /**
- * Close a port, releasing its association with `globals.thePort`.
- *
- * `PROCEDURE ClosePort(port: GrafPtr)` from `QuickDraw.p`.
- * In JS the region memory is garbage-collected; this call is mainly needed
- * to clear `globals.thePort` when the current port is being destroyed.
- *
- * @param port  The port to close.
+ * Dispose clipRgn and visRgn. Does **not** touch `thePort`
+ * (`GrafAsm.a:162-176`).
  */
-export function ClosePort(port: GrafPort): void {
-  // No-op in JS; references will be GC'd
-  if (globals.thePort === port) {
-    globals.thePort = null;
-  }
+export function ClosePort(_port: GrafPort): void {
+  // Handles are GC'd; the original only DisposHandle'd the two regions.
 }
 
-// -------------------------------------------------------------------------
-// Port management
-// -------------------------------------------------------------------------
-
-/**
- * Make `port` the current drawing port.
- * `PROCEDURE SetPort(port: GrafPtr)`.
- */
+/** `PROCEDURE SetPort(port: GrafPtr)`. */
 export function SetPort(port: GrafPort): void {
   globals.thePort = port;
 }
 
-/**
- * Return the current drawing port.
- * `PROCEDURE GetPort(VAR port: GrafPtr)` — returns the value rather than
- * writing to a VAR parameter.
- */
+/** `PROCEDURE GetPort(VAR port: GrafPtr)` — returns the value. */
 export function GetPort(): GrafPort | null {
   return globals.thePort;
 }
 
-/** Set the device number of the current port (`PROCEDURE GrafDevice`). */
+/** `PROCEDURE GrafDevice(device: INTEGER)`. */
 export function GrafDevice(device: number): void {
-  if (globals.thePort) globals.thePort.device = device;
-}
-
-/** Replace the current port's backing bitmap (`PROCEDURE SetPortBits`). */
-export function SetPortBits(bm: BitMap): void {
-  const port = globals.thePort;
-  if (!port) return;
-  port.portBits = {
-    baseAddr: bm.baseAddr,
-    rowBytes: bm.rowBytes,
-    bounds: cloneRect(bm.bounds),
-  };
+  requirePort().device = device;
 }
 
 /**
- * Resize the current port's portRect to `width × height`.
- * `PROCEDURE PortSize(width, height: INTEGER)`.
+ * Copy `bm` into the current port's `portBits` in place
+ * (`GrafAsm.a` SetPortBits).
  */
+export function SetPortBits(bm: BitMap): void {
+  const bits = requirePort().portBits;
+  bits.baseAddr = bm.baseAddr;
+  bits.rowBytes = bm.rowBytes;
+  bits.bounds.top = bm.bounds.top;
+  bits.bounds.left = bm.bounds.left;
+  bits.bounds.bottom = bm.bounds.bottom;
+  bits.bounds.right = bm.bounds.right;
+}
+
+/** `PROCEDURE PortSize(width, height: INTEGER)`. */
 export function PortSize(width: number, height: number): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.portRect.right = port.portRect.left + width;
   port.portRect.bottom = port.portRect.top + height;
 }
 
-/**
- * Move the current port so that its portRect's top-left maps to the
- * global screen coordinates `(leftGlobal, topGlobal)`.
- * `PROCEDURE MovePortTo(leftGlobal, topGlobal: INTEGER)`.
- */
+/** `PROCEDURE MovePortTo(leftGlobal, topGlobal: INTEGER)`. */
 export function MovePortTo(leftGlobal: number, topGlobal: number): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   const dh = port.portRect.left - port.portBits.bounds.left - leftGlobal;
   const dv = port.portRect.top - port.portBits.bounds.top - topGlobal;
   port.portBits.bounds.top += dv;
@@ -219,149 +131,41 @@ export function MovePortTo(leftGlobal: number, topGlobal: number): void {
 }
 
 /**
- * Shift the coordinate origin of the current port.
- *
- * After this call, local coordinate `(h, v)` maps to the pixel that used
- * to be at `(h − oldLeft + h, v − oldTop + v)`.  The visRgn is adjusted
- * by the same delta so clipping remains correct.
- *
- * `PROCEDURE SetOrigin(h, v: INTEGER)` from `QuickDraw.p`.
- *
- * @param h  New left edge of portRect in local coordinates.
- * @param v  New top edge of portRect in local coordinates.
+ * Redefine local coords by adjusting portBits.bounds, portRect, and visRgn.
+ * `PROCEDURE SetOrigin(h, v: INTEGER)` (`GrafAsm.a:404-426`).
  */
 export function SetOrigin(h: number, v: number): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   const dh = h - port.portRect.left;
   const dv = v - port.portRect.top;
   if (dh === 0 && dv === 0) return;
-  // Offset portBits.bounds
   port.portBits.bounds.top += dv;
   port.portBits.bounds.left += dh;
   port.portBits.bounds.bottom += dv;
   port.portBits.bounds.right += dh;
-  // Offset portRect
   port.portRect.top += dv;
   port.portRect.left += dh;
   port.portRect.bottom += dv;
   port.portRect.right += dh;
-  // Offset visRgn
-  if (port.visRgn) {
-    const r = port.visRgn.rgn.rgnBBox;
-    r.top += dv;
-    r.left += dh;
-    r.bottom += dv;
-    r.right += dh;
-  }
+  OffsetRgn(port.visRgn, dh, dv);
 }
 
-// -------------------------------------------------------------------------
-// Clip management
-// -------------------------------------------------------------------------
-
-/**
- * Replace the current port's clip region with a deep copy of `rgn`.
- * `PROCEDURE SetClip(rgn: RgnHandle)`.
- */
+/** `PROCEDURE SetClip(rgn: RgnHandle)` — copy *into* the existing handle. */
 export function SetClip(rgn: RgnHandle): void {
-  const port = globals.thePort;
-  if (!port) return;
-  // Copy rgn into port.clipRgn
-  port.clipRgn = {
-    rgn: {
-      rgnSize: rgn.rgn.rgnSize,
-      rgnBBox: cloneRect(rgn.rgn.rgnBBox),
-      scanlines: rgn.rgn.scanlines
-        ? rgn.rgn.scanlines.map((sl) => ({ y: sl.y, xs: [...sl.xs] }))
-        : undefined,
-    },
-  };
+  CopyRgn(rgn, requirePort().clipRgn);
 }
 
-/**
- * Copy the current port's clip region into `rgn`.
- * `PROCEDURE GetClip(rgn: RgnHandle)`.
- */
+/** `PROCEDURE GetClip(rgn: RgnHandle)`. */
 export function GetClip(rgn: RgnHandle): void {
-  const port = globals.thePort;
-  if (!port) return;
-  const src = port.clipRgn.rgn;
-  rgn.rgn.rgnSize = src.rgnSize;
-  rgn.rgn.rgnBBox = cloneRect(src.rgnBBox);
-  rgn.rgn.scanlines = src.scanlines
-    ? src.scanlines.map((sl) => ({ y: sl.y, xs: [...sl.xs] }))
-    : undefined;
+  CopyRgn(requirePort().clipRgn, rgn);
 }
 
-/**
- * Set the current port's clip region to the rectangle `r`.
- * `PROCEDURE ClipRect(r: Rect)`.
- */
-export function ClipRect(r: Rect): void {
-  const port = globals.thePort;
-  if (!port) return;
-  port.clipRgn = {
-    rgn: {
-      rgnSize: 10,
-      rgnBBox: cloneRect(r),
-      scanlines: undefined,
-    },
-  };
+/** `PROCEDURE ClipRect(r: Rect)` — `RectRgn` into the existing clip handle. */
+export function ClipRect(r: import("./types").Rect): void {
+  RectRgn(requirePort().clipRgn, r);
 }
 
-/**
- * Set the current port's background pattern to `pat`.
- * Used by erase operations.  `PROCEDURE BackPat(pat: Pattern)`.
- */
+/** `PROCEDURE BackPat(pat: Pattern)` — copy bytes in place. */
 export function BackPat(pat: Pattern): void {
-  const port = globals.thePort;
-  if (!port) return;
-  port.bkPat = new Uint8Array(pat);
-}
-
-// -------------------------------------------------------------------------
-// Create a new GrafPort object (not part of original API, but needed in JS)
-// -------------------------------------------------------------------------
-
-/**
- * Allocate and return a fully initialised {@link GrafPort} pointing at the
- * current screen buffer.
- *
- * This is a JS-only convenience that replaces the original two-step
- * `NEW(port); OpenPort(port)` pattern.  The returned port is **not** made
- * the current port — call {@link SetPort} or {@link OpenPort} to activate it.
- */
-
-export function newGrafPort(): GrafPort {
-  const screen = globals.screenBits;
-  const bounds = cloneRect(screen.bounds);
-
-  return {
-    device: 0,
-    portBits: { baseAddr: screen.baseAddr, rowBytes: screen.rowBytes, bounds: cloneRect(bounds) },
-    portRect: cloneRect(bounds),
-    visRgn: makeRegion(cloneRect(bounds)),
-    clipRgn: makeRegion(makeRect(-32767, -32767, 32767, 32767)),
-    bkPat: new Uint8Array(8),
-    fillPat: new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
-    pnLoc: { v: 0, h: 0 },
-    pnSize: { v: 1, h: 1 },
-    pnMode: patCopy,
-    pnPat: new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
-    pnVis: 0,
-    txFont: 0,
-    txFace: 0,
-    txMode: 1,
-    txSize: 0,
-    spExtra: 0,
-    fgColor: blackColor,
-    bkColor: whiteColor,
-    colrBit: 0,
-    patStretch: 0,
-    picSave: null,
-    rgnSave: null,
-    polySave: null,
-    grafProcs: null,
-  };
+  copyPatternInto(requirePort().bkPat, pat);
 }

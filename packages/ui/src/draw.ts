@@ -18,14 +18,15 @@ import {
   CopyBits,
   ForeColor,
   MoveTo,
-  DrawString,
+  DrawText,
   PaintRect,
+  PaintRoundRect,
   EraseRect,
+  EraseRoundRect,
   FrameRect,
   FrameRoundRect,
   FillRect,
-  makeRect,
-  cloneRect,
+  FillRoundRect,
   globals,
   blackColor,
   whiteColor,
@@ -35,14 +36,22 @@ import {
   srcCopy,
   srcOr,
   srcBic,
+  TextFace,
+  TextFont,
+  TextMode,
+  TextSize,
   PenPat,
   PenMode,
   PenNormal,
+} from "@mockintosh/quickdraw";
+import {
+  makeRect,
+  cloneRect,
   bitMapFromPixels,
   bitMapWidth,
   bitMapHeight,
   setBit,
-} from "@mockintosh/quickdraw";
+} from "@mockintosh/quickdraw/bits";
 import {
   hasMouseHandlers,
   resolveBorderWidth,
@@ -61,6 +70,7 @@ import type { FocusManager } from "./focus";
 import type { Sprite } from "./sprite";
 import { requireFont } from "./fonts/registry";
 import { layoutText } from "./fonts/textLayout";
+import { encodeUiText, fontAscent, fontFamilyId } from "./fonts/strike";
 
 // -------------------------------------------------------------------------
 // Pattern data — 8x8 bitmaps for dither fills
@@ -91,13 +101,8 @@ export function patternBits(name: PatternName): Uint8Array {
 // Port helpers
 // -------------------------------------------------------------------------
 
-interface PortWithMeta extends GrafPort {
-  _uiFontName?: string;
-  _uiTextColor?: number;
-}
-
 export interface DrawContext {
-  port: PortWithMeta;
+  port: GrafPort;
   focusManager: FocusManager | null;
   width: number;
   height: number;
@@ -105,14 +110,14 @@ export interface DrawContext {
 
 /** Inline equivalent of the private `makeRegion` in grafport.ts */
 function _makeRgn(r: Rect): RgnHandle {
-  return { rgn: { rgnSize: 10, rgnBBox: cloneRect(r) } };
+  return { rgn: { rgnSize: 10, rgnBBox: cloneRect(r), data: new Int16Array(0) } };
 }
 
 export function createDrawContext(screen: BitMap): DrawContext {
   const width = bitMapWidth(screen);
   const height = bitMapHeight(screen);
   const bounds = cloneRect(screen.bounds);
-  const port: PortWithMeta = {
+  const port: GrafPort = {
     device: 0,
     portBits: screen,
     portRect: cloneRect(bounds),
@@ -135,39 +140,44 @@ export function createDrawContext(screen: BitMap): DrawContext {
     colrBit: 0,
     patStretch: 0,
     picSave: null,
-    rgnSave: null,
-    polySave: null,
+    rgnSave: false,
+    polySave: false,
     grafProcs: null,
   };
   SetPort(port);
   return { port, focusManager: null, width, height };
 }
 
-function applyPenMode(port: PortWithMeta, penMode: "copy" | "xor" | undefined): void {
+function applyPenMode(_port: GrafPort, penMode: "copy" | "xor" | undefined): void {
   if (penMode === "xor") PenMode(patXor);
   else PenNormal();
 }
 
 function fillBackground(
-  port: PortWithMeta,
+  port: GrafPort,
   r: ReturnType<typeof makeRect>,
   background: Ink | PatternName,
-  penMode: "copy" | "xor" | undefined
+  penMode: "copy" | "xor" | undefined,
+  ovSize = 0
 ): void {
   applyPenMode(port, penMode);
+  const rounded = ovSize > 0;
   if (typeof background === "number") {
     if (background === 0 && penMode !== "xor") {
-      EraseRect(r);
+      if (rounded) EraseRoundRect(r, ovSize, ovSize);
+      else EraseRect(r);
     } else {
       PenNormal();
       if (penMode === "xor") PenMode(patXor);
       if (background === 0) PenPat(globals.white);
-      PaintRect(r);
+      if (rounded) PaintRoundRect(r, ovSize, ovSize);
+      else PaintRect(r);
       PenNormal();
     }
   } else {
     const pat = PATTERNS[background] ?? PATTERNS.checker;
-    FillRect(r, pat);
+    if (rounded) FillRoundRect(r, ovSize, ovSize, pat);
+    else FillRect(r, pat);
   }
   PenNormal();
 }
@@ -257,13 +267,17 @@ function drawBox(
       penMode?: "copy" | "xor";
     };
 
+  // QuickDraw `ovWd`/`ovHt` are corner-oval *diameters* (`RRects.a`).
+  // `borderRadius` is a CSS-style radius, so the oval size is 2×.
+  const radius = borderRadius ?? 0;
+  const ovSize = radius > 0 ? radius * 2 : 0;
+
   if (background !== undefined) {
-    fillBackground(ctx.port, r, background, penMode);
+    fillBackground(ctx.port, r, background, penMode, ovSize);
   }
 
   const bw = resolveBorderWidth(node);
   if (borderColor !== undefined && bw > 0) {
-    const radius = borderRadius ?? 0;
     applyPenMode(ctx.port, penMode);
 
     if (borderColor === 0) {
@@ -278,7 +292,7 @@ function drawBox(
     } else {
       for (let i = 0; i < bw; i++) {
         const inset = makeRect(r.top + i, r.left + i, r.bottom - i, r.right - i);
-        if (radius > 0) FrameRoundRect(inset, radius, radius);
+        if (ovSize > 0) FrameRoundRect(inset, ovSize, ovSize);
         else FrameRect(inset);
       }
     }
@@ -323,7 +337,6 @@ function drawText(
   width: number,
   height: number
 ): void {
-  const port = ctx.port as PortWithMeta;
   const fontName = (node.props["font"] as string | undefined) ?? "body";
   const color = (node.props["color"] as Ink | undefined) ?? 1;
   const align = (node.props["align"] as TextAlign | undefined) ?? "left";
@@ -342,8 +355,16 @@ function drawText(
     }
   }
 
-  port._uiFontName = fontName;
-  port._uiTextColor = color;
+  TextFont(fontFamilyId(fontName));
+  TextSize(0);
+  TextFace(0);
+  if (color) {
+    ForeColor(blackColor);
+    TextMode(srcOr);
+  } else {
+    ForeColor(whiteColor);
+    TextMode(srcBic);
+  }
 
   const text = collectText(node);
   if (!text) return;
@@ -359,7 +380,9 @@ function drawText(
   const innerH = Math.max(0, height - padTop - padBottom);
 
   // Same line breaking as the measure pass, so drawn geometry matches layout.
-  const block = layoutText(requireFont(fontName), text, wrap ? innerW : undefined);
+  const font = requireFont(fontName);
+  const block = layoutText(font, text, wrap ? innerW : undefined);
+  const ascent = fontAscent(fontName);
 
   let lineY = innerY;
   if (verticalAlign === "middle") lineY = innerY + Math.floor((innerH - block.height) / 2);
@@ -370,8 +393,9 @@ function drawText(
       let lineX = innerX;
       if (align === "center") lineX = innerX + Math.floor((innerW - line.width) / 2);
       else if (align === "right") lineX = innerX + innerW - line.width;
-      MoveTo(lineX, lineY);
-      DrawString(line.text);
+      const bytes = encodeUiText(font, line.text);
+      MoveTo(lineX, lineY + ascent);
+      DrawText(bytes, 0, bytes.length);
     }
     lineY += block.lineHeight;
   }

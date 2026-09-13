@@ -10,7 +10,7 @@ import { createDrawContext, drawTree } from "../src/draw";
 import { createNode, type CanvasNode } from "../src/nodes";
 import { createMeasureFunc } from "../src/measure";
 import { installFontBridge } from "../src/fonts/bridge";
-import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw";
+import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
 import { requireFont } from "../src/fonts/registry";
 
 // Synthetic monospace font: every printable ASCII glyph is 5px + 1px spacing = 6px advance.

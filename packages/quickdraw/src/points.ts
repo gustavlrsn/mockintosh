@@ -1,16 +1,10 @@
 /**
- * Point calculation routines — from `QuickDraw.p` Point Calculations section.
- *
- * All functions operate on the mutable {@link Point} type (pass by reference,
- * matching the original Pascal VAR parameters).
+ * Point calculation routines — from `QuickDraw.p` and `Pictures.a` SCALE1/MAP1.
  */
 
-import { Point } from "./types";
-import { globals } from "./globals";
-
-// -------------------------------------------------------------------------
-// Point construction and equality
-// -------------------------------------------------------------------------
+import { Point, Rect } from "./types";
+import { requirePort } from "./globals";
+import { mulDivU16 } from "./fixmath";
 
 /**
  * Set the `h` and `v` fields of `pt` in place.
@@ -21,114 +15,82 @@ export function SetPt(pt: Point, h: number, v: number): void {
   pt.v = v;
 }
 
-/**
- * Return `true` if `pt1` and `pt2` have identical coordinates.
- * `FUNCTION EqualPt(pt1, pt2: Point): BOOLEAN`.
- */
+/** `FUNCTION EqualPt(pt1, pt2: Point): BOOLEAN`. */
 export function EqualPt(pt1: Point, pt2: Point): boolean {
   return pt1.h === pt2.h && pt1.v === pt2.v;
 }
 
-// -------------------------------------------------------------------------
-// Point arithmetic
-// -------------------------------------------------------------------------
-
-/**
- * Add `src` to `dst` in place: `dst := dst + src`.
- * `PROCEDURE AddPt(src: Point; VAR dst: Point)`.
- */
+/** `PROCEDURE AddPt(src: Point; VAR dst: Point)`. */
 export function AddPt(src: Point, dst: Point): void {
   dst.v += src.v;
   dst.h += src.h;
 }
 
-/**
- * Subtract `src` from `dst` in place: `dst := dst - src`.
- * `PROCEDURE SubPt(src: Point; VAR dst: Point)`.
- */
+/** `PROCEDURE SubPt(src: Point; VAR dst: Point)`. */
 export function SubPt(src: Point, dst: Point): void {
   dst.v -= src.v;
   dst.h -= src.h;
 }
 
-// -------------------------------------------------------------------------
-// Coordinate conversion
-// -------------------------------------------------------------------------
-
-/**
- * Convert `pt` from local port coordinates to global (screen) coordinates
- * by subtracting the current port's bitmap origin.
- *
- * `PROCEDURE LocalToGlobal(VAR pt: Point)`.
- */
+/** `PROCEDURE LocalToGlobal(VAR pt: Point)` (`GrafAsm.a:218-248`). */
 export function LocalToGlobal(pt: Point): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   pt.v -= port.portBits.bounds.top;
   pt.h -= port.portBits.bounds.left;
 }
 
-/**
- * Convert `pt` from global (screen) coordinates to local port coordinates
- * by adding the current port's bitmap origin.
- *
- * `PROCEDURE GlobalToLocal(VAR pt: Point)`.
- */
+/** `PROCEDURE GlobalToLocal(VAR pt: Point)` (`GrafAsm.a:234-248`). */
 export function GlobalToLocal(pt: Point): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   pt.v += port.portBits.bounds.top;
   pt.h += port.portBits.bounds.left;
 }
 
-// -------------------------------------------------------------------------
-// Point mapping
-// -------------------------------------------------------------------------
-
 /**
- * Scale `pt` proportionally from `fromRect` dimensions to `toRect` dimensions.
- *
- * The scaling is applied about the origin (not the rect's origin), so this
- * is a pure scaling operation rather than a full affine map.
- * Use {@link MapPt} when you also need coordinate translation.
- *
- * `PROCEDURE ScalePt(VAR pt: Point; fromRect, toRect: Rect)`.
+ * SCALE1 (`Pictures.a:1694-1718`): skip if from==to; input ≤0 → 0;
+ * `(x·to + from/2) div from`, **minimum 1**.
  */
-export function ScalePt(
-  pt: Point,
-  fromRect: { top: number; left: number; bottom: number; right: number },
-  toRect: { top: number; left: number; bottom: number; right: number }
-): void {
-  const fW = fromRect.right - fromRect.left;
-  const fH = fromRect.bottom - fromRect.top;
-  const tW = toRect.right - toRect.left;
-  const tH = toRect.bottom - toRect.top;
-  if (fW !== 0) pt.h = Math.round((pt.h * tW) / fW);
-  if (fH !== 0) pt.v = Math.round((pt.v * tH) / fH);
+function scale1(coord: number, fromSize: number, toSize: number): number {
+  if (fromSize === toSize) return coord;
+  if (coord <= 0) return 0;
+  const rounded = mulDivU16(coord, toSize, fromSize, fromSize >> 1);
+  return rounded === 0 ? 1 : rounded;
 }
 
 /**
- * Map `pt` from the coordinate space of `fromRect` to the coordinate space
- * of `toRect`, preserving the relative position within each rect.
- *
- * Equivalent to a proportional scaling plus translation:
- * `pt' = toRect.origin + (pt - fromRect.origin) * (toRect.size / fromRect.size)`.
- *
- * `PROCEDURE MapPt(VAR pt: Point; fromRect, toRect: Rect)`.
+ * Scale `pt` about the origin from `fromRect` size to `toRect` size.
+ * `PROCEDURE ScalePt(VAR pt: Point; fromRect, toRect: Rect)`.
  */
-export function MapPt(
-  pt: Point,
-  fromRect: { top: number; left: number; bottom: number; right: number },
-  toRect: { top: number; left: number; bottom: number; right: number }
-): void {
+export function ScalePt(pt: Point, fromRect: Rect, toRect: Rect): void {
   const fW = fromRect.right - fromRect.left;
   const fH = fromRect.bottom - fromRect.top;
   const tW = toRect.right - toRect.left;
   const tH = toRect.bottom - toRect.top;
+  pt.h = scale1(pt.h, fW, tW);
+  pt.v = scale1(pt.v, fH, tH);
+}
 
-  const relH = pt.h - fromRect.left;
-  const relV = pt.v - fromRect.top;
+/**
+ * MAP1 (`Pictures.a:1759-1785`): skip if from==to; magnitude rounded
+ * half-away-from-zero via unsigned mul/div, then the original sign restored.
+ */
+function map1(coord: number, fromOrigin: number, fromSize: number, toOrigin: number, toSize: number): number {
+  let rel = coord - fromOrigin;
+  if (fromSize !== toSize) {
+    const denom2 = fromSize >> 1;
+    const neg = rel < 0;
+    if (neg) rel = -rel;
+    rel = mulDivU16(rel, toSize, fromSize, denom2);
+    if (neg) rel = -rel;
+  }
+  return rel + toOrigin;
+}
 
-  pt.h = toRect.left + (fW !== 0 ? Math.round((relH * tW) / fW) : 0);
-  pt.v = toRect.top + (fH !== 0 ? Math.round((relV * tH) / fH) : 0);
+/**
+ * Map `pt` from `fromRect`'s coordinate space into `toRect`'s.
+ * `PROCEDURE MapPt(VAR pt: Point; fromRect, toRect: Rect)`.
+ */
+export function MapPt(pt: Point, fromRect: Rect, toRect: Rect): void {
+  pt.v = map1(pt.v, fromRect.top, fromRect.bottom - fromRect.top, toRect.top, toRect.bottom - toRect.top);
+  pt.h = map1(pt.h, fromRect.left, fromRect.right - fromRect.left, toRect.left, toRect.right - toRect.left);
 }

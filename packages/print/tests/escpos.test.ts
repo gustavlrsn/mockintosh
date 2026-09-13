@@ -1,14 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  InitGraf,
-  PaintRect,
-  bitMapFromPixels,
-  getBit,
-  globals,
-  makeRect,
-  newBitMap,
-  type BitMap,
-} from "@mockintosh/quickdraw";
+import { InitGraf, PaintRect, globals, type BitMap } from "@mockintosh/quickdraw";
+import { bitMapFromPixels, getBit, makeRect, newBitMap } from "@mockintosh/quickdraw/bits";
 import { EscPosEncoder, RASTER_BAND_ROWS, packRows, createPrintPage, drawOnPage } from "../src";
 
 function bitmapFromRows(rows: string[]): BitMap {
@@ -73,7 +65,7 @@ describe("EscPosEncoder", () => {
 
 describe("createPrintPage", () => {
   it("is a white QuickDraw port the size of the paper that drawing lands on", () => {
-    InitGraf({ width: 16, height: 16 });
+    InitGraf(newBitMap(16, 16));
     const screen = globals.screenBits;
 
     const page = createPrintPage(24, 4);
