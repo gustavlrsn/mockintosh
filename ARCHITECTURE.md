@@ -212,11 +212,38 @@ Each dirty frame:
 
 `InitGraf` allocates the framebuffer (`globals.screenBits`) unless the display owns one (`display.framebuffer`, for DMA-backed panels); the shell hands the same `BitMap` to `createUI` and to the display, so nothing else owns pixel memory.
 
-QuickDraw moves bytes, not pixels, wherever it can: `drawRectToPort`, `BitBlt`, `CopyBits` and `ScrollRect` combine whole bytes under edge masks (`fillRowBits` / `blitRowBits` in `packedBits.ts`, the way `BitBlt.a` moved words) and fall back to per-pixel work only under a complex clip region, a region mask, or a scale factor. `BitBltSlow` is the per-pixel reference the fast path is tested against.
+QuickDraw paints through the original `RgnBlt` / `StretchBits` pipeline (`CopyBits`, `ScrollRect`, and every shape verb). Word-wide `BitBlt` fast paths are omitted unless they are pixel-identical to the general path. `BitBltSlow` is the per-pixel oracle tests compare against; it is not part of the public surface.
 
 Sprites (`Sprite` in `@mockintosh/ui`, re-exported by the SDK) stay 1 byte per pixel as an asset format, with `defineSprite` (2 bpp base64) and `fromGrid` (ASCII art) as the two decoders; `<image>` packs each sprite to a `BitMap` once (cached per sprite) and draws it with `CopyBits`.
 
 Layout snaps every node to the pixel grid (positions floor, sizes round) so centering and percentages never produce half-pixels, which QuickDraw would refuse to draw.
+
+## QuickDraw
+
+`@mockintosh/quickdraw` is a TypeScript rewrite of Bill Atkinson's 1984 QuickDraw (`reference/QuickDraw`). The public entry is exactly `QuickDraw.p` + `GrafUtil.p` plus the three OS seams the original left outside the unit. Pixel helpers (`newBitMap`, `getBit`, `makeRect`, …) live on `@mockintosh/quickdraw/bits`.
+
+### Adaptation policy
+
+A faithful port in another language is not a byte-for-byte emulation. These eight deviations are accepted; everything else should match the original exactly (`docs/quickdraw-fidelity-plan.md` §4):
+
+1. **Memory / handles.** Handles are object references; `NewHandle` / `SetSize` / `DisposHandle` become allocation and GC. Growth-in-chunks (`polyMax`, `rgnMax`, `picMax`) and the 16-bit size cap of `QuickGlue.a` are dropped. `Kill*` / `Dispose*` may be no-ops.
+2. **Word size.** 16-bit wraparound of coordinates is not emulated, except where the original relies on 16.16 fixed-point (`FixRatio`, `FixMul`, `|0` wraps in `DrawArc` / `DrawLine` / `PutLine`) — those go through `fixmath.ts` and `|0`.
+3. **Traps → functions.** `_LongMul` / `_FixMul` / `_FixRatio` are local functions with ROM semantics. VAR parameters mutate the passed object; `GetPort` may return a value.
+4. **Bounds-check.** Where the original would read or write arbitrary memory, the port bounds-checks and returns white / zero. Where the original would trap (nil `thePort`), the port throws `QDError` (`'QuickDraw: thePort is NIL'`). Query routines that do not dereference `thePort` keep working without one.
+5. **Three OS seams.** The screen (`InitGraf(screenBits: BitMap)`), the Font Manager (`installFontManager` + `FMInput` / `FMOutput` / `FontStrike`), and the cursor engine (`$800` vectors + `cursorState`) stay outside QuickDraw, with the original record shapes — not convenience callbacks.
+6. **Pixel-identical shortcuts only.** 68k word-wide `BitBlt` cases, `StretchBits` ratio tables, and `_StackAvail` text splits are omitted. JS may skip work when pixels match: `TrimRect` + all-rect `BitBlt`, `DrText` direct-to-screen, `DrawArc` solid-rect slabs, span apply under a region mask, pooled blit scratch, and skipping `ShieldCursor` when the vector is the default no-op. See `packages/quickdraw/README.md`.
+7. **Packed regions + PICT serialize.** Regions use the packed XOR-delta inversion-point stream (`Int16Array`, not raw bytes). `Picture` is `{picSize, picFrame, data}` with `serializePicture` / `parsePicture` producing exact PICT v1 bytes.
+8. **Pixel helpers on `./bits`.** `packedBits.ts` (`getBit` / `setBit` / `newBitMap` / `rowBytesFor` / `bitMapFromPixels` / `pixelsFromBitMap`) and `makePoint` / `makeRect` / `cloneRect` are host utilities, not QuickDraw. Import them from `@mockintosh/quickdraw/bits`.
+
+Anything in the fidelity catalogue marked ADDED, SIMPLIFIED, BUG, or MISSING that is not on this list is in scope for removal or restoration.
+
+### How to verify against `reference/QuickDraw`
+
+- Source files carry `file:line` comments pointing at the original (`reference/QuickDraw/*.a`, `QuickDraw.p`, `GrafUtil.p`) so a reader can diff a TypeScript routine against the assembly.
+- Internal helpers keep the original names (`DoLine`, `FrRect`, `PushVerb`, `RgnBlt`, `SeekRgn`, `CheckPic`) and file grouping; they are not re-exported from the barrel. Tests that need them import the source path (`../src/bitblt`, `../src/rgnBlt`, …).
+- No `Math.max(1, …)`, no `portRect` in a blitter, no `as any`, no `scanlines` region encoding. `packages/quickdraw/tests/fidelity.test.ts` greps `src/*.ts` for those.
+- Run the suite: `npx vitest run packages/quickdraw/tests`.
+- Departures from the assembly that are not listed above are bugs.
 
 Pointer events hit-test the node tree (`ui.dispatchPointer`) with capture: the node that received `mouseDown` keeps `drag` / `mouseUp`. There is no bubbling — a press goes to the topmost node with a handler — but there *is* a capture phase: `onMouseDownCapture` runs on every ancestor of the hit (root-most first) before the target's `onMouseDown`, and `preventDefault()` swallows the press along with its mouseup / click / drag. A press also makes the nearest `focusScope` the active one. Keyboard goes to the focus manager; ⌘ shortcuts are handled by the shell first.
 

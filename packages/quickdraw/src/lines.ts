@@ -7,9 +7,24 @@
  * path.  The pen must be visible (`pnVis >= 0`) for pixels to appear.
  */
 
-import { Point, PenState, Pattern, GrafPort } from "./types";
-import { globals } from "./globals";
-import { drawPixelToPort, drawRectToPort } from "./bitblt";
+import { Point, PenState, Pattern } from "./types";
+import { globals, requirePort } from "./globals";
+import { asInt16 } from "./fixmath";
+import { DrawLine } from "./drawLine";
+import { PutLine } from "./putLine";
+import {
+  CheckPic,
+  PutPicByte,
+  PutPicVerb,
+  PutPicWord,
+  ptsEqual,
+} from "./picSave";
+import { FRAME } from "./constants";
+
+function fitsSignedByte(n: number): boolean {
+  const w = asInt16(n);
+  return ((w << 24) >> 24) === w;
+}
 
 // -------------------------------------------------------------------------
 // Pen visibility
@@ -21,8 +36,7 @@ import { drawPixelToPort, drawRectToPort } from "./bitblt";
  * `PROCEDURE HidePen`.
  */
 export function HidePen(): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.pnVis--;
 }
 
@@ -31,8 +45,7 @@ export function HidePen(): void {
  * `pnVis >= 0`.  `PROCEDURE ShowPen`.
  */
 export function ShowPen(): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.pnVis++;
 }
 
@@ -45,8 +58,7 @@ export function ShowPen(): void {
  * `PROCEDURE GetPen(VAR pt: Point)`.
  */
 export function GetPen(pt: Point): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   pt.h = port.pnLoc.h;
   pt.v = port.pnLoc.v;
 }
@@ -56,8 +68,7 @@ export function GetPen(pt: Point): void {
  * `PROCEDURE GetPenState(VAR pnState: PenState)`.
  */
 export function GetPenState(pnState: PenState): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   pnState.pnLoc = { h: port.pnLoc.h, v: port.pnLoc.v };
   pnState.pnSize = { h: port.pnSize.h, v: port.pnSize.v };
   pnState.pnMode = port.pnMode;
@@ -69,8 +80,7 @@ export function GetPenState(pnState: PenState): void {
  * `PROCEDURE SetPenState(pnState: PenState)`.
  */
 export function SetPenState(pnState: PenState): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.pnLoc = { h: pnState.pnLoc.h, v: pnState.pnLoc.v };
   port.pnSize = { h: pnState.pnSize.h, v: pnState.pnSize.v };
   port.pnMode = pnState.pnMode;
@@ -82,8 +92,7 @@ export function SetPenState(pnState: PenState): void {
  * `PROCEDURE PenSize(width, height: INTEGER)`.
  */
 export function PenSize(width: number, height: number): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.pnSize.h = width;
   port.pnSize.v = height;
 }
@@ -93,8 +102,7 @@ export function PenSize(width: number, height: number): void {
  * `PROCEDURE PenMode(mode: INTEGER)`.
  */
 export function PenMode(mode: number): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.pnMode = mode;
 }
 
@@ -103,8 +111,7 @@ export function PenMode(mode: number): void {
  * `PROCEDURE PenPat(pat: Pattern)`.
  */
 export function PenPat(pat: Pattern): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.pnPat = new Uint8Array(pat);
 }
 
@@ -113,8 +120,7 @@ export function PenPat(pat: Pattern): void {
  * pattern.  `PROCEDURE PenNormal`.
  */
 export function PenNormal(): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.pnSize = { h: 1, v: 1 };
   port.pnMode = 8; // patCopy
   port.pnPat = new Uint8Array(globals.black);
@@ -129,8 +135,7 @@ export function PenNormal(): void {
  * `PROCEDURE MoveTo(h, v: INTEGER)`.
  */
 export function MoveTo(h: number, v: number): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.pnLoc.h = h;
   port.pnLoc.v = v;
 }
@@ -140,8 +145,7 @@ export function MoveTo(h: number, v: number): void {
  * drawing.  `PROCEDURE Move(dh, dv: INTEGER)`.
  */
 export function Move(dh: number, dv: number): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   port.pnLoc.h += dh;
   port.pnLoc.v += dv;
 }
@@ -160,19 +164,12 @@ export function Move(dh: number, dv: number): void {
  * `PROCEDURE LineTo(h, v: INTEGER)`.
  */
 export function LineTo(h: number, v: number): void {
-  const port = globals.thePort;
-  if (!port) return;
-
-  // Route through grafProcs bottleneck if installed
-  if (port.grafProcs && port.grafProcs.lineProc) {
-    const saved = { h: port.pnLoc.h, v: port.pnLoc.v };
+  const port = requirePort();
+  if (port.grafProcs?.lineProc) {
     port.grafProcs.lineProc({ h, v });
-    port.pnLoc.h = h;
-    port.pnLoc.v = v;
     return;
   }
-
-  StdLine(port, { h, v });
+  StdLine({ h, v });
 }
 
 /**
@@ -180,8 +177,7 @@ export function LineTo(h: number, v: number): void {
  * `PROCEDURE Line(dh, dv: INTEGER)`.
  */
 export function Line(dh: number, dv: number): void {
-  const port = globals.thePort;
-  if (!port) return;
+  const port = requirePort();
   LineTo(port.pnLoc.h + dh, port.pnLoc.v + dv);
 }
 
@@ -190,72 +186,58 @@ export function Line(dh: number, dv: number): void {
 // -------------------------------------------------------------------------
 
 /**
- * Default line rasterizer — draws a Bresenham line from `port.pnLoc` to
- * `newPt` using the current pen size, pattern and mode, then updates
- * `port.pnLoc`.
- *
- * If `port.pnVis < 0` the pen is hidden: the position is updated but no
- * pixels are written.
- *
- * Matches the behaviour of `reference/QuickDraw/DrawLine.a`.
- *
- * @param port   The port to draw into.
- * @param newPt  The destination point.
+ * `PROCEDURE StdLine(newPt: Point)` (`Lines.a:19-93`).
+ * Records `$20–$23` when a picture is open, then {@link DoLine}.
  */
-export function StdLine(port: GrafPort, newPt: Point): void {
-  if (port.pnVis < 0) {
-    port.pnLoc.h = newPt.h;
-    port.pnLoc.v = newPt.v;
-    return;
+export function StdLine(newPt: Point): void {
+  const port = requirePort();
+  if (CheckPic()) {
+    const s = port.picSave!;
+    PutPicVerb(FRAME);
+    let op = 0x20;
+    if (ptsEqual(port.pnLoc, s.picPnLoc)) op += 1;
+    const dh = asInt16(newPt.h - port.pnLoc.h);
+    const dv = asInt16(newPt.v - port.pnLoc.v);
+    if (fitsSignedByte(dh) && fitsSignedByte(dv)) op += 2;
+    PutPicByte(op);
+    if ((op & 1) === 0) {
+      PutPicWord(port.pnLoc.v);
+      PutPicWord(port.pnLoc.h);
+    }
+    if (op & 2) {
+      PutPicByte(dh);
+      PutPicByte(dv);
+    } else {
+      PutPicWord(newPt.v);
+      PutPicWord(newPt.h);
+    }
+    s.picPnLoc = { h: newPt.h, v: newPt.v };
   }
-
-  const x0 = port.pnLoc.h;
-  const y0 = port.pnLoc.v;
-  const x1 = newPt.h;
-  const y1 = newPt.v;
-  const pw = Math.max(1, port.pnSize.h);
-  const ph = Math.max(1, port.pnSize.v);
-
-  drawBresenhamLine(x0, y0, x1, y1, pw, ph, port);
-
-  port.pnLoc.h = x1;
-  port.pnLoc.v = y1;
+  DoLine(newPt);
 }
 
-// Bresenham integer line algorithm — matches the original DrawLine.a behaviour
-function drawBresenhamLine(
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  pw: number,
-  ph: number,
-  port: GrafPort
-): void {
-  const dx = Math.abs(x1 - x0);
-  const dy = Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1;
-  const sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
-
-  let x = x0;
-  let y = y0;
-
-  const drawPen = (px: number, py: number) => {
-    drawRectToPort(px, py, px + pw, py + ph, port.pnPat, port.pnMode, port);
-  };
-
-  while (true) {
-    drawPen(x, y);
-    if (x === x1 && y === y1) break;
-    const e2 = 2 * err;
-    if (e2 > -dy) {
-      err -= dy;
-      x += sx;
+/**
+ * `PROCEDURE DoLine(newPt: Point)` (`Lines.a:159-213`).
+ * Poly/rgn append, then {@link DrawLine}, then `pnLoc := newPt`.
+ * Called by {@link StdLine} and by `FrPoly` (so framing a poly into a
+ * picture does not emit `$20–$23` per edge).
+ */
+export function DoLine(newPt: Point): void {
+  const port = requirePort();
+  const from = { h: port.pnLoc.h, v: port.pnLoc.v };
+  if (port.polySave && globals.thePoly) {
+    const p = globals.thePoly.poly;
+    if ((p.polySize | 0) === 10) {
+      p.polyPoints.push({ h: from.h, v: from.v });
+      p.polySize = 14;
     }
-    if (e2 < dx) {
-      err += dx;
-      y += sy;
-    }
+    p.polyPoints.push({ h: newPt.h, v: newPt.v });
+    p.polySize = (p.polySize | 0) + 4;
+  } else if (port.rgnSave) {
+    if (!globals.rgnBuf) globals.rgnBuf = [];
+    PutLine(from, newPt, globals.rgnBuf);
   }
+  DrawLine(from, newPt);
+  port.pnLoc.h = newPt.h;
+  port.pnLoc.v = newPt.v;
 }

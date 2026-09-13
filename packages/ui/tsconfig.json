@@ -4,7 +4,11 @@
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
     "composite": false,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@mockintosh/quickdraw": ["../quickdraw/src/index.ts"],
+      "@mockintosh/quickdraw/bits": ["../quickdraw/src/bits.ts"]
+    }
   },
   "include": ["src/**/*", "tests/**/*"]
 }

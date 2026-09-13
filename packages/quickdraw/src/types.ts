@@ -210,16 +210,9 @@ export type PolyHandle = { poly: Polygon };
 // -------------------------------------------------------------------------
 
 /**
- * An arbitrary 1-bit mask region, represented as a bounding box plus an
- * optional list of scanline inversion points.
- *
- * **Rectangular region** — `rgnSize = 10`, `scanlines` absent or empty.
- * The region exactly equals its `rgnBBox`.
- *
- * **Complex region** — `rgnSize > 10`, `scanlines` present.
- * Each scanline entry `{ y, xs }` holds sorted x-inversion points for row
- * `y`.  A pixel `(h, v)` is inside the region if the number of `xs[i] <= h`
- * is **odd** (even-odd rule).
+ * An arbitrary 1-bit mask region in the original packed XOR-delta form
+ * (`PackRgn.a:13-19`): `rgnSize`, `rgnBBox`, then rows `V H … H 32767`
+ * terminated by `V=32767`. `rgnSize === 10` ⇔ rectangular (no stream).
  */
 export interface Region {
   /** Byte size of the region record (10 for rectangular, larger for complex). */
@@ -227,11 +220,10 @@ export interface Region {
   /** Tight bounding box of the entire region. */
   rgnBBox: Rect;
   /**
-   * Per-row inversion points for complex regions.
-   * Each entry covers one horizontal scanline.
-   * Absent or empty means the region is rectangular.
+   * Packed inversion-point stream (`V H…H 32767 … 32767`). Empty when
+   * rectangular. `rgnSize` is `10 + 2 * data.length`.
    */
-  scanlines?: Array<{ y: number; xs: number[] }>;
+  data: Int16Array;
 }
 
 /** Indirect reference to a {@link Region}. */
@@ -258,6 +250,37 @@ export interface Picture {
 
 /** Indirect reference to a {@link Picture}. */
 export type PicHandle = { pic: Picture };
+
+/**
+ * Private picture-recording snapshot (`GrafTypes.a:206-232`). Stored in
+ * {@link GrafPort.picSave} while a picture is open; the live picture itself
+ * lives in `globals.thePic`.
+ */
+export interface PicSaveState {
+  thePic: PicHandle;
+  picMax: number;
+  picIndex: number;
+  picClipRgn: RgnHandle;
+  picBkPat: Pattern;
+  picTxFont: number;
+  picTxFace: Style;
+  picTxMode: number;
+  picTxSize: number;
+  picSpExtra: number;
+  picTxNumer: Point;
+  picTxDenom: Point;
+  picTxLoc: Point;
+  picPnLoc: Point;
+  picPnSize: Point;
+  picPnMode: number;
+  picPnPat: Pattern;
+  picFillPat: Pattern;
+  picTheRect: Rect;
+  picOvSize: Point;
+  picOrigin: Point;
+  picFgColor: number;
+  picBkColor: number;
+}
 
 // -------------------------------------------------------------------------
 // FontInfo
@@ -398,11 +421,11 @@ export interface GrafPort {
   /** Pattern stretching factor (used internally during pattern rendering). */
   patStretch: number;
   /** Non-null while a picture is being recorded via {@link OpenPicture}. */
-  picSave: PicHandle | null;
-  /** Non-null while a region is being recorded via {@link OpenRgn}. */
-  rgnSave: RgnHandle | null;
-  /** Non-null while a polygon is being recorded via {@link OpenPoly}. */
-  polySave: PolyHandle | null;
+  picSave: PicSaveState | null;
+  /** True while a region is being recorded via {@link OpenRgn}. */
+  rgnSave: boolean;
+  /** True while a polygon is being recorded via {@link OpenPoly}. */
+  polySave: boolean;
   /**
    * Optional bottleneck record.  When non-null, all drawing primitives are
    * dispatched through these function pointers instead of the default

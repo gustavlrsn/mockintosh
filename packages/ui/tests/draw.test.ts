@@ -11,7 +11,8 @@ import { createDrawContext, drawTree } from "../src/draw";
 import { createNode } from "../src/nodes";
 import type { MeasureFunc } from "../src/layout";
 import { createFocusManager } from "../src/focus";
-import { getBit, newBitMap, type BitMap } from "@mockintosh/quickdraw";
+import type { BitMap } from "@mockintosh/quickdraw";
+import { getBit, newBitMap } from "@mockintosh/quickdraw/bits";
 
 const noMeasure: MeasureFunc = () => ({ width: 0, height: 0 });
 
@@ -81,6 +82,26 @@ describe("drawTree — background fill", () => {
     // Checker pattern: pixel (0,0) = black (0xAA byte, bit 7 set)
     expect(px(screen, 0, 0)).toBe(1); // black
     expect(px(screen, 1, 0)).toBe(0); // white
+  });
+});
+
+describe("drawTree — borderRadius", () => {
+  it("cuts the square corners of a filled box", () => {
+    const { screen, ctx, root } = makeTestContext();
+    const child = createNode("box");
+    child.style = { width: 12, height: 10 };
+    child.props = { background: 1, borderRadius: 3 };
+    child.parent = root;
+    root.children = [child];
+
+    computeLayout(root, W, H, noMeasure);
+    drawTree(root, ctx);
+
+    expect(px(screen, 0, 0)).toBe(0);
+    expect(px(screen, 11, 0)).toBe(0);
+    expect(px(screen, 0, 9)).toBe(0);
+    expect(px(screen, 11, 9)).toBe(0);
+    expect(px(screen, 5, 5)).toBe(1);
   });
 });
 

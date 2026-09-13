@@ -14,9 +14,13 @@
  * (if installed) before falling through to the `StdRect` rasterizer.
  */
 
-import { Rect, Point, Pattern, cloneRect } from "./types";
-import { globals } from "./globals";
-import { drawRectToPort, drawHSpan } from "./bitblt";
+import { Rect, Point, Pattern } from "./types";
+import { globals, requirePort } from "./globals";
+import { MapPt } from "./points";
+import { asInt16 } from "./fixmath";
+import { RgnBlt } from "./rgnBlt";
+import { PutRect } from "./putRect";
+import { CheckPic, PutPicRect, PutPicVerb } from "./picSave";
 import {
   patCopy,
   patXor,
@@ -159,19 +163,15 @@ export function UnionRect(src1: Rect, src2: Rect, dstRect: Rect): void {
  * `PROCEDURE MapRect(VAR r: Rect; fromRect, toRect: Rect)`.
  */
 export function MapRect(r: Rect, fromRect: Rect, toRect: Rect): void {
-  const fW = fromRect.right - fromRect.left;
-  const fH = fromRect.bottom - fromRect.top;
-  const tW = toRect.right - toRect.left;
-  const tH = toRect.bottom - toRect.top;
-
-  if (fW !== 0) {
-    r.left = toRect.left + Math.round(((r.left - fromRect.left) * tW) / fW);
-    r.right = toRect.left + Math.round(((r.right - fromRect.left) * tW) / fW);
-  }
-  if (fH !== 0) {
-    r.top = toRect.top + Math.round(((r.top - fromRect.top) * tH) / fH);
-    r.bottom = toRect.top + Math.round(((r.bottom - fromRect.top) * tH) / fH);
-  }
+  // Pictures.a:1798-1803 — MapPt × 2 (topLeft, then botRight).
+  const topLeft = { v: r.top, h: r.left };
+  const botRight = { v: r.bottom, h: r.right };
+  MapPt(topLeft, fromRect, toRect);
+  MapPt(botRight, fromRect, toRect);
+  r.top = topLeft.v;
+  r.left = topLeft.h;
+  r.bottom = botRight.v;
+  r.right = botRight.h;
 }
 
 // -------------------------------------------------------------------------
@@ -197,115 +197,95 @@ export function Pt2Rect(pt1: Point, pt2: Point, dstRect: Rect): void {
 
 // Internal: dispatch to grafProcs or StdRect
 function callRect(verb: number, r: Rect, fillPat?: Pattern): void {
-  const port = globals.thePort;
-  if (!port) return;
-  if (port.grafProcs && port.grafProcs.rectProc) {
-    if (fillPat) port.fillPat = new Uint8Array(fillPat);
-    port.grafProcs.rectProc(verb as any, r);
+  const port = requirePort();
+  if (fillPat) port.fillPat = new Uint8Array(fillPat);
+  if (port.grafProcs?.rectProc) {
+    port.grafProcs.rectProc(verb as 0 | 1 | 2 | 3 | 4, r);
     return;
   }
-  StdRect(verb as any, r, fillPat);
+  StdRect(verb as 0 | 1 | 2 | 3 | 4, r);
 }
 
 /**
- * Default rectangle rasterizer.  Draws `r` using the given `verb` into the
- * current port.  Called by the `Frame/Paint/…Rect` family, and also directly
- * when bypassing the bottleneck.
- *
- * @param verb     Drawing operation (FRAME=0, PAINT=1, ERASE=2, INVERT=3, FILL=4).
- * @param r        The rectangle to draw.
- * @param fillPat  Pattern to use for FILL; ignored for other verbs.
+ * `PUSH A MODE AND A PATTERN, BASED ON VERB` (`Rects.a:69-104`).
+ * FRAME and PAINT share `pnMode`/`pnPat`; hollow is chosen by the caller.
+ */
+export function PushVerb(verb: number): { mode: number; pat: Pattern } {
+  const port = requirePort();
+  if (verb <= PAINT) return { mode: port.pnMode, pat: port.pnPat };
+  if (verb < INVERT) return { mode: patCopy, pat: port.bkPat };
+  if (verb === INVERT) return { mode: patXor, pat: globals.black };
+  return { mode: patCopy, pat: port.fillPat };
+}
+
+/** `DrawRect` (`Rects.a:187-217`). `pnVis` gate, then `RgnBlt` (no `portRect`). */
+function DrawRect(r: Rect, mode: number, pat: Pattern): void {
+  const port = requirePort();
+  if (asInt16(port.pnVis) < 0) return;
+  RgnBlt(
+    port.portBits,
+    port.portBits,
+    r,
+    r,
+    mode,
+    pat,
+    port.clipRgn,
+    port.visRgn,
+    globals.wideOpen
+  );
+}
+
+/**
+ * `FrRect` pinwheel (`Rects.a:243-301`). Raw 16-bit pen size; if
+ * `h2≥h3 ∨ v2≥v3` the original rect is painted once. Otherwise top /
+ * right / bottom / left slabs share edges so XOR does not cancel corners
+ * (`right.bottom = v3`, not `v4`).
+ */
+function FrRect(r: Rect): void {
+  const port = requirePort();
+  if (port.pnVis < 0) return;
+  const pw = asInt16(port.pnSize.h);
+  const ph = asInt16(port.pnSize.v);
+  const h1 = asInt16(r.left);
+  const h2 = asInt16(h1 + pw);
+  const h4 = asInt16(r.right);
+  const h3 = asInt16(h4 - pw);
+  const v1 = asInt16(r.top);
+  const v2 = asInt16(v1 + ph);
+  const v4 = asInt16(r.bottom);
+  const v3 = asInt16(v4 - ph);
+  if (h2 >= h3 || v2 >= v3) {
+    DrawRect({ top: v1, left: h1, bottom: v4, right: h4 }, port.pnMode, port.pnPat);
+    return;
+  }
+  DrawRect({ top: v1, left: h1, bottom: v2, right: h3 }, port.pnMode, port.pnPat);
+  DrawRect({ top: v1, left: h3, bottom: v3, right: h4 }, port.pnMode, port.pnPat);
+  DrawRect({ top: v3, left: h2, bottom: v4, right: h4 }, port.pnMode, port.pnPat);
+  DrawRect({ top: v2, left: h1, bottom: v4, right: h2 }, port.pnMode, port.pnPat);
+}
+
+/**
+ * Default rectangle rasterizer (`Rects.a:19-65`). FRAME → `FrRect`;
+ * other verbs → `PushVerb` then `DrawRect`. Optional `fillPat` is copied
+ * into `thePort.fillPat` first so `PushVerb` reads the port.
  */
 export function StdRect(verb: number, r: Rect, fillPat?: Pattern): void {
-  const port = globals.thePort;
-  if (!port) return;
-  if (r.top >= r.bottom || r.left >= r.right) return;
-
-  switch (verb) {
-    case FRAME: {
-      const pw = Math.max(1, port.pnSize.h);
-      const ph = Math.max(1, port.pnSize.v);
-      // Top edge
-      drawRectToPort(
-        r.left,
-        r.top,
-        r.right,
-        r.top + ph,
-        port.pnPat,
-        port.pnMode,
-        port
-      );
-      // Bottom edge
-      drawRectToPort(
-        r.left,
-        r.bottom - ph,
-        r.right,
-        r.bottom,
-        port.pnPat,
-        port.pnMode,
-        port
-      );
-      // Left edge (avoid double-drawing corners)
-      drawRectToPort(
-        r.left,
-        r.top + ph,
-        r.left + pw,
-        r.bottom - ph,
-        port.pnPat,
-        port.pnMode,
-        port
-      );
-      // Right edge
-      drawRectToPort(
-        r.right - pw,
-        r.top + ph,
-        r.right,
-        r.bottom - ph,
-        port.pnPat,
-        port.pnMode,
-        port
-      );
-      break;
-    }
-    case PAINT:
-      drawRectToPort(
-        r.left,
-        r.top,
-        r.right,
-        r.bottom,
-        port.pnPat,
-        port.pnMode,
-        port
-      );
-      break;
-    case ERASE:
-      drawRectToPort(
-        r.left,
-        r.top,
-        r.right,
-        r.bottom,
-        port.bkPat,
-        patCopy,
-        port
-      );
-      break;
-    case INVERT:
-      drawRectToPort(
-        r.left,
-        r.top,
-        r.right,
-        r.bottom,
-        globals.black,
-        patXor,
-        port
-      );
-      break;
-    case FILL: {
-      const pat = fillPat ?? port.fillPat;
-      drawRectToPort(r.left, r.top, r.right, r.bottom, pat, patCopy, port);
-      break;
-    }
+  const port = requirePort();
+  if (fillPat) port.fillPat = new Uint8Array(fillPat);
+  if (CheckPic()) {
+    PutPicVerb(verb);
+    PutPicRect(0x30 + verb, r);
   }
+  if (verb === FRAME) {
+    if (port.rgnSave) {
+      if (!globals.rgnBuf) globals.rgnBuf = [];
+      PutRect(r, globals.rgnBuf);
+    }
+    FrRect(r);
+    return;
+  }
+  const { mode, pat } = PushVerb(verb);
+  DrawRect(r, mode, pat);
 }
 
 /** Draw the outline of `r` using the current pen. `PROCEDURE FrameRect`. */

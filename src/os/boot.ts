@@ -16,6 +16,7 @@ import { registerFileOperations } from "./kernel/files";
  */
 
 import { InitGraf, InitCursor, cursorState, globals as qd } from "@mockintosh/quickdraw";
+import { newBitMap } from "@mockintosh/quickdraw/bits";
 import { createUI, type Modifiers } from "@mockintosh/ui";
 import { FileSystem } from "@mockintosh/fs";
 import type { AppContext, MenubarActionItem } from "@mockintosh/sdk";
@@ -90,7 +91,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   const resolution = { width: display.width, height: display.height };
 
   // --- QuickDraw framebuffer ---
-  InitGraf({ width: display.width, height: display.height, bits: display.framebuffer });
+  InitGraf(display.framebuffer ?? newBitMap(display.width, display.height));
   const screen = qd.screenBits;
   const present = () => { if (!stopped) display.present(screen); };
 

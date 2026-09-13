@@ -2,15 +2,17 @@
  * @mockintosh/quickdraw
  *
  * TypeScript re-implementation of the original Macintosh QuickDraw graphics
- * library (1984, Bill Atkinson). Exports the same function names as the
- * original Pascal API, targeting a packed 1-bit pixel buffer (8 pixels per
- * byte, MSB leftmost, 1 = black — see `packedBits.ts`).
+ * library (1984, Bill Atkinson). The public surface is `QuickDraw.p` +
+ * `GrafUtil.p` plus the three OS seams the original left outside the unit
+ * (screen BitMap on `InitGraf`, Font Manager, cursor vectors). Pixel helpers
+ * live on `@mockintosh/quickdraw/bits`.
  *
  * Usage:
  *   import { InitGraf, OpenPort, MoveTo, LineTo, FrameRect, ... } from "@mockintosh/quickdraw";
+ *   import { newBitMap } from "@mockintosh/quickdraw/bits";
  *
- *   InitGraf({ width: 512, height: 342 });   // allocates globals.screenBits
- *   const port = newGrafPort();
+ *   InitGraf(newBitMap(512, 342));
+ *   const port = {} as GrafPort;
  *   OpenPort(port);
  *   MoveTo(10, 10);
  *   LineTo(100, 100);
@@ -43,10 +45,9 @@ export type {
   GrafPtr,
 } from "./types";
 
+export { QDError } from "./errors";
+
 export {
-  makePoint,
-  makeRect,
-  cloneRect,
   bold,
   italic,
   underline,
@@ -104,30 +105,15 @@ export {
 } from "./constants";
 
 // -------------------------------------------------------------------------
-// Globals + InitGraf
+// Globals + InitGraf + Font Manager seam
 // -------------------------------------------------------------------------
 
-export type { QDScreen } from "./globals";
-export { globals, __injectFontFunctions } from "./globals";
+export { globals } from "./globals";
+export type { FMInput, FMOutput, FontStrike } from "./fontManager";
+export { installFontManager } from "./fontManager";
 
 // -------------------------------------------------------------------------
-// Packed 1-bit pixel storage
-// -------------------------------------------------------------------------
-
-export {
-  rowBytesFor,
-  newBitMap,
-  bitMapWidth,
-  bitMapHeight,
-  getBit,
-  setBit,
-  clearBitMap,
-  bitMapFromPixels,
-  pixelsFromBitMap,
-} from "./packedBits";
-
-// -------------------------------------------------------------------------
-// Fixed-point math and bit utilities (GrafUtil)
+// Fixed-point math and bit utilities (GrafUtil.p)
 // -------------------------------------------------------------------------
 
 export type { Fixed, Int64Bit } from "./fixmath";
@@ -200,21 +186,22 @@ export {
   GetClip,
   ClipRect,
   BackPat,
-  newGrafPort,
 } from "./grafport";
 
 // -------------------------------------------------------------------------
-// Cursor routines
+// Cursor vectors (OS seam — LCursor.a)
 // -------------------------------------------------------------------------
 
-export type { CursorState } from "./cursors";
+export type { CursorState, CursorVectors } from "./cursors";
 export {
   cursorState,
+  installCursorVectors,
   InitCursor,
   SetCursor,
   HideCursor,
   ShowCursor,
   ObscureCursor,
+  ShieldCursor,
 } from "./cursors";
 
 // -------------------------------------------------------------------------
@@ -255,6 +242,7 @@ export {
   StringWidth,
   TextWidth,
   GetFontInfo,
+  MeasureText,
   StdText,
   StdTxMeas,
 } from "./text";
@@ -309,8 +297,8 @@ export {
   EraseArc,
   InvertArc,
   FillArc,
-  PtToAngle,
 } from "./arcs";
+export { PtToAngle } from "./angles";
 
 // -------------------------------------------------------------------------
 // Polygon
@@ -373,7 +361,7 @@ export {
 // BitMap operations
 // -------------------------------------------------------------------------
 
-export { CopyBits, ScrollRect } from "./bitmaps";
+export { CopyBits, ScrollRect, StdBits } from "./bitmaps";
 
 // -------------------------------------------------------------------------
 // Picture routines
@@ -387,13 +375,15 @@ export {
   PicComment,
   StdGetPic,
   StdPutPic,
+  serializePicture,
+  parsePicture,
 } from "./pictures";
 
 // -------------------------------------------------------------------------
 // Bottleneck
 // -------------------------------------------------------------------------
 
-export { SetStdProcs, StdBits, StdComment } from "./bottleneck";
+export { SetStdProcs, StdComment } from "./bottleneck";
 
 // -------------------------------------------------------------------------
 // Misc utilities
@@ -407,9 +397,3 @@ export {
   BackColor,
   ColorBit,
 } from "./utils";
-
-// -------------------------------------------------------------------------
-// Low-level BitBlt engine (exposed for advanced use)
-// -------------------------------------------------------------------------
-
-export { BitBlt, BitBltSlow, samplePattern, drawRectToPort, drawHSpan } from "./bitblt";

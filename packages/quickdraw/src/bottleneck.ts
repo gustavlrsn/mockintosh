@@ -16,17 +16,7 @@
  * ```
  */
 
-import {
-  QDProcs,
-  GrafPort,
-  Rect,
-  Point,
-  RgnHandle,
-  BitMap,
-  FontInfo,
-  Pattern,
-} from "./types";
-import { globals } from "./globals";
+import type { QDProcs } from "./types";
 import { StdLine } from "./lines";
 import { StdRect } from "./rects";
 import { StdRRect, StdOval, StdArc } from "./arcs";
@@ -34,7 +24,8 @@ import { StdPoly } from "./polygons";
 import { StdRgn } from "./regions";
 import { StdText, StdTxMeas } from "./text";
 import { StdGetPic, StdPutPic } from "./pictures";
-import { CopyBits } from "./bitmaps";
+import { StdComment } from "./picSave";
+import { StdBits } from "./bitmaps";
 
 // -------------------------------------------------------------------------
 // SetStdProcs
@@ -51,25 +42,15 @@ import { CopyBits } from "./bitmaps";
  */
 export function SetStdProcs(procs: QDProcs): void {
   procs.textProc = StdText;
-  procs.lineProc = (newPt: Point) => {
-    const port = globals.thePort;
-    if (port) StdLine(port, newPt);
-  };
-  procs.rectProc = (verb, r) => StdRect(verb as number, r);
-  procs.rRectProc = (verb, r, ovWd, ovHt) =>
-    StdRRect(verb as number, r, ovWd, ovHt);
-  procs.ovalProc = (verb, r) => StdOval(verb as number, r);
-  procs.arcProc = (verb, r, sa, aa) => StdArc(verb as number, r, sa, aa);
-  procs.polyProc = (verb, poly) => StdPoly(verb as number, poly);
-  procs.rgnProc = (verb, rgn) => StdRgn(verb as number, rgn);
-  procs.bitsProc = (srcBits, srcRect, dstRect, mode, maskRgn) => {
-    const port = globals.thePort;
-    if (!port) return;
-    CopyBits(srcBits, port.portBits, srcRect, dstRect, mode, maskRgn);
-  };
-  procs.commentProc = (_kind, _dataSize, _dataHandle) => {
-    /* no-op */
-  };
+  procs.lineProc = StdLine;
+  procs.rectProc = StdRect;
+  procs.rRectProc = StdRRect;
+  procs.ovalProc = StdOval;
+  procs.arcProc = StdArc;
+  procs.polyProc = StdPoly;
+  procs.rgnProc = StdRgn;
+  procs.bitsProc = StdBits;
+  procs.commentProc = StdComment;
   procs.txMeasProc = StdTxMeas;
   procs.getPicProc = StdGetPic;
   procs.putPicProc = StdPutPic;
@@ -79,40 +60,5 @@ export function SetStdProcs(procs: QDProcs): void {
 // StdBits
 // -------------------------------------------------------------------------
 
-/**
- * Default bitmap bottleneck.  Copies `srcBits[srcRect]` to
- * `port.portBits[dstRect]` using the given mode and optional mask region.
- *
- * `PROCEDURE StdBits(VAR srcBits: BitMap; VAR srcRect, dstRect: Rect;
- *                    mode: INTEGER; maskRgn: RgnHandle)`.
- */
-export function StdBits(
-  srcBits: BitMap,
-  srcRect: Rect,
-  dstRect: Rect,
-  mode: number,
-  maskRgn: RgnHandle | null
-): void {
-  const port = globals.thePort;
-  if (!port) return;
-  CopyBits(srcBits, port.portBits, srcRect, dstRect, mode, maskRgn);
-}
-
-// -------------------------------------------------------------------------
-// StdComment
-// -------------------------------------------------------------------------
-
-/**
- * Default picture-comment bottleneck.  The standard implementation is a
- * no-op; override via `grafProcs.commentProc` to handle application-defined
- * comments during picture playback.
- *
- * `PROCEDURE StdComment(kind, dataSize: INTEGER; dataHandle: QDHandle)`.
- */
-export function StdComment(
-  _kind: number,
-  _dataSize: number,
-  _dataHandle: number[] | null
-): void {
-  // Default implementation is a no-op
-}
+export { StdBits } from "./bitmaps";
+export { StdComment } from "./picSave";

@@ -10,13 +10,13 @@ import {
   CopyBits,
   SetPort,
   cursorState,
-  makeRect,
   srcBic,
   srcOr,
   type BitMap,
   type Cursor,
   type GrafPort,
 } from "@mockintosh/quickdraw";
+import { makeRect } from "@mockintosh/quickdraw/bits";
 
 const CURSOR_SIZE = 16;
 const CURSOR_RECT = makeRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);

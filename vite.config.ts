@@ -72,6 +72,11 @@ export default defineConfig({
       "@": __dirname,
       // Solid’s Babel preset uses Node assertions inside the browser compiler.
       "assert": "assert/",
+      "@mockintosh/quickdraw/bits": resolve(__dirname, "packages/quickdraw/src/bits.ts"),
+      "@mockintosh/quickdraw": resolve(__dirname, "packages/quickdraw/src/index.ts"),
+      "@mockintosh/ui/renderer": resolve(__dirname, "packages/ui/src/renderer.ts"),
+      "@mockintosh/ui": resolve(__dirname, "packages/ui/src/index.ts"),
+      "@mockintosh/print": resolve(__dirname, "packages/print/src/index.ts"),
     },
   },
   test: {

@@ -3,7 +3,7 @@ import { computeLayout } from "../src/layout";
 import { createDrawContext, drawTree } from "../src/draw";
 import { createNode } from "../src/nodes";
 import type { MeasureFunc } from "../src/layout";
-import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw";
+import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
 
 const noMeasure: MeasureFunc = () => ({ width: 0, height: 0 });
 const W = 16;
