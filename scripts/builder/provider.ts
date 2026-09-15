@@ -3,8 +3,7 @@ import {fileURLToPath} from "node:url";
 import {mkdtemp, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {buildResult, type BuildProvider, type BuildResult} from "../../src/shared/buildContract";
-import {parse} from "../../src/shared/schema";
+import {parseBuildResult, type BuildProvider, type BuildResult} from "../../src/shared/buildContract";
 /** The parent owns the workspace, including when cancellation kills the worker. */
 export const localBuilder: BuildProvider = {
   async build(request, cancellation) {
@@ -23,7 +22,7 @@ export const localBuilder: BuildProvider = {
             if (done) return;
             done = true; clearTimeout(timer); release();
             if (error) reject(error);
-            else { try { resolve(parse(buildResult, result)); } catch (error) { reject(error); } }
+            else { try { resolve(parseBuildResult(result)); } catch (error) { reject(error); } }
           }
           release = cancellation.subscribe(() => finish(Object.assign(new Error("Build cancelled"), {code: "cancellation"})));
           child.once("message", result => finish(undefined, result));

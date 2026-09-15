@@ -1,23 +1,50 @@
 import { ServiceError } from "./errors";
 import type { MenubarActionItem, MenubarDefinition, MenubarRadioGroupDef } from "@mockintosh/sdk";
-import { getMenubarMenus, setOpenMenuIndex, setHighlightedMenuItem } from "../state";
-export function appleMenu(openApp: (id: string) => void): MenubarDefinition {
+import type { OSServices } from "../context";
+import { FINDER_APP_ID, getActiveAppId, getMenubarMenus, setOpenMenuIndex, setHighlightedMenuItem } from "../state";
+import { getApp } from "../apps";
+import { openAppAboutBox } from "../components/AppAboutBox.solid";
+import { openAboutBox } from "../../../apps/finder/AboutBox";
+import { openControlPanel } from "../../../apps/finder/ControlPanel";
+
+/** The Apple menu's title: the Apple logo glyph. */
+export const APPLE_MENU_LABEL = "\uF8FF";
+
+/** The Finder's About item; the About box it opens is a Finder window. */
+export const ABOUT_THIS_MACINTOSH_LABEL = "About This Macintosh…";
+
+/**
+ * The first Apple-menu item belongs to the frontmost application: "About
+ * <app>…", or "About This Macintosh…" when that is the Finder. It is never
+ * disabled — an app that declares no `about` gets the standard OS box.
+ */
+export function aboutMenuItem(os: OSServices): MenubarActionItem {
+  const appId = getActiveAppId();
+  if (appId === FINDER_APP_ID) return { label: ABOUT_THIS_MACINTOSH_LABEL, onClick: () => openAboutBox(os) };
+  const app = getApp(appId);
   return {
-    label: "\uF8FF",
-    items: [{
-      label: "About Mockintosh",
-      onClick: () => openApp("about")
-    }, {
+    label: `About ${app?.title ?? appId}…`,
+    onClick: () => { if (app) openAppAboutBox(os, app); },
+  };
+}
+
+export function appleMenu(os: OSServices): MenubarDefinition {
+  return {
+    label: APPLE_MENU_LABEL,
+    items: [aboutMenuItem(os), {
       type: "separator"
-    },     {
+    }, {
       label: "Control Panel",
-      onClick: () => openApp("control_panel")
+      onClick: () => openControlPanel(os)
     }, {
       label: "Icon Gallery",
-      onClick: () => openApp("icon_gallery")
+      onClick: () => os.openApp("icon_gallery")
+    }, {
+      label: "MacPaint",
+      onClick: () => os.openApp("macpaint")
     }, {
       label: "Terminal",
-      onClick: () => openApp("terminal")
+      onClick: () => os.openApp("terminal")
     }, {
       label: "Chooser",
       disabled: true
@@ -47,11 +74,12 @@ export function runRadioItem(group: MenubarRadioGroupDef, value: string) {
   setHighlightedMenuItem(null);
   group.onValueChange(value);
 }
-export function menus(openApp: (id: string) => void) {
-  return [appleMenu(openApp), ...getMenubarMenus()];
+/** Every menu in the menubar right now: the Apple menu, then the active app's. */
+export function menus(os: OSServices) {
+  return [appleMenu(os), ...getMenubarMenus()];
 }
-export function runNamedMenu(openApp: (id: string) => void, menu: string, label: string) {
-  const matches = menus(openApp).filter(m => m.label === menu);
+export function runNamedMenu(os: OSServices, menu: string, label: string) {
+  const matches = menus(os).filter(m => m.label === menu);
   if (matches.length !== 1) throw new ServiceError(matches.length ? "ambiguity" : "missing-resource", "Menu must match exactly once");
   const actions: (() => void)[] = [];
   for (const item of matches[0].items) {

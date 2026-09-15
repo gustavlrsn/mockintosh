@@ -15,6 +15,10 @@ export function platformCapabilities(platform: Platform): CapabilitySet {
   if (platform.fetch) caps.add("network");
   if (platform.clipboard) caps.add("clipboard");
   if (platform.printer) caps.add("printer");
+  if (platform.images) caps.add("images");
+  if (platform.video) caps.add("video");
+  if (platform.camera) caps.add("camera");
+  if (platform.browser) caps.add("browser");
   return caps;
 }
 

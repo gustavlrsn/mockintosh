@@ -24,7 +24,7 @@ interface Command {
 /** The sole S1 catalog: syntax, execution, and presentation live together. */
 export const commands: Readonly<Record<string, Command>> = {
   desktop_pattern: {
-    operands: "[checker|white|black]", json: true,
+    operands: "[checker|white|black|ppat:<id>]", json: true,
     format: result => (result as {pattern: string}).pattern + "\n",
     async run(args, {invoke}, usage) {
       usage(0, 1);

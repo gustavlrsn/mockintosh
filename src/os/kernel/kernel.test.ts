@@ -98,4 +98,27 @@ describe("kernel persistent volume", () => {
     await fs.flush();
     expect((await backend.readCatalog())!).toContain('"name":"a"');
   });
+
+  it("enforces session operation grants", async () => {
+    const { kernel } = await setup();
+    const limited = kernel.createSession({ operations: ["stat", "list"] });
+    await expect(kernel.invoke(limited, "stat", { path: "/disk" })).resolves.toMatchObject({ kind: "directory" });
+    await expect(kernel.invoke(limited, "write", { path: "/disk/x", body: "no" })).rejects.toMatchObject({
+      code: "permission",
+    });
+    expect(kernel.describe(limited).map(o => o.name).sort()).toEqual(["list", "stat"]);
+    const open = kernel.createSession();
+    await expect(kernel.invoke(open, "write", { path: "/disk/ok", body: "yes" })).resolves.toMatchObject({ path: "/disk/ok" });
+  });
+
+  it("rejects revoked and stale granted sessions", async () => {
+    const { kernel } = await setup();
+    const limited = kernel.createSession({ operations: ["stat"] });
+    kernel.revokeSession(limited.id);
+    await expect(kernel.invoke(limited, "stat", { path: "/disk" })).rejects.toMatchObject({ code: "permission" });
+    const stale = kernel.createSession({ operations: ["stat"] });
+    await expect(kernel.invoke({ ...stale, generation: 0 }, "stat", { path: "/disk" })).rejects.toMatchObject({
+      code: "stale-reference",
+    });
+  });
 });

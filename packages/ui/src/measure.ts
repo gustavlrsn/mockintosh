@@ -49,7 +49,7 @@ export function createMeasureFunc(): MeasureFunc {
       const src = node.props["src"] as { width: number; height: number } | undefined;
       if (src) return { width: src.width, height: src.height };
     }
-    if (node.type === "raster") {
+    if (node.type === "raster" || node.type === "bitmap") {
       return { width: 0, height: 0 };
     }
     return { width: 0, height: 0 };

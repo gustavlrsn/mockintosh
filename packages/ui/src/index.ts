@@ -11,6 +11,8 @@ export type { UIServices, UIClipboard } from "./services";
 // -------------------------------------------------------------------------
 export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid } from "./sprite";
 export type { Sprite } from "./sprite";
+export { toBits, createDitherer } from "./dither";
+export type { ImageFrame, DitherMode, DitherOptions } from "./dither";
 export { decodeBase64 } from "./base64";
 
 // -------------------------------------------------------------------------
@@ -20,6 +22,8 @@ export type {
   LayoutStyle,
   LayoutRect,
   PatternName,
+  PatternBits,
+  Fill,
   Ink,
   BoxProps,
   TextProps,
@@ -27,6 +31,7 @@ export type {
   TextVerticalAlign,
   ImageProps,
   RasterProps,
+  BitmapProps,
   RasterPaintFn,
   RasterPaintRect,
   RasterSurface,

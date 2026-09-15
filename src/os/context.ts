@@ -8,8 +8,18 @@ import type { SpriteRegistry } from "./sprites/registry";
 import type { FileSystem } from "@mockintosh/fs";
 import type { AnimRect } from "./zoomAnimation";
 import type { AppInstaller } from "./installedApps";
-import type { DialogOptions, FetchFunction, PrintService, WindowSpec } from "@mockintosh/sdk";
-import type { PlatformEnv } from "../platform/types";
+import type {
+  AppCrypto,
+  BrowserService,
+  CameraService,
+  DialogOptions,
+  FetchFunction,
+  ImageService,
+  PrintService,
+  VideoService,
+  WindowSpec,
+} from "@mockintosh/sdk";
+import type { PlatformEnv, PlatformScheduler } from "../platform/types";
 import type { CapabilitySet } from "./capabilities";
 
 export interface IconScreenRect {
@@ -35,12 +45,18 @@ export interface OSServices {
   resolution: { width: number; height: number };
   menubarHeight: number;
   env: PlatformEnv;
+  scheduler: PlatformScheduler;
   /** What this machine can do; apps' `requires` are checked against it. */
   capabilities: CapabilitySet;
   /** Network access, when the platform has it. */
   fetch?: FetchFunction;
   /** The system printer, when the platform provides a transport for one. */
   printer?: PrintService;
+  images?: ImageService;
+  video?: VideoService;
+  camera?: CameraService;
+  crypto: AppCrypto;
+  browser?: BrowserService;
   /** Installs third-party apps, when the platform can load code at runtime. */
   installer?: AppInstaller;
   /**

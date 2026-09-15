@@ -59,7 +59,9 @@ import {
   type CanvasNode,
   type HitRect,
   type HitMask,
+  type Fill,
   type Ink,
+  type PatternBits,
   type PatternName,
   type RasterPaintFn,
   type RasterPaintRect,
@@ -110,6 +112,24 @@ export interface DrawContext {
   height: number;
 }
 
+/**
+ * `ClipRect` replaces the port clip. Nested overflow / raster / bitmap clips
+ * must intersect so a child cannot reopen a parent's padding box.
+ */
+function intersectClip(port: GrafPort, next: Rect): void {
+  const prev = port.clipRgn?.rgn.rgnBBox;
+  ClipRect(
+    prev
+      ? makeRect(
+          Math.max(prev.top, next.top),
+          Math.max(prev.left, next.left),
+          Math.min(prev.bottom, next.bottom),
+          Math.min(prev.right, next.right)
+        )
+      : next
+  );
+}
+
 /** Inline equivalent of the private `makeRegion` in grafport.ts */
 function _makeRgn(r: Rect): RgnHandle {
   return { rgn: { rgnSize: 10, rgnBBox: cloneRect(r), data: new Int16Array(0) } };
@@ -155,10 +175,17 @@ function applyPenMode(_port: GrafPort, penMode: "copy" | "xor" | undefined): voi
   else PenNormal();
 }
 
+function resolvePattern(background: PatternName | PatternBits): Uint8Array {
+  if (background instanceof Uint8Array) {
+    return background.length === 8 ? background : PATTERNS.checker;
+  }
+  return PATTERNS[background] ?? PATTERNS.checker;
+}
+
 function fillBackground(
   port: GrafPort,
   r: ReturnType<typeof makeRect>,
-  background: Ink | PatternName,
+  background: Fill,
   penMode: "copy" | "xor" | undefined,
   ovSize = 0
 ): void {
@@ -177,7 +204,7 @@ function fillBackground(
       PenNormal();
     }
   } else {
-    const pat = PATTERNS[background] ?? PATTERNS.checker;
+    const pat = resolvePattern(background);
     if (rounded) FillRoundRect(r, ovSize, ovSize, pat);
     else FillRect(r, pat);
   }
@@ -223,6 +250,7 @@ function drawNode(
   else if (node.type === "text") drawText(node, ctx, x, y, width, height);
   else if (node.type === "image") drawImage(node, ctx, x, y, width, height);
   else if (node.type === "raster") drawRaster(node, ctx, x, y, width, height);
+  else if (node.type === "bitmap") drawBitmap(node, ctx, x, y, width, height);
 
   if (clips) {
     const savedClip = port.clipRgn
@@ -230,18 +258,7 @@ function drawNode(
       : null;
     // Clip to the padding box so children can never paint over the border.
     const bw = resolveBorderWidth(node);
-    const clipRect = makeRect(y + bw, x + bw, y + height - bw, x + width - bw);
-    const prev = savedClip?.rgn.rgnBBox;
-    ClipRect(
-      prev
-        ? makeRect(
-            Math.max(prev.top, clipRect.top),
-            Math.max(prev.left, clipRect.left),
-            Math.min(prev.bottom, clipRect.bottom),
-            Math.min(prev.right, clipRect.right)
-          )
-        : clipRect
-    );
+    intersectClip(port, makeRect(y + bw, x + bw, y + height - bw, x + width - bw));
     for (const child of node.children) drawNode(child, ctx, zIndex + 1, ox, childOy);
     if (savedClip) ClipRect(savedClip.rgn.rgnBBox);
     else ClipRect(makeRect(-32767, -32767, 32767, 32767));
@@ -262,7 +279,7 @@ function drawBox(
 ): void {
   const { background, borderColor, borderStyle, borderRadius, penMode } =
     node.props as {
-      background?: Ink | PatternName;
+      background?: Fill;
       borderColor?: Ink;
       borderStyle?: "solid" | "dotted" | "dashed";
       borderRadius?: number;
@@ -568,8 +585,42 @@ function drawRaster(
   const savedClip = ctx.port.clipRgn
     ? { ...ctx.port.clipRgn, rgn: { ...ctx.port.clipRgn.rgn, rgnBBox: { ...ctx.port.clipRgn.rgn.rgnBBox } } }
     : null;
-  ClipRect(makeRect(y, x, y + height, x + width));
+  intersectClip(ctx.port, makeRect(y, x, y + height, x + width));
   onPaint(createRasterSurface(ctx.port, { x, y, width, height }));
+  if (savedClip) ClipRect(savedClip.rgn.rgnBBox);
+  else ClipRect(makeRect(-32767, -32767, 32767, 32767));
+}
+
+function numericSize(value: number | `${number}%` | undefined, fallback: number): number {
+  return typeof value === "number" ? value : fallback;
+}
+
+/**
+ * Blit a retained unpacked buffer. Stride is the node's numeric `width`
+ * (the buffer width); the layout rect is only the clip. A short buffer
+ * paints as many full rows as it has.
+ */
+function drawBitmap(
+  node: CanvasNode,
+  ctx: DrawContext,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): void {
+  const pixels = node.props["pixels"];
+  if (!(pixels instanceof Uint8Array)) return;
+  const bufW = numericSize(node.style.width, width);
+  const bufH = numericSize(node.style.height, height);
+  if (bufW <= 0 || bufH <= 0) return;
+  const rows = Math.min(bufH, Math.floor(pixels.length / bufW));
+  if (rows <= 0) return;
+  SetPort(ctx.port);
+  const savedClip = ctx.port.clipRgn
+    ? { ...ctx.port.clipRgn, rgn: { ...ctx.port.clipRgn.rgn, rgnBBox: { ...ctx.port.clipRgn.rgn.rgnBBox } } }
+    : null;
+  intersectClip(ctx.port, makeRect(y, x, y + height, x + width));
+  createRasterSurface(ctx.port, { x, y, width, height }).blitPixels(pixels, bufW, rows);
   if (savedClip) ClipRect(savedClip.rgn.rgnBBox);
   else ClipRect(makeRect(-32767, -32767, 32767, 32767));
 }

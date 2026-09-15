@@ -140,6 +140,38 @@ describe("computeLayout — row layout", () => {
     expect(a.layout.width).toBe(50);
     expect(b.layout.width).toBe(50);
   });
+
+  it("overflow:scroll flex item shrinks so it can scroll instead of growing the column", () => {
+    const content = box({ height: 200 });
+    const pane = box({ flexGrow: 1, overflow: "scroll" }, [content]);
+    const bar = box({ height: 22 });
+    const root = createNode("_root");
+    root.style = { width: 100, height: 100, flexDirection: "column" };
+    root.children = [pane, bar];
+    pane.parent = root;
+    bar.parent = root;
+    computeLayout(root, 100, 100, noMeasure);
+    expect(pane.layout.height).toBe(78);
+    expect(bar.layout.y).toBe(78);
+    expect(content.layout.height).toBe(200);
+  });
+
+  it("flexGrow adds free space on top of the child's own size", () => {
+    // ChatGippity: a padded flexGrow pane + a fixed compose row. Free space
+    // is available minus every sibling's base size, including the grow pane's
+    // padding. Skipping that base made the column overflow and clipped the row.
+    const pane = box({ flexGrow: 1, padding: 6 });
+    const bar = box({ height: 22 });
+    const root = createNode("_root");
+    root.style = { width: 100, height: 100, flexDirection: "column" };
+    root.children = [pane, bar];
+    pane.parent = root;
+    bar.parent = root;
+    computeLayout(root, 100, 100, noMeasure);
+    expect(pane.layout.height).toBe(78);
+    expect(bar.layout.y).toBe(78);
+    expect(bar.layout.y + bar.layout.height).toBe(100);
+  });
 });
 
 describe("computeLayout — alignment", () => {

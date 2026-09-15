@@ -6,6 +6,7 @@
 
 import {
   hasMouseHandlers,
+  markDirty,
   resolveBorderWidth,
   type CanvasNode,
   type HitMask,
@@ -13,6 +14,7 @@ import {
   type PointerCaptureEvent,
 } from "./nodes";
 import type { FocusManager } from "./focus";
+import { scheduleRepaint } from "./renderer";
 
 export type PointerType =
   | "mousemove"
@@ -137,6 +139,83 @@ export function hitTest(
   return null;
 }
 
+function paddingEdge(node: CanvasNode, edge: "top" | "right" | "bottom" | "left"): number {
+  const base = node.style.padding ?? 0;
+  if (edge === "top") return node.style.paddingTop ?? base;
+  if (edge === "right") return node.style.paddingRight ?? base;
+  if (edge === "bottom") return node.style.paddingBottom ?? base;
+  return node.style.paddingLeft ?? base;
+}
+
+/** How far `overflow: scroll` can move, from laid-out children. */
+export function scrollOverflow(node: CanvasNode): number {
+  const bw = resolveBorderWidth(node);
+  let maxBottom = node.layout.y + bw + paddingEdge(node, "top");
+  for (const child of node.children) {
+    if ((child.style.position ?? "relative") === "absolute") continue;
+    maxBottom = Math.max(maxBottom, child.layout.y + child.layout.height);
+  }
+  const contentH = maxBottom - node.layout.y + bw + paddingEdge(node, "bottom");
+  return Math.max(0, contentH - node.layout.height);
+}
+
+/**
+ * Innermost node whose box contains (x, y), including boxes with no mouse
+ * handlers. Wheel uses this so `overflow: scroll` works without onScroll.
+ */
+export function nodeAt(
+  node: CanvasNode,
+  x: number,
+  y: number,
+  ox = 0,
+  oy = 0,
+  clip: ClipRect | null = null
+): CanvasNode | null {
+  if (node.props["inert"] === true) return null;
+  if (node.type === "_text_content") return null;
+
+  const rect = visualRect(node, ox, oy);
+  const overflow = node.style.overflow;
+  const clips = overflow === "hidden" || overflow === "scroll";
+  const childOy = overflow === "scroll" ? oy - node._scrollOffset : oy;
+
+  if (clips) {
+    const bw = resolveBorderWidth(node);
+    const nextClip = intersectClip(clip, {
+      x: rect.x + bw,
+      y: rect.y + bw,
+      width: Math.max(0, rect.width - 2 * bw),
+      height: Math.max(0, rect.height - 2 * bw),
+    });
+    if (nextClip.width > 0 && nextClip.height > 0) {
+      for (let i = node.children.length - 1; i >= 0; i--) {
+        const hit = nodeAt(node.children[i], x, y, ox, childOy, nextClip);
+        if (hit) return hit;
+      }
+    }
+  } else {
+    for (let i = node.children.length - 1; i >= 0; i--) {
+      const hit = nodeAt(node.children[i], x, y, ox, oy, clip);
+      if (hit) return hit;
+    }
+  }
+
+  if (node.type === "_root") return null;
+  if (clip && !pointInRect(x, y, clip)) return null;
+  if (!pointInRect(x, y, rect)) return null;
+  return node;
+}
+
+function applyWheel(node: CanvasNode, dy: number): boolean {
+  const max = scrollOverflow(node);
+  const next = Math.max(0, Math.min(max, node._scrollOffset + dy));
+  if (next === node._scrollOffset) return false;
+  node._scrollOffset = next;
+  markDirty(node);
+  scheduleRepaint();
+  return true;
+}
+
 function localOf(node: CanvasNode, gx: number, gy: number): { lx: number; ly: number } {
   // Walk ancestors to accumulate scroll offsets so local coords match the
   // visual position used by layout + draw.
@@ -213,12 +292,23 @@ export function createPointerDispatcher(
   return {
     dispatch(type, x, y, extras) {
       if (type === "scroll") {
-        // Wheel targets the deepest hit (often a button). Walk up to the
-        // nearest onScroll, like a DOM wheel on a nested clickable.
-        let node = hitTest(root, x, y);
+        // Start from the box under the pointer, not only a hit-target. An
+        // overflow:scroll pane (ChatGippity's message list) has no handlers
+        // of its own; hitTest would miss it and the window would eat the wheel.
+        const dy = extras?.deltaY ?? 0;
+        let node = nodeAt(root, x, y) ?? hitTest(root, x, y);
         while (node) {
-          if (node._eventHandlers.onScroll) {
-            node._eventHandlers.onScroll(extras?.deltaY ?? 0);
+          const canScroll = node.style.overflow === "scroll";
+          const onScroll = node._eventHandlers.onScroll;
+          if (canScroll) {
+            const moved = applyWheel(node, dy);
+            if (onScroll) {
+              onScroll(dy);
+              return;
+            }
+            if (moved) return;
+          } else if (onScroll) {
+            onScroll(dy);
             return;
           }
           node = node.parent;

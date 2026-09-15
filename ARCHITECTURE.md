@@ -6,7 +6,7 @@ Mockintosh is a mock operating system in the style of an early Macintosh, runnin
 
 The entire UI is rendered to a **single `<canvas>` element** backed by the 1-bit framebuffer: a QuickDraw `BitMap` packed exactly as on the original Macintosh — 8 pixels per byte, most-significant bit leftmost, `1` = black, rows padded to a 16-bit word (`packedBits.ts` in `@mockintosh/quickdraw` is the only code that knows this layout). A 512×342 screen is 22 KB, and the same bytes can be handed to a 1-bit panel driver or an ESC/POS printer unchanged. There is no HTML/CSS rendering within the simulated screen. Colour is deliberately out of scope; if it ever returns it will come in the way Color QuickDraw did — a `PixMap` with a `pixelSize` beside the 1-bit `BitMap` — rather than as a palette bolted onto the monochrome path.
 
-The frontend is built with **Vite** and a **SolidJS custom renderer** (`@mockintosh/ui`) that paints a retained `box` / `text` / `image` / `raster` tree through QuickDraw into that framebuffer. The OS shell lives in `src/os` and is brought up by `bootOS(platform)` (`src/os/boot.ts`); the browser entry point `src/solidMain.ts` just builds the web platform and calls it. The backend runs as **Vercel Edge Functions** in the same repo.
+The frontend is built with **Vite** and a **SolidJS custom renderer** (`@mockintosh/ui`) that paints a retained `box` / `text` / `image` / `raster` / `bitmap` tree through QuickDraw into that framebuffer. The OS shell lives in `src/os` and is brought up by `bootOS(platform)` (`src/os/boot.ts`); the browser entry point `src/solidMain.ts` just builds the web platform and calls it. The backend runs as **Vercel Edge Functions** in the same repo.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -35,7 +35,7 @@ src/platform/<host>  ─ implements Platform ─▶  bootOS(platform)
 
 ## Kernel (Toolbox traps)
 
-Each `BootedOS` owns a `Kernel`: a trap dispatcher with an instance identity, boot generation, and caller sessions. Sessions identify the caller and own cleanup; they are not an ACL. `defineOperation` keeps each trap's input schema, result schema, and handler together. The same table is what MCP lists, what Terminal runs, and what Source Editor calls.
+Each `BootedOS` owns a `Kernel`: a trap dispatcher with an instance identity, boot generation, and caller sessions. Sessions identify the caller and own cleanup. `createSession({ operations })` can attach an operation grant; `invoke` then throws `permission` for names outside that set. Nested `Execution.invoke` inside a handler is trusted and is not filtered. `defineOperation` keeps each trap's input schema, result schema, and handler together. The same table is what MCP lists, what Terminal runs, and what Source Editor calls. Wire types live in `@mockintosh/protocol`.
 
 Traps are grouped as managers in documentation only:
 
@@ -60,7 +60,7 @@ Handlers receive an `Execution` with the caller, cancellation, streams, the boot
 
 `AppInstances` owns actual launch lifetimes and window ids. The window store still owns geometry, ordering, and rendering. App contexts register cleanup and explicitly retain background work; restart disposes the old instance and launches the selected build. Component initialization errors are caught at the window and attributed to the instance. This is the lifecycle needed for app replacement, not a general process table.
 
-The shipped [M2 app-building slice](docs/m2-apps.md) creates, builds, runs, edits, restarts, restores, and reopens Counter after reboot. Shell S2 and a general multi-file editor remain planned.
+The shipped [M2 app-building slice](docs/m2-apps.md) creates, builds, runs, edits, restarts, restores, and reopens Counter after reboot. ChatGippity's M3 loop calls the same project/UI traps from the live computer; `/api/chat` is one LLM turn and does not execute them. Shell S2 and a general multi-file editor remain planned.
 
 ## Platform layer
 
@@ -70,11 +70,14 @@ Everything above the dashed line compiles **without DOM types**; `npm run check:
 interface Platform {
   display:   { width, height, framebuffer?, present(screen: BitMap) }
   input:     { onPointer(handler), onKey(handler) }      // raw events, screen coordinates
-  scheduler: { requestFrame(cb), now() }                  // what varies about time
+  scheduler: { requestFrame(cb), now() }                  // requestFrame returns a cancel
   storage:   FSBackend                                    // the disk
-  env:       { origin }
-  hostCapabilities: HostCapability[]                      // camera, video, images, browser
+  env:       { origin, config }                           // host origin + VITE_* / device config
+  hostCapabilities: HostCapability[]                      // leftover flags; `browser` is derived from the service
   clipboard?, printer?, fetch?                            // peripherals; absent = feature hidden
+  images?, video?, camera?                                // media; capabilities follow presence
+  crypto                                                  // randomBytes + sha256
+  browser?                                                // openExternal, authorize, loadScript
 }
 ```
 
@@ -85,7 +88,7 @@ Implementations:
 - `src/platform/web/` — `<canvas>` + `CanvasPresenter`, DOM events, `requestAnimationFrame`, `OPFSBackend`, `navigator.clipboard`, `WebUSBPrinterTransport`, `fetch`. The only OS-level code allowed to touch the DOM.
 - `src/platform/headless/` — in-memory display with frame read-back, synthetic input injection, a hand-advanced clock, `InMemoryBackend`. `src/os/boot.test.ts` boots the whole shell on it and drives menus, ⌘N, and the capability dialog from Node. It is the starting point for any new host: swap `present()` and the input injectors for real drivers.
 
-Which apps ship is the entry point's decision, not the OS's: `src/systemApps.ts` registers the web build's bundled apps; a device build imports a different list. Bundled apps are written against `@mockintosh/sdk` only — `export default defineApp(…)`, `useApp()` — so they are the same shape as a third-party bundle and could be moved out of the tree. Five are OS-owned and reach into `src/os` on purpose: Finder (desktop and folder windows), Terminal (kernel shell sessions), Control Panel (persistent settings), and App Store (installation privileges). Source Editor owns project editing. Finder, Terminal, and Source Editor are registered by boot; other bundled apps are registered by the host.
+Which apps ship is the entry point's decision, not the OS's: `src/systemApps.ts` registers the web build's bundled apps; a device build imports a different list. Bundled apps are written against `@mockintosh/sdk` only — `export default defineApp(…)`, `useApp()` — so they are the same shape as a third-party bundle and could be moved out of the tree. Three stay OS-owned and reach into `src/os` on purpose: Finder (desktop, folder windows, About This Macintosh, Control Panel), App Store (installation privileges), and Icon Gallery (the OS icon catalog). Finder is registered by boot; other bundled apps are registered by the host. Kernel clients (Source Editor, Terminal, ChatGippity) stay SDK-clean and receive a granted `AppContext.kernel` session from `permissions`.
 
 ### Capabilities
 
@@ -120,9 +123,9 @@ interface SolidApp<P = Record<string, never>> {
 
 Windows are opened through **`AppContext.openWindow(spec)`** (`OSServices.openWindow` underneath, `buildAppWindow` in `appWindow.ts` — this shell's `NewWindow`). A `WindowSpec` names the kind, title, size, position, `scrollable`/`resizable`, and optionally a `Component` other than the app's main one; every field defaults to the `defineApp` declaration, so `openWindow()` is the main window. The first window opened from an icon gets the zoom-rect animation. `OSWindow.Component` holds a window's own component when it has one; `WindowContent` mounts it, else the app's.
 
-`AppContext` (`appContext.ts`) is everything an app can do without a window — sprites, storage, `fs`, `os.openApp/closeWindow/showDialog`, `openWindow`, `fetch`, `print`, `capabilities`, `env`. `AppServices`, what `useApp()` returns inside a window, is `AppContext` plus `window` and `setMenus`. The OS supplies one `AppServices` per window. `useWindow()` (shell-internal) exposes `{ id, width, height, isActive, scrollY, kind, setTitle, setContentSize, setInfoBar, setMenus, setFullScreen, close }`. Apps fill a non-scrolling band above the body with `WindowHeader` (Finder folder “N items”, Icon Gallery search) and below it with `WindowFooter`; the window scrollbar thumbs only the body. `win.height` is that body. `setContentSize` is the document height that drives the thumb.
+`AppContext` (`appContext.ts`) is everything an app can do without a window — sprites, storage, `fs`, `os.openApp/closeWindow/showDialog`, `openWindow`, `fetch`, `print`, `images`/`video`/`camera`, `scheduler`, `crypto`, `browser`, granted `kernel`, `capabilities`, `env`. `AppServices`, what `useApp()` returns inside a window, is `AppContext` plus `window` and `setMenus`. The OS supplies one `AppServices` per window. `useWindow()` (shell-internal) exposes `{ id, width, height, isActive, scrollY, kind, setTitle, setContentSize, setInfoBar, setMenus, setFullScreen, close }`. Apps fill a non-scrolling band above the body with `WindowHeader` (Finder folder “N items”, Icon Gallery search) and below it with `WindowFooter`; the window scrollbar thumbs only the body. `win.height` is that body. `setContentSize` is the document height that drives the thumb.
 
-Finder is registered like any other app (`FINDER_APP_ID`): the desktop is its window-less surface and folder windows are its windows (`kind: "finder-folder"`, `props: { directoryId }`). Apps that need to write pixels directly (video frames, dithered photos) use a `<raster onPaint>` node, which hands them a `RasterSurface` (`setPixel` / `blitPixels` / `fill` in raster-local coordinates, plus the clipped QuickDraw port); the framebuffer's memory layout never reaches app code. There is no other rendering path.
+Finder is registered like any other app (`FINDER_APP_ID`): the desktop is its window-less surface and folder windows are its windows (`kind: "finder-folder"`, `props: { directoryId }`). A live 1-bit buffer the app owns is a `<bitmap pixels>` node (unpacked `Uint8Array`; replacing the array repaints). Apps that paint from an external source (video frames, dithered photos) use `<raster onPaint>`, which hands them a `RasterSurface` (`setPixel` / `blitPixels` / `fill` in raster-local coordinates, plus the clipped QuickDraw port) and an explicit `revision` to dirty the frame. The framebuffer's memory layout never reaches app code. There is no other rendering path.
 
 ### Apps, windows, and the menubar
 
@@ -163,15 +166,17 @@ src/platform/
 
 packages/ui/                Solid universal renderer
 packages/fs/                Reactive virtual file system + backends
-packages/sdk/               defineApp, useApp, menubar types, UI + fs re-exports
+packages/sdk/               defineApp, useApp, menubar types, UI + fs + protocol re-exports
+packages/protocol/          Wire schemas: kernel resources, jobs, chat, build contract
+packages/agent/             ChatGippity loop (`runAgent`) over KernelClient + fetch
 packages/markdown/          mdast → LayoutNode
 packages/print/             Print pages (QuickDraw ports) → ESC/POS → PrinterTransport
 packages/quickdraw/         GrafPort, CopyBits, BitBlt, packed 1-bit BitMap
 
-apps/                       Bundled apps (*.tsx), SDK-only except OS-owned Finder, Terminal, Control Panel, App Store
+apps/                       Bundled apps (*.tsx), SDK-only except Finder, App Store, Icon Gallery
   Finder.solid.tsx
-  finder/attributes.ts      Icon position / zOrder / custom icon on FS attributes
-  MarkdownView.tsx
+  finder/                   Finder windows: folder views, AboutBox, Control Panel
+  sdkClean.ts               SDK_CLEAN / SHELL_APPS manifest for the compile gate
   …
 
 src/

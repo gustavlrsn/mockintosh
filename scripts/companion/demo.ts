@@ -3,6 +3,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { strict as assert } from "node:assert";
+/** The Apple menu's label (the Apple logo glyph), as the `menu` trap names it. */
+const APPLE_MENU = "\uF8FF";
 const config = JSON.parse(await readFile(process.env.MOCKINTOSH_DEMO_CONFIG ?? "/tmp/mockintosh-m1-connection.json", "utf8"));
 if (process.argv.includes("--pair")) {
   const action = (...args: string[]) => execFileSync("terminal-browser", ["action", "--tab", process.env.MOCKINTOSH_DEMO_TAB ?? "4", "--", ...args], {
@@ -49,11 +51,13 @@ try {
   assert(tools.tools.some(t => t.name === "run_shell"));
   const phase = process.argv[2] ?? "before";
   if (phase === "before") {
-    await call("open", {
-      app: "control_panel"
+    // The Control Panel is a Finder window; it opens from the Apple menu, as for a user.
+    await call("menu", {
+      menu: APPLE_MENU,
+      item: "Control Panel"
     });
     const windows = await call("windows"),
-      panel = windows.find((w: any) => w.app === "control_panel");
+      panel = windows.find((w: any) => w.app === "finder" && w.title === "Control Panel");
     assert(panel);
     const nodes = await call("inspect", {
       window: panel.id
@@ -107,7 +111,7 @@ try {
     });
     await writeFile("/tmp/mockintosh-m1-evidence/terminal-nodes.json", JSON.stringify(terminalNodes, null, 2));
     const capturePath = `/disk/terminal-${Date.now().toString(36)}.pbm`;
-    const command = `ls /disk; desktop_pattern white; open control_panel; screenshot ${capturePath}`;
+    const command = `ls /disk; desktop_pattern white; menu ${APPLE_MENU} 'Control Panel'; screenshot ${capturePath}`;
     await call("click", {
       name: "terminal-command",
       window: win.id
@@ -137,7 +141,7 @@ try {
     await writeFile("/tmp/mockintosh-m1-evidence/terminal.png", image.content[0].data, "base64");
     console.log("PASS: visible Terminal explored /disk, wrote the setting, opened Control Panel, and captured PBM.");
   } else if (phase === "cli") {
-    const stdout = execFileSync(process.execPath, ["--import", "tsx", "scripts/mockintosh-sh.ts", "--connect", session.session, "-c", "desktop_pattern black; open control_panel; screenshot /disk/cli.pbm; desktop_pattern"], {
+    const stdout = execFileSync(process.execPath, ["--import", "tsx", "scripts/mockintosh-sh.ts", "--connect", session.session, "-c", `desktop_pattern black; menu ${APPLE_MENU} 'Control Panel'; screenshot /disk/cli.pbm; desktop_pattern`], {
       env: {
         ...process.env,
         MOCKINTOSH_TOKEN: config.token

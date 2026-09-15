@@ -2,8 +2,6 @@ import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } f
 import { Button, type Ink } from "@mockintosh/ui";
 import { useApp, defineApp } from "@mockintosh/sdk";
 import {
-  CLIENT_ID,
-  REDIRECT_URI,
   SCOPES,
   type DeviceFlowState,
   type PlayerState,
@@ -20,6 +18,7 @@ import {
   loadSpotifySDK,
   spotifyPost,
   spotifyPut,
+  spotifyRedirectUri,
 } from "./spotify/api";
 import { spotifySprites } from "./sprites/spotify";
 
@@ -27,8 +26,6 @@ const SIDEBAR_W = 90;
 
 /** Key in the app's storage folder (System Folder/Preferences/spotify/). */
 const TOKENS_KEY = "tokens.json";
-/** Pre-FS location; migrated on first open and then removed. */
-const LEGACY_TOKENS_KEY = "mockintosh:spotify:tokens";
 
 /** `/api/spotify/device-request` — starts the device-code login flow. */
 interface DeviceRequestResponse {
@@ -53,6 +50,8 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const win = app.window;
   const { storage } = app;
+  const CLIENT_ID = app.env.config.SPOTIFY_CLIENT_ID ?? "";
+  const REDIRECT_URI = spotifyRedirectUri(app.env.origin);
   const [tokens, setTokens] = createSignal<SpotifyTokens | null>(null);
   const [playlists, setPlaylists] = createSignal<SpotifyPlaylist[]>([]);
   const [selected, setSelected] = createSignal(-1);
@@ -69,6 +68,10 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   const session: SpotifySession = {
     tokens: null,
     fetch: app.fetch!, // present: the app requires "network"
+    clientId: CLIENT_ID,
+    redirectUri: REDIRECT_URI,
+    crypto: app.crypto,
+    images: app.images,
     onChange(next) {
       setTokens(next);
       void (next ? storage.write(TOKENS_KEY, JSON.stringify(next)) : storage.remove(TOKENS_KEY));
@@ -76,14 +79,7 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   };
 
   onMount(async () => {
-    let raw = await storage.read(TOKENS_KEY);
-    if (raw === null && typeof localStorage !== "undefined") {
-      raw = localStorage.getItem(LEGACY_TOKENS_KEY);
-      if (raw !== null) {
-        localStorage.removeItem(LEGACY_TOKENS_KEY);
-        await storage.write(TOKENS_KEY, raw);
-      }
-    }
+    const raw = await storage.read(TOKENS_KEY);
     if (raw === null) return;
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -107,8 +103,7 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
     if (!t) return;
     void (async () => {
       try {
-        await loadSpotifySDK();
-        const Spotify = (window as unknown as { Spotify?: { Player: new (opts: unknown) => typeof sdkPlayer } }).Spotify;
+        const Spotify = await loadSpotifySDK(app.browser!);
         if (!Spotify?.Player) return;
         sdkPlayer = new Spotify.Player({
           name: "Mockintosh Player",
@@ -117,7 +112,7 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
             if (tok) cb(tok);
           },
           volume: volume() / 100,
-        });
+        }) as NonNullable<typeof sdkPlayer>;
         sdkPlayer.addListener("ready", ({ device_id }: { device_id: string }) => {
           deviceId = device_id;
           void spotifyPut("/me/player", { device_ids: [device_id], play: false }, session);
@@ -165,25 +160,7 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
     });
   });
 
-  createEffect(() => {
-    const handler = async (e: MessageEvent) => {
-      if (e.data?.type !== "spotify-callback") return;
-      if (e.data.error) {
-        setError(String(e.data.error));
-        return;
-      }
-      if (!e.data.code || !codeVerifier) return;
-      try {
-        const next = await exchangeCodeForTokens(e.data.code, codeVerifier, session);
-        session.onChange(next);
-        setError("");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Auth failed");
-      }
-    };
-    window.addEventListener("message", handler);
-    onCleanup(() => window.removeEventListener("message", handler));
-  });
+  // OAuth return is handled in startBrowser via `browser.authorize`.
 
   createEffect(() => {
     const flow = deviceFlow();
@@ -268,22 +245,28 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
       setError("No client ID configured");
       return;
     }
-    const verifier = generateCodeVerifier();
+    const verifier = generateCodeVerifier(app.crypto);
     codeVerifier = verifier;
-    void generateCodeChallenge(verifier).then((challenge) => {
-      const params = new URLSearchParams({
-        response_type: "code",
-        client_id: CLIENT_ID,
-        scope: SCOPES,
-        redirect_uri: REDIRECT_URI,
-        code_challenge_method: "S256",
-        code_challenge: challenge,
-      });
-      window.open(
-        `https://accounts.spotify.com/authorize?${params.toString()}`,
-        "spotify-auth",
-        "width=500,height=700"
-      );
+    void generateCodeChallenge(verifier, app.crypto).then(async (challenge) => {
+      const params = [
+        ["response_type", "code"],
+        ["client_id", CLIENT_ID],
+        ["scope", SCOPES],
+        ["redirect_uri", REDIRECT_URI],
+        ["code_challenge_method", "S256"],
+        ["code_challenge", challenge],
+      ].map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
+      try {
+        const result = await app.browser!.authorize(`https://accounts.spotify.com/authorize?${params}`, {
+          redirectOrigin: app.env.origin,
+        });
+        if (!result.code || !codeVerifier) return;
+        const next = await exchangeCodeForTokens(result.code, codeVerifier, session);
+        session.onChange(next);
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Auth failed");
+      }
     });
   }
 

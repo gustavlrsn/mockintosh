@@ -29,6 +29,16 @@ declare class TextDecoder {
   decode(input?: ArrayBufferView | ArrayBuffer): string;
 }
 
+interface AbortSignal {
+  readonly aborted: boolean;
+  addEventListener(type: "abort", listener: () => void, options?: { once?: boolean }): void;
+  removeEventListener(type: "abort", listener: () => void): void;
+}
+declare class AbortController {
+  readonly signal: AbortSignal;
+  abort(): void;
+}
+
 declare module "*.json" {
   const value: unknown;
   export default value;

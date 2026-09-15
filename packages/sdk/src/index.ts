@@ -2,7 +2,7 @@
  * @mockintosh/sdk v2 — Solid-only public API for third-party Mockintosh apps.
  *
  * Apps export a Solid component via `defineApp`. Drawing happens through
- * `@mockintosh/ui` (`box` / `text` / `image` / `raster`). OS services come
+ * `@mockintosh/ui` (`box` / `text` / `image` / `raster` / `bitmap`). OS services come
  * from `useApp()`.
  */
 
@@ -11,6 +11,10 @@ import type { FileSystem } from "@mockintosh/fs";
 import type { GrafPort } from "@mockintosh/quickdraw";
 import type { Sprite } from "@mockintosh/ui";
 import type { MenubarDefinition } from "./menus";
+import type { AppScheduler, CameraService, ImageService, VideoService } from "./media";
+import type { KernelClient, KernelPermission } from "./kernel";
+import type { AppCrypto } from "./crypto";
+import type { BrowserService } from "./browser";
 
 export type {
   MenubarDefinition,
@@ -43,8 +47,22 @@ export {
 
 // The screen is 1-bit: every pixel is one of two inks. Sprites are the
 // 1-bit image asset format; `defineSprite` / `fromGrid` build them.
-export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid } from "@mockintosh/ui";
-export type { Sprite } from "@mockintosh/ui";
+export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid, toBits, createDitherer } from "@mockintosh/ui";
+export type { Sprite, ImageFrame, DitherMode, DitherOptions } from "@mockintosh/ui";
+export type {
+  ImageService,
+  VideoSource,
+  VideoService,
+  CameraSource,
+  CameraService,
+  AppScheduler,
+} from "./media";
+export type { KernelClient, KernelInvokeOptions, KernelPermission, OperationContract } from "./kernel";
+export type { AppCrypto } from "./crypto";
+export type { BrowserService } from "./browser";
+export { encodeQR } from "./qr";
+export type { Resource, Job, Diagnostic, ChatMessage, CompleteResult, OpenAITool } from "@mockintosh/protocol";
+export { parse, resource, jobSchema } from "@mockintosh/protocol";
 export {
   readSpriteFile,
   writeSpriteFile,
@@ -218,7 +236,10 @@ export interface AppContext {
   fetch?: FetchFunction;
   env: {
     origin: string;
+    config: Readonly<Record<string, string>>;
   };
+  crypto: AppCrypto;
+  browser?: BrowserService;
   /**
    * What this Macintosh can do. Apps that work with or without a feature
    * check here instead of declaring it in `requires`.
@@ -226,6 +247,16 @@ export interface AppContext {
   capabilities: ReadonlySet<Capability>;
   /** The system printer, when this platform has one. */
   print?: PrintService;
+  /** Decode PNG/JPEG/GIF, when this platform can. */
+  images?: ImageService;
+  /** Play compressed video, when this platform can. */
+  video?: VideoService;
+  /** Live camera frames, when this platform can. */
+  camera?: CameraService;
+  /** Frame clock and monotonic time. */
+  scheduler: AppScheduler;
+  /** Kernel traps, when the app declared `permissions`. */
+  kernel?: KernelClient;
 }
 
 /** Request options an app may pass to `fetch` — the portable subset of `RequestInit`. */
@@ -259,10 +290,10 @@ export type FetchFunction = (url: string, options?: FetchRequest) => Promise<Fet
  * - `network`   — `useApp().fetch` is available
  * - `clipboard` — copy and paste work
  * - `printer`   — `useApp().print` is available
- * - `camera`    — live camera frames can be captured
- * - `video`     — compressed video can be decoded and played
- * - `images`    — PNG/JPEG and similar raster formats can be decoded
- * - `browser`   — the OS runs inside a web browser the app may use directly (DOM, OAuth redirects, …)
+ * - `camera`    — `useApp().camera` is available
+ * - `video`     — `useApp().video` is available
+ * - `images`    — `useApp().images` is available
+ * - `browser`   — `useApp().browser` is available (`openExternal`, `authorize`, `loadScript`)
  */
 export type Capability =
   | "network"
@@ -273,16 +304,41 @@ export type Capability =
   | "images"
   | "browser";
 
+/**
+ * What "About <app>…" — the first Apple-menu item while the app is frontmost —
+ * shows. Everything is optional: with nothing declared the OS draws a standard
+ * About box from the app's `title` and `icon`; `version` and `description` add
+ * lines to that box; `Component` replaces it entirely and is mounted in a
+ * fixed-size `dialog` window of `size` (the OS default when omitted).
+ */
+export interface AppAbout {
+  /** Custom About-box content; receives no props. */
+  Component?: (props: Record<string, unknown>) => JSX.Element;
+  /** Content size of the About window when `Component` needs a particular one. */
+  size?: { width: number; height: number };
+  /** Shown as "Version <version>" in the standard box. */
+  version?: string;
+  /** A sentence or two about the app, wrapped in the standard box. */
+  description?: string;
+}
+
 export interface SolidApp<P extends Record<string, unknown> = Record<string, unknown>> {
   id: string;
   title: string;
   icon: string;
+  /** The app's About box, opened from the Apple menu. See `AppAbout`. */
+  about?: AppAbout;
   /**
    * Capabilities the app cannot work without. The OS refuses to launch the
    * app on a platform that lacks any of them and tells the user why, instead
    * of the app failing at runtime. Omit when the app runs anywhere.
    */
   requires?: Capability[];
+  /**
+   * Kernel traps this app may call. The OS creates a granted session for the
+   * instance and exposes it as `useApp().kernel`. `kernel:*` is every trap.
+   */
+  permissions?: KernelPermission[];
   /** Content size of the main window. */
   defaultSize: { width: number; height: number };
   /** Kind of the main window (default `document`). */
@@ -419,6 +475,9 @@ export {
   TextInput,
   Checkbox,
 } from "@mockintosh/ui";
+
+export { Markdown, parseMarkdown } from "./markdown";
+export type { MarkdownProps, LayoutNode, InlineSegment } from "./markdown";
 
 export interface AppManifest {
   id: string;

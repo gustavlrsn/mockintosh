@@ -186,11 +186,17 @@ export interface HitRect {
 /** A 1-bit pixel value: `0` = white, `1` = black. The screen has no other colours. */
 export type Ink = 0 | 1;
 
+/** An 8-byte QuickDraw `Pattern` (8×8, 1-bit). */
+export type PatternBits = Uint8Array;
+
+/** Solid ink, a named dither, or a raw 8-byte pattern. */
+export type Fill = Ink | PatternName | PatternBits;
+
 export interface SemanticProps { semantic?: import("./inspection").SemanticMetadata; }
 
 export interface BoxProps extends LayoutStyle, EventHandlers, SemanticProps {
-  /** Solid ink or dither pattern name */
-  background?: Ink | PatternName;
+  /** Solid ink, named dither, or raw 8-byte QuickDraw pattern */
+  background?: Fill;
   borderColor?: Ink;
   /** default: "solid" */
   borderStyle?: "solid" | "dotted" | "dashed";
@@ -288,13 +294,26 @@ export interface RasterProps extends LayoutStyle, EventHandlers, SemanticProps {
   revision?: number;
 }
 
+/**
+ * A retained 1-bit picture. `pixels` is unpacked (`0` = white, nonzero =
+ * black, `width` bytes per row) — not a QuickDraw `BitMap`. Replacing the
+ * array (a new `Uint8Array`, typically from a signal) is what schedules a
+ * repaint; there is no `onPaint` and no `revision`.
+ *
+ * Use `<raster>` when the pixels come from a camera, decoder, or other
+ * source Solid cannot see.
+ */
+export interface BitmapProps extends LayoutStyle, EventHandlers, SemanticProps {
+  pixels: Uint8Array;
+}
+
 // -------------------------------------------------------------------------
 // CanvasNode — the internal tree node
 // -------------------------------------------------------------------------
 
 let nextNodeId = 1;
 
-export type NodeType = "box" | "text" | "image" | "raster" | "_root" | "_text_content";
+export type NodeType = "box" | "text" | "image" | "raster" | "bitmap" | "_root" | "_text_content";
 
 export interface CanvasNode {
   id: number;

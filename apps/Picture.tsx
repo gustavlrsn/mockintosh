@@ -1,11 +1,11 @@
 import { createSignal, onMount, Show, type JSX } from "solid-js";
-import { useApp, type PrintableImage, defineApp, Button, MIME, readSpriteFile, type Sprite } from "@mockintosh/sdk";
+import { useApp, type PrintableImage, defineApp, Button, MIME, readSpriteFile, toBits, type Sprite } from "@mockintosh/sdk";
 
 const BROWSER_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif"];
 
 /**
  * Picture — views image files. Mockintosh sprite files draw directly; browser
- * image formats are decoded off-screen and thresholded to 1-bit.
+ * image formats are decoded through `useApp().images` and thresholded to 1-bit.
  */
 function Picture(props: Record<string, unknown>): JSX.Element {
   const app = useApp();
@@ -17,25 +17,6 @@ function Picture(props: Record<string, unknown>): JSX.Element {
   const [pixels, setPixels] = createSignal<Uint8Array | null>(null);
   const [pw, setPw] = createSignal(0);
   const [ph, setPh] = createSignal(0);
-
-  function thresholdImage(img: HTMLImageElement): void {
-    const w = Math.min(img.width, win.width() - 8);
-    const h = Math.min(img.height, win.height() - 28);
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    const ctx = c.getContext("2d")!;
-    ctx.drawImage(img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h).data;
-    const out = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) {
-      const lum = data[i * 4] * 0.3 + data[i * 4 + 1] * 0.59 + data[i * 4 + 2] * 0.11;
-      out[i] = lum < 128 ? 1 : 0;
-    }
-    setPw(w);
-    setPh(h);
-    setPixels(out);
-  }
 
   onMount(async () => {
     if (props.title) win.setTitle(String(props.title));
@@ -49,20 +30,23 @@ function Picture(props: Record<string, unknown>): JSX.Element {
       if (s) setSprite(s);
       return;
     }
-    if (!app.capabilities.has("images")) {
+    if (!app.images) {
       void app.os.showDialog({ message: `This Macintosh cannot decode "${file.name}".` });
       return;
     }
     const bytes = await app.fs.readBytes(fileId);
     if (!bytes) return;
-    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: file.type }));
-    const img = new Image();
-    img.onload = () => {
-      thresholdImage(img);
-      URL.revokeObjectURL(url);
-    };
-    img.onerror = () => URL.revokeObjectURL(url);
-    img.src = url;
+    try {
+      const frame = await app.images.decode(bytes, file.type, {
+        maxWidth: win.width() - 8,
+        maxHeight: win.height() - 28,
+      });
+      setPw(frame.width);
+      setPh(frame.height);
+      setPixels(toBits(frame, "threshold"));
+    } catch {
+      void app.os.showDialog({ message: `Couldn't decode "${file.name}".` });
+    }
   });
 
   /** The picture as shown, whichever way it was loaded. */
@@ -101,7 +85,7 @@ function Picture(props: Record<string, unknown>): JSX.Element {
           }}
         />
       }>
-        {(s) => (
+        {(s: () => Sprite) => (
           <image
             width={s().width}
             height={s().height}

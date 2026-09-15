@@ -16,8 +16,11 @@
     "packages/ui/src/**/*.tsx",
     "packages/fs/src/**/*.ts",
     "packages/sdk/src/**/*.ts",
+    "packages/sdk/src/**/*.tsx",
     "packages/print/src/**/*.ts",
-    "packages/markdown/src/**/*.ts"
+    "packages/markdown/src/**/*.ts",
+    "packages/protocol/src/**/*.ts",
+    "packages/agent/src/**/*.ts"
   ],
   "exclude": ["**/*.test.ts", "node_modules", "dist"]
 }

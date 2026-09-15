@@ -83,6 +83,21 @@ describe("drawTree — background fill", () => {
     expect(px(screen, 0, 0)).toBe(1); // black
     expect(px(screen, 1, 0)).toBe(0); // white
   });
+
+  it("accepts a raw 8-byte QuickDraw pattern", () => {
+    const { screen, ctx, root } = makeTestContext();
+    const child = createNode("box");
+    child.style = { width: 8, height: 8 };
+    child.props = { background: new Uint8Array([0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55]) };
+    child.parent = root;
+    root.children = [child];
+
+    computeLayout(root, W, H, noMeasure);
+    drawTree(root, ctx);
+
+    expect(px(screen, 0, 0)).toBe(1);
+    expect(px(screen, 1, 0)).toBe(0);
+  });
 });
 
 describe("drawTree — borderRadius", () => {

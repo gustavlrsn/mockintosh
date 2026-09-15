@@ -7,16 +7,15 @@ import {validateModule} from "../installedApps";
 import {missingCapabilities} from "../capabilities";
 import type {OSServices} from "../context";
 import type {Platform} from "../../platform/types";
-import {buildResult, diagnostic, projectPath, type BuildProvider, type BuildResult} from "../../shared/buildContract";
+import {parseBuildResult, projectPath, jobSchema, type BuildProvider, type Job} from "../../shared/buildContract";
 import * as s from "../kernel/schema";
 
 const manifestSchema = s.object({id: s.string, title: s.string, entry: s.string, sdkVersion: {enum: ["2"]}});
 const selectionSchema = s.object({projectId: s.string, app: s.string, build: s.string, previous: s.string}, ["projectId", "app", "build"]);
 const selectionsSchema = s.array(selectionSchema);
 const artifactSchema = s.object({id: s.string, sourceRevision: s.string, codeRevision: s.integer, toolchain: s.string});
-export const jobSchema = s.object({id: s.string, project: s.string, sourceRevision: s.string,
-  state: {enum: ["building", "succeeded", "failed", "cancelled"]}, diagnostics: s.array(diagnostic)});
-type Job = s.Value<typeof jobSchema>;
+export { jobSchema };
+export type { Job };
 type Selection = s.Value<typeof selectionSchema>;
 const encoder = new TextEncoder(), decoder = new TextDecoder();
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -147,7 +146,7 @@ export class ProjectService {
     for (const [key, prior] of this.jobs) if (this.jobs.size > 64 && prior.value.state !== "building") this.jobs.delete(key);
     void (async () => {
       try {
-        const result = s.parse(buildResult, await builder.build({requestId: id, sourceRevision, entry: manifest.entry, sdkVersion: "2", files}, token));
+        const result = parseBuildResult(await builder.build({requestId: id, sourceRevision, entry: manifest.entry, sdkVersion: "2", files}, token));
         token.check();
         if (result.code === undefined || result.diagnostics.length) {
           entry.value = {...entry.value, state: "failed", diagnostics: result.diagnostics};

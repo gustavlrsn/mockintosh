@@ -5,11 +5,9 @@
  * shell and the boot sequence depends on it.
  */
 import { registerApp } from "./os/apps";
-import About from "@/apps/About";
 import Testing from "@/apps/Testing";
 import FileViewer from "@/apps/FileViewer";
 import Picture from "@/apps/Picture";
-import ControlPanel from "@/apps/ControlPanel";
 import VideoPlayer from "@/apps/VideoPlayer";
 import PhotoBooth from "@/apps/PhotoBooth";
 import AppStore from "@/apps/AppStore";
@@ -17,13 +15,12 @@ import ChatGippity from "@/apps/ChatGippity";
 import Safari, { SafariStream, SafariTextweb } from "@/apps/Safari";
 import SpotifyPlayer from "@/apps/SpotifyPlayer";
 import IconGallery from "@/apps/IconGallery";
+import MacPaint from "@/apps/MacPaint";
 
 for (const app of [
-  About,
   Testing,
   FileViewer,
   Picture,
-  ControlPanel,
   VideoPlayer,
   PhotoBooth,
   AppStore,
@@ -33,6 +30,7 @@ for (const app of [
   SafariTextweb,
   SpotifyPlayer,
   IconGallery,
+  MacPaint,
 ]) {
   registerApp(app);
 }

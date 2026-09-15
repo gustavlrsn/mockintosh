@@ -1,5 +1,4 @@
-import {buildResult, type BuildProvider} from "../../../shared/buildContract";
-import {parse} from "../../../shared/schema";
+import {parseBuildResult, type BuildProvider} from "../../../shared/buildContract";
 
 /** Each build owns one worker. Cancellation/timeout terminates compilation,
  * including synchronous compiler phases; no compiler runs on the UI thread. */
@@ -17,7 +16,7 @@ export const browserBuilder: BuildProvider = {
         unsubscribe();
         worker.terminate();
         if (error) reject(error);
-        else { try { resolve(parse(buildResult, value)); } catch (error) { reject(error); } }
+        else { try { resolve(parseBuildResult(value)); } catch (error) { reject(error); } }
       };
       const timer = setTimeout(() => finish(new Error("Browser build timed out after 60 seconds")), 60000);
       unsubscribe = cancellation.subscribe(() => finish(new Error("Build cancelled")));

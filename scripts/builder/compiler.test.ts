@@ -13,5 +13,6 @@ describe("fixed app compiler", () => {
   it("reports type errors and rejects host dependencies", async () => {
     expect((await compile(request('const count: number = "wrong"; export default count;'))).diagnostics[0]).toMatchObject({file: "src/index.tsx", line: 1});
     expect((await compile(request('import fs from "node:fs"; export default fs;'))).diagnostics[0].message).toContain("Unsupported import");
+    expect((await compile(request('export default function App() { alert("saved"); return null; }'))).diagnostics[0].message).toMatch(/Host API 'alert'/);
   });
 });

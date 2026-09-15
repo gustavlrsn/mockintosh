@@ -25,12 +25,12 @@
     "icons:import": "tsx scripts/import-icon.ts",
     "icons:refresh-catalog": "tsx scripts/refresh-icon-catalog.ts",
     "icons:gallery": "tsx scripts/icons-gallery.ts",
-    "icons:extract-753": "python3 scripts/extract-system753-icons.py"
+    "icons:extract-753": "python3 scripts/extract-system753-icons.py",
+    "resources:extract-753": "python3 scripts/extract-system753-resources.py"
   },
   "dependencies": {
     "@babel/standalone": "^7.29.8",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@paulmillr/qr": "^0.3.0",
     "@rollup/browser": "^4.63.1",
     "assert": "^2.1.0",
     "babel-preset-solid": "^1.9.15",

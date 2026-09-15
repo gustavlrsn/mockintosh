@@ -153,14 +153,14 @@ export class ShellManager {
   }
   private dispose(id: string) { this.sessions.get(id)?.shell.close(); this.sessions.delete(id); }
   async run(caller: KernelSession, command: string, options: {
-    session?: string; cwd?: string; timeout?: number; outputLimit?: number;
+    session?: string; cwd?: string; timeout?: number; outputLimit?: number; keepAlive?: boolean;
     cancellation?: Cancellation; stdout?: (bytes: Uint8Array) => void; stderr?: (bytes: Uint8Array) => void;
   } = {}): Promise<ShellOutcome> {
     const timeout = options.timeout ?? 30000, outputLimit = options.outputLimit ?? 65536;
     if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 3600000 || !Number.isSafeInteger(outputLimit) || outputLimit < 0 || outputLimit > 1048576)
       throw new ServiceError("invalid-argument", "Invalid timeout or output limit");
     if (options.session && options.cwd !== undefined) throw new ServiceError("invalid-argument", "Set cwd only when creating a session");
-    const id = options.session ?? this.open(caller, options.cwd);
+    const id = options.session ?? this.open(caller, options.cwd, { keepAlive: options.keepAlive === true });
     const entry = this.sessions.get(id);
     if (!entry || entry.shell.caller.id !== caller.id) throw new ServiceError("permission", "Shell session does not belong to caller");
     const token = options.cancellation ?? new Cancellation();
@@ -184,6 +184,7 @@ export function registerShell(kernel: Kernel): ShellManager {
   kernel.register(defineOperation("run_shell", "Run S1 commands in this OS; fresh session by default. No host shell execution.", {
     command: {type: "string"}, session: {type: "string"}, cwd: {type: "string"},
     timeout: {type: "integer", minimum: 1, maximum: 3600000}, outputLimit: {type: "integer", minimum: 0, maximum: 1048576},
+    keepAlive: {type: "boolean"},
   }, ["command"], shellOutcome, (args, e) => manager.run(e.caller, args.command, {...args, cancellation: e.cancellation, ...e.streams}), {cancellation: "return-result"}));
   kernel.register(defineOperation("shell_outcome", "Retrieve a retained shell result from this boot", {id: {type: "string"}}, ["id"], shellOutcome,
     async (args, e) => manager.outcome(e.caller, args.id)));

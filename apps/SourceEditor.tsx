@@ -1,28 +1,36 @@
 import {createSignal, onCleanup, onMount, type JSX} from "solid-js";
 import {Button, TextInput, TextEditor} from "@mockintosh/ui";
-import {defineApp, useApp} from "@mockintosh/sdk";
-import {useOS} from "../src/os/context";
-import {Cancellation} from "../src/os/kernel/cancellation";
-import {parse, resource} from "../src/os/kernel/schema";
-import {jobSchema} from "../src/os/projects";
+import {defineApp, jobSchema, parse, resource, useApp} from "@mockintosh/sdk";
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new Error("Operation cancelled"));
+    };
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
 function SourceEditor(props: {path?: string}): JSX.Element {
-  const os = useOS(), app = useApp(), kernel = os.kernel!;
-  const caller = kernel.createSession();
-  const [path, setPath] = createSignal(props.path ?? os.projects!.pathFor(os.fs.locate("applications")!.id) + "/Counter.app");
+  const app = useApp(), kernel = app.kernel!;
+  const [path, setPath] = createSignal(props.path ?? "/disk/Applications/Counter.app");
   const [text, setText] = createSignal(""), [saved, setSaved] = createSignal("");
   const [status, setStatus] = createSignal("Load a project or create Counter."), [busy, setBusy] = createSignal(false), [line, setLine] = createSignal(1);
   let revision: number | undefined, loadedPath: string | undefined, closed = false;
-  let token = new Cancellation();
-  const invoke = (name: string, args: Record<string, unknown>) => kernel.invoke(caller, name, args, token);
-  onCleanup(() => { closed = true; kernel.revokeSession(caller.id); });
+  let controller = new AbortController();
+  const invoke = (name: string, args: Record<string, unknown>) => kernel.invoke(name, args, { signal: controller.signal });
+  onCleanup(() => { closed = true; controller.abort(); });
   async function action(work: () => Promise<void>) {
     if (busy()) return;
-    setBusy(true); token = new Cancellation();
+    setBusy(true); controller.abort(); controller = new AbortController();
     try { await work(); } catch (error) { if (!closed) setStatus(error instanceof Error ? error.message : String(error)); }
     finally { if (!closed) setBusy(false); }
   }
   async function load() {
-    if (text() !== saved() && await os.showDialog({message: "Discard unsaved changes and reload?", buttons: ["Cancel", "Discard"]}) !== "Discard") return;
+    if (text() !== saved() && await app.os.showDialog({message: "Discard unsaved changes and reload?", buttons: ["Cancel", "Discard"]}) !== "Discard") return;
     const file = path() + "/src/index.tsx";
     const before = parse(resource, await invoke("stat", {path: file}));
     const body = await invoke("read", {path: file}) as string;
@@ -41,7 +49,7 @@ function SourceEditor(props: {path?: string}): JSX.Element {
     if (text() !== saved()) await save();
     let job = parse(jobSchema, await invoke("build_submit", {path: path()}));
     setStatus("Building…");
-    while (job.state === "building") { await token.delay(100); job = parse(jobSchema, await invoke("build_status", {id: job.id})); }
+    while (job.state === "building") { await delay(100, controller.signal); job = parse(jobSchema, await invoke("build_status", {id: job.id})); }
     if (job.state !== "succeeded") {
       const diagnostic = job.diagnostics[0];
       if (diagnostic?.line) setLine(diagnostic.line);
@@ -67,4 +75,16 @@ function SourceEditor(props: {path?: string}): JSX.Element {
     <text wrap>{`${text() !== saved() ? "Modified. " : ""}${status()}`}</text>
   </box>;
 }
-export default defineApp({id: "source_editor", title: "Source Editor", icon: "icon/computer", defaultSize: {width: 480, height: 260}, singleInstance: false, Component: SourceEditor});
+export default defineApp({
+  id: "source_editor",
+  title: "Source Editor",
+  icon: "icon/computer",
+  defaultSize: {width: 480, height: 260},
+  singleInstance: false,
+  permissions: [
+    "kernel:stat", "kernel:read", "kernel:write",
+    "kernel:build_submit", "kernel:build_status",
+    "kernel:app_install", "kernel:project_create", "kernel:app_restore",
+  ],
+  Component: SourceEditor,
+});

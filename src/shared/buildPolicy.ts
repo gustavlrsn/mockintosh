@@ -2,12 +2,30 @@ import ts from "typescript";
 import {buildRequest, projectPath, type BuildRequest} from "./buildContract";
 import {parse} from "./schema";
 
-export const sharedBuildImports = new Set(["solid-js", "solid-js/store", "@mockintosh/sdk", "@mockintosh/ui", "@mockintosh/ui/renderer"]);
+export const sharedBuildImports = new Set(["solid-js", "solid-js/store", "@mockintosh/sdk", "@mockintosh/ui", "@mockintosh/ui/renderer", "@mockintosh/agent"]);
+/** Browser globals that share the OS JavaScript realm. Apps must use the SDK. */
+export const bannedHostGlobals = new Set([
+  "alert", "confirm", "prompt",
+  "document", "localStorage", "sessionStorage",
+  "indexedDB", "XMLHttpRequest",
+]);
 export const compilerOptions: ts.CompilerOptions = {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
   jsx: ts.JsxEmit.Preserve, jsxImportSource: "solid-js", strict: true, noEmit: true, skipLibCheck: true,
-  allowJs: true, checkJs: true, types: [], lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
+  allowJs: true, checkJs: true, types: [], lib: ["lib.es2022.d.ts"],
 };
+/** `foo.alert` / `{ alert }` bindings are not the host global. */
+function isHostGlobalUse(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  if (!parent) return true;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return false;
+  if (ts.isShorthandPropertyAssignment(parent) && parent.name === node) return false;
+  if (ts.isBindingElement(parent) && (parent.name === node || parent.propertyName === node)) return false;
+  if ((ts.isVariableDeclaration(parent) || ts.isParameter(parent)) && parent.name === node) return false;
+  if (ts.isFunctionDeclaration(parent) && parent.name === node) return false;
+  return true;
+}
 /** Resolve relative imports inside the submitted project, independently of host paths. */
 export function relativeImport(importer: string, specifier: string): string {
   const parts = importer.split("/").slice(0, -1);
@@ -43,6 +61,10 @@ export function validateSources(request: BuildRequest): void {
           if (!id.startsWith(".")) throw new Error(`Unsupported import: ${id}`);
           relativeImport(file.path, id);
         }
+      }
+      if (ts.isIdentifier(node) && bannedHostGlobals.has(node.text) && isHostGlobalUse(node)) {
+        const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
+        throw new Error(`${file.path}:${line + 1}:${character + 1}: Host API '${node.text}' is not available. Use the SDK (useApp().os.showDialog, useApp().storage, useApp().fetch).`);
       }
       ts.forEachChild(node, inspect);
     }

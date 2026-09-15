@@ -1,22 +1,19 @@
 import { createSignal, onCleanup, type JSX } from "solid-js";
 import { TextInput } from "@mockintosh/ui";
 import { defineApp, useApp } from "@mockintosh/sdk";
-import { useOS } from "../src/os/context";
-import { Cancellation } from "../src/os/kernel/cancellation";
+
 function Terminal(): JSX.Element {
-  const os = useOS(),
-    app = useApp(),
-    kernel = os.kernel!;
-  const caller = kernel.createSession();
-  const shell = os.shell!;
-  const session = shell.open(caller, undefined, {keepAlive: true});
+  const app = useApp();
+  const kernel = app.kernel!;
+  const release = app.keepAlive?.();
+  let session: string | undefined;
   let cwd = "/disk";
   const [input, setInput] = createSignal(""),
     [scrollback, setScrollback] = createSignal("Mockintosh shell S1. Type help.\n"),
     [busy, setBusy] = createSignal(false);
   const history: string[] = [];
   let index = 0,
-    token: Cancellation | undefined,
+    controller: AbortController | undefined,
     closed = false;
   const append = (text: string) => {
     if (!closed) setScrollback(old => (old + text).slice(-16384));
@@ -28,14 +25,17 @@ function Terminal(): JSX.Element {
     setInput("");
     setBusy(true);
     append(`${cwd}> ${command}\n`);
-    token = new Cancellation();
+    controller = new AbortController();
     try {
-      const result = await shell.run(caller, command, {
-        session,
-        cancellation: token,
+      const result = await kernel.invoke("run_shell", {
+        command,
+        ...(session ? { session } : { keepAlive: true }),
+      }, {
+        signal: controller.signal,
         stdout: bytes => append(new TextDecoder().decode(bytes)),
-        stderr: bytes => append(new TextDecoder().decode(bytes))
-      });
+        stderr: bytes => append(new TextDecoder().decode(bytes)),
+      }) as { session: string; cwd: string; truncated: { stdout: boolean; stderr: boolean } };
+      session = result.session;
       cwd = result.cwd;
       if (result.truncated.stdout || result.truncated.stderr) append("[output truncated]\n");
     } finally {
@@ -44,7 +44,9 @@ function Terminal(): JSX.Element {
   }
   onCleanup(() => {
     closed = true;
-    kernel.revokeSession(caller.id);
+    controller?.abort();
+    if (session) void kernel.invoke("shell_close", { session }).catch(() => {});
+    release?.();
   });
   return <box width={app.window.width()} height={app.window.height()} padding={6} gap={4} background={0}>
     <box height={Math.max(0, app.window.height() - 32)} overflow="scroll" scrollOffset={Math.max(0, scrollback().split("\n").length * 14 - app.window.height() + 50)}>
@@ -54,7 +56,7 @@ function Terminal(): JSX.Element {
       if (!busy()) setInput(value);
     }} onSubmit={value => {
       void submit(value);
-    }} width={app.window.width() - 12} autoFocus onInterrupt={() => token?.cancel()} onHistory={direction => {
+    }} width={app.window.width() - 12} autoFocus onInterrupt={() => controller?.abort()} onHistory={direction => {
       index = Math.max(0, Math.min(history.length, index + direction));
       setInput(history[index] ?? "");
     }} />
@@ -70,5 +72,6 @@ export default defineApp({
   },
   singleInstance: false,
   scrollable: false,
+  permissions: ["kernel:run_shell", "kernel:shell_close"],
   Component: Terminal
 });

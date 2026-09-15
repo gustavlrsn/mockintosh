@@ -1,9 +1,5 @@
 export * from "../../shared/schema";
 import { string, boolean, number, integer, array, object, bytes } from "../../shared/schema";
-export const resource = object({
-  id: string, revision: integer, path: string,
-  kind: { type: "string", enum: ["file", "directory"] }, contentType: string,
-});
 export const frame = object({ width: integer, height: integer, rowBytes: integer, bytes });
 export const inspection = array(object({
   id: integer, name: string, role: string, text: string, value: string,

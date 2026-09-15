@@ -194,4 +194,24 @@ describe("scroll bubbling", () => {
     ptr.dispatch("scroll", 30, 30, { deltaY: 16 });
     expect(deltas).toEqual([16]);
   });
+
+  it("wheels an overflow:scroll pane that has no onScroll", () => {
+    const root = createNode("_root");
+    root.style = { width: 80, height: 80 };
+    const pane = createNode("box");
+    pane.style = { overflow: "scroll", width: 80, height: 40 };
+    const content = createNode("box");
+    content.style = { width: 80, height: 100 };
+    pane.children = [content];
+    content.parent = pane;
+    root.children = [pane];
+    pane.parent = root;
+    computeLayout(root, 80, 80, noMeasure);
+
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    ptr.dispatch("scroll", 20, 20, { deltaY: 16 });
+    expect(pane._scrollOffset).toBe(16);
+    ptr.dispatch("scroll", 20, 20, { deltaY: 200 });
+    expect(pane._scrollOffset).toBe(60);
+  });
 });

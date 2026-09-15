@@ -1,6 +1,7 @@
 import { JSX } from "solid-js";
 import { useOS } from "../context";
 import { FinderDesktop } from "../../../apps/Finder.solid";
+import { desktopFill } from "../resourceCatalog/catalog";
 
 export function Desktop(): JSX.Element {
   const os = useOS();
@@ -11,7 +12,7 @@ export function Desktop(): JSX.Element {
       top={os.menubarHeight}
       width={os.resolution.width}
       height={os.resolution.height - os.menubarHeight}
-      background={os.desktopSettings?.pattern() === "white" ? 0 : os.desktopSettings?.pattern() === "black" ? 1 : "checker"}
+      background={desktopFill(os.desktopSettings?.pattern() ?? "checker")}
     >
       <FinderDesktop />
     </box>

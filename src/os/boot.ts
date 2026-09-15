@@ -145,9 +145,15 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     resolution,
     menubarHeight: MENUBAR_HEIGHT,
     env: platform.env,
+    scheduler: platform.scheduler,
     capabilities,
     fetch: platform.fetch,
     printer,
+    images: platform.images,
+    video: platform.video,
+    camera: platform.camera,
+    crypto: platform.crypto,
+    browser: platform.browser,
     installer,
     openApp(appId, props = {}, fromRect?) {
       const app = getApp(appId);

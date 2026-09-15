@@ -24,7 +24,7 @@ Full screen (the Macintosh "special presentation mode") and `onOpen` are in: an 
 
 ## Window definition details
 
-`windowKinds.ts` is the WDEF table. Not yet distinguished: `documentProc` vs `zoomDocProc` (every document has a zoom box), `altDBoxProc` (plain box with a heavier shadow), and the "small title" of a `utility` window, which today draws the standard title bar.
+`windowKinds.ts` is the WDEF table. `dBoxProc` alerts use a square 1px / 2px-white / 2px picture frame. Not yet distinguished: `documentProc` vs `zoomDocProc` (every document has a zoom box), `altDBoxProc` (plain box with a heavier shadow), and the "small title" of a `utility` window, which today draws the standard title bar.
 
 ## Paid Apps via Polar.sh
 

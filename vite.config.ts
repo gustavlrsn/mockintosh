@@ -32,6 +32,7 @@ function sharedRuntimeImportMap(): Plugin {
             // Third-party JSX compiles to calls into the universal renderer.
             "@mockintosh/ui/renderer": renderer,
             "@mockintosh/sdk": sdk,
+            "@mockintosh/agent": chunkFile("agent-runtime") ?? "/packages/agent/src/index.ts",
           },
         };
         return html.replace(
@@ -57,6 +58,7 @@ export default defineConfig({
     solid({
       include: [
         /packages\/ui\/.*\.[tj]sx?$/,
+        /packages\/sdk\/.*\.[tj]sx?$/,
         /apps\/.*\.[tj]sx?$/,
         /src\/os\/.*\.[tj]sx?$/,
       ],
@@ -76,19 +78,29 @@ export default defineConfig({
       "@mockintosh/quickdraw": resolve(__dirname, "packages/quickdraw/src/index.ts"),
       "@mockintosh/ui/renderer": resolve(__dirname, "packages/ui/src/renderer.ts"),
       "@mockintosh/ui": resolve(__dirname, "packages/ui/src/index.ts"),
+      "@mockintosh/protocol": resolve(__dirname, "packages/protocol/src/index.ts"),
+      "@mockintosh/agent": resolve(__dirname, "packages/agent/src/index.ts"),
       "@mockintosh/print": resolve(__dirname, "packages/print/src/index.ts"),
+      // mdast's default Vite `browser` condition reads `document` at import time.
+      "decode-named-character-reference": resolve(
+        __dirname,
+        "node_modules/decode-named-character-reference/index.js"
+      ),
     },
   },
   test: {
     environment: "node",
+    setupFiles: ["scripts/vitest-setup.ts"],
     include: [
       "packages/quickdraw/tests/**/*.test.ts",
       "packages/ui/tests/**/*.test.ts",
+      "packages/agent/src/**/*.test.ts",
       "packages/fs/tests/**/*.test.ts",
       "packages/print/tests/**/*.test.ts",
       "src/os/**/*.test.ts",
       "src/shared/**/*.test.ts",
       "scripts/**/*.test.ts",
+      "apps/**/*.test.ts",
     ],
   },
   build: {
@@ -104,6 +116,7 @@ export default defineConfig({
         "ui-runtime": resolve(__dirname, "packages/ui/src/index.ts"),
         "ui-renderer-runtime": resolve(__dirname, "packages/ui/src/renderer.ts"),
         "sdk-runtime": resolve(__dirname, "packages/sdk/src/index.ts"),
+        "agent-runtime": resolve(__dirname, "packages/agent/src/index.ts"),
         "solid-runtime": resolve(__dirname, "node_modules/solid-js/dist/solid.js"),
         "solid-store-runtime": resolve(
           __dirname,

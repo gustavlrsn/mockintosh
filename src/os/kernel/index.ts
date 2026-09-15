@@ -53,7 +53,7 @@ export function defineOperation<const P extends Record<string, schemas.Schema>, 
 let generation = 0;
 const instance = `os-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
-/** A boot owns its registry and callers. Sessions identify the caller; they are not an ACL. */
+/** A boot owns its registry and callers. Sessions may carry an operation allowlist. */
 export class Kernel {
   readonly instance = instance;
   readonly generation = ++generation;
@@ -63,6 +63,8 @@ export class Kernel {
   private operations = new Map<string, Operation>();
   private nextSession = 0;
   private lifetimes = new Map<string, Lifetime>();
+  /** `undefined` grant = every operation (shell callers). */
+  private grants = new Map<string, ReadonlySet<string> | undefined>();
 
   attachDisk(fs: FileSystem) {
     this.disk = new Disk(fs);
@@ -80,15 +82,18 @@ export class Kernel {
     return JSON.parse(JSON.stringify(contract)) as Omit<Operation, "handler" | "cancellation">;
   }
 
-  describe() {
-    return [...this.operations.keys()].map(name => this.requireOperation(name));
+  describe(caller?: Pick<KernelSession, "id">) {
+    const grant = caller ? this.grants.get(caller.id) : undefined;
+    return [...this.operations.keys()]
+      .filter(name => !grant || grant.has(name))
+      .map(name => this.requireOperation(name));
   }
 
   documentation(): string {
     return this.describe().map(o => `### ${o.name}\n\n${o.description}\n\n${JSON.stringify(o.inputSchema)}\n\nResult: ${JSON.stringify(o.resultSchema)}`).join("\n\n");
   }
 
-  createSession(): KernelSession {
+  createSession(options?: { operations?: readonly string[] }): KernelSession {
     this.assertAlive();
     const session = Object.freeze({
       id: `${this.generation}:${++this.nextSession}`,
@@ -97,6 +102,7 @@ export class Kernel {
     });
     this.sessions.set(session.id, session);
     this.lifetimes.set(session.id, new Lifetime());
+    this.grants.set(session.id, options?.operations ? new Set(options.operations) : undefined);
     return session;
   }
 
@@ -110,15 +116,18 @@ export class Kernel {
     this.sessions.delete(id);
     this.lifetimes.get(id)?.close();
     this.lifetimes.delete(id);
+    this.grants.delete(id);
   }
 
-  async invoke(caller: Pick<KernelSession, "id" | "instance" | "generation">, name: string, args: Arguments, cancellation = new Cancellation(), streams?: OperationStreams): Promise<unknown> {
+  async invoke(caller: Pick<KernelSession, "id" | "instance" | "generation">, name: string, args: Arguments, cancellation = new Cancellation(), streams?: OperationStreams, trusted = false): Promise<unknown> {
     this.assertAlive();
     if (caller.instance !== this.instance || caller.generation !== this.generation) throw new ServiceError("stale-reference", "Select the current boot generation");
     const session = this.sessions.get(caller.id);
     if (!session) throw new ServiceError("permission", "Caller session is not active");
     const operation = this.operations.get(name);
     if (!operation) throw new ServiceError("unsupported-operation", `Unknown operation: ${name}`);
+    const grant = this.grants.get(session.id);
+    if (!trusted && grant && !grant.has(name)) throw new ServiceError("permission", `Operation not granted: ${name}`);
     if (!args || typeof args !== "object" || Array.isArray(args)) throw new ServiceError("invalid-argument", "Expected an argument object");
     schemas.validate(operation.inputSchema, args, "arguments");
     cancellation.check();
@@ -149,7 +158,7 @@ export class Kernel {
         if (!disk) throw new ServiceError("unsupported-operation", "No disk is attached to this kernel");
         return disk;
       },
-      invoke: (name, args) => this.invoke(caller, name, args, cancellation),
+      invoke: (name, args) => this.invoke(caller, name, args, cancellation, undefined, true),
     };
   }
 

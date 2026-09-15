@@ -1,11 +1,11 @@
 /**
  * TypeScript JSX intrinsic element declarations for the canvas UI framework.
  *
- * These augment Solid.js's JSX namespace to add `box`, `text`, and `image`
- * as known intrinsic elements with full type safety.
+ * These augment Solid.js's JSX namespace to add `box`, `text`, `image`,
+ * `raster`, and `bitmap` as known intrinsic elements with full type safety.
  */
 
-import type { BoxProps, TextProps, ImageProps, RasterProps } from "./nodes";
+import type { BoxProps, TextProps, ImageProps, RasterProps, BitmapProps } from "./nodes";
 
 declare module "solid-js" {
   namespace JSX {
@@ -21,6 +21,9 @@ declare module "solid-js" {
         ref?: (el: import("./nodes").CanvasNode) => void;
       };
       raster: RasterProps & {
+        ref?: (el: import("./nodes").CanvasNode) => void;
+      };
+      bitmap: BitmapProps & {
         ref?: (el: import("./nodes").CanvasNode) => void;
       };
     }

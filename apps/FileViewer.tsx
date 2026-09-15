@@ -1,7 +1,5 @@
 import { Show, createSignal, onMount, type JSX } from "solid-js";
-import { MIME } from "@mockintosh/fs";
-import { MarkdownView } from "./MarkdownView";
-import { defineApp, useApp } from "@mockintosh/sdk";
+import { MIME, Markdown, defineApp, useApp } from "@mockintosh/sdk";
 
 function looksLikeMarkdown(title: string, content: string): boolean {
   if (/\.(md|markdown)$/i.test(title)) return true;
@@ -40,7 +38,7 @@ function FileViewer(props: Record<string, unknown>): JSX.Element {
           </text>
         }
       >
-        <MarkdownView markdown={content()} />
+        <Markdown text={content()} />
       </Show>
     </box>
   );

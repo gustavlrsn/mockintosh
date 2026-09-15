@@ -1,19 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootOS, type BootedOS } from "../boot";
 import { createHeadlessPlatform } from "../../platform/headless";
-import { registerApp } from "../apps";
-import ControlPanel from "../../../apps/ControlPanel";
 import type { KernelSession } from "./index";
-import { getWindows } from "../state";
+import { registerApp } from "../apps";
+import { FINDER_APP_ID, getActiveWindowId, getWindows } from "../state";
 import { InMemoryBackend } from "@mockintosh/fs";
 import { Cancellation } from "./cancellation";
 import type { InspectionNode } from "@mockintosh/ui";
+import { ABOUT_THIS_MACINTOSH_LABEL, APPLE_MENU_LABEL } from "./menus";
+import { ABOUT_BOX_TITLE } from "../../../apps/finder/AboutBox";
+import { CONTROL_PANEL_TITLE } from "../../../apps/finder/ControlPanel";
 describe("visible kernel UI operations", () => {
   let os: BootedOS, caller: KernelSession;
   const invoke = (name: string, args = {}) => os.kernel.invoke(caller, name, args);
+  /** Open the Control Panel the way a user does: from the Apple menu. */
+  const openControlPanel = () => invoke("menu", { menu: APPLE_MENU_LABEL, item: CONTROL_PANEL_TITLE });
+  /** The Control Panel is a Finder window, found by its title. */
+  const controlPanelWindow = () => getWindows().find(w => w.appId === FINDER_APP_ID && w.title === CONTROL_PANEL_TITLE)!;
   beforeEach(async () => {
     vi.useFakeTimers();
-    registerApp(ControlPanel);
     os = await bootOS(createHeadlessPlatform({
       width: 640,
       height: 480
@@ -30,8 +35,13 @@ describe("visible kernel UI operations", () => {
     expect(os.kernel.describe().some(operation => operation.name === "desktop_pattern")).toBe(true);
     expect(await invoke("desktop_pattern", {value: "black"})).toMatchObject({pattern: "black", diagnostic: ""});
     expect(os.services.desktopSettings!.pattern()).toBe("black");
+    expect(await invoke("desktop_pattern", {value: "ppat:132"})).toMatchObject({pattern: "ppat:132", diagnostic: ""});
+    expect(os.services.desktopSettings!.pattern()).toBe("ppat:132");
     const preferences = os.services.fs.locate("preferences")!;
-    expect(await os.services.fs.readText(os.services.fs.child(preferences.id, "desktop-pattern")!.id)).toBe("black\n");
+    expect(await os.services.fs.readText(os.services.fs.child(preferences.id, "desktop-pattern")!.id)).toBe("ppat:132\n");
+    await expect(invoke("desktop_pattern", {value: "ppat:99999"})).rejects.toMatchObject({
+      code: "invalid-argument"
+    });
   });
   it("saves screenshots onto the disk", async () => {
     expect(await invoke("screenshot_save", {path: "/disk/capture.pbm"})).toMatchObject({path: "/disk/capture.pbm"});
@@ -48,10 +58,11 @@ describe("visible kernel UI operations", () => {
     expect(await invoke("desktop_pattern")).toMatchObject({pattern: "checker", diagnostic: expect.stringContaining("missing")});
     await invoke("desktop_pattern", {value: "black"});
     expect(await invoke("desktop_pattern")).toMatchObject({pattern: "black", diagnostic: ""});
-    await invoke("open", {app: "control_panel"});
-    const window = getWindows().find(window => window.appId === "control_panel")!;
+    await openControlPanel();
+    const window = controlPanelWindow();
     const nodes = await invoke("inspect", {window: window.id}) as InspectionNode[];
     expect(nodes.some(node => node.name === "desktop-pattern-white")).toBe(true);
+    expect(nodes.some(node => node.name === "desktop-pattern-ppat-132")).toBe(true);
     await invoke("click", {name: "desktop-pattern-white", window: window.id});
     os.shutdown();
     await reboot();
@@ -109,7 +120,7 @@ describe("visible kernel UI operations", () => {
     expect(observed).toBe("cancelled");
   });
   it("provides readable UI shell output while retaining direct and JSON snapshots", async () => {
-    expect(await invoke("run_shell", { command: "open control_panel; render" })).toMatchObject({ stdout: "", exitCode: 0 });
+    expect(await invoke("run_shell", { command: `menu ${APPLE_MENU_LABEL} 'Control Panel'; render` })).toMatchObject({ stdout: "", exitCode: 0 });
     expect(await invoke("run_shell", { command: "apps; windows; inspect; menu" })).toMatchObject({
       stdout: expect.stringContaining("desktop-pattern-black"), exitCode: 0,
     });
@@ -124,11 +135,20 @@ describe("visible kernel UI operations", () => {
     expect(menu.stdout).toContain("(disabled)");
   });
   it("operates a named Control Panel setting and captures an idle frame", async () => {
-    await invoke("open", {
-      app: "control_panel"
-    });
+    await openControlPanel();
     const nodes = (await invoke("inspect")) as InspectionNode[];
     expect(nodes.some(n => n.name === "desktop-pattern-black")).toBe(true);
+    expect(nodes.some(n => n.name === "desktop-pattern-ppat-132")).toBe(true);
+    await invoke("click", {
+      name: "desktop-pattern-black"
+    });
+    await os.services.fs.flush();
+    expect(await invoke("desktop_pattern")).toMatchObject({pattern: "black"});
+    await invoke("click", {
+      name: "desktop-pattern-ppat-132"
+    });
+    await os.services.fs.flush();
+    expect(await invoke("desktop_pattern")).toMatchObject({pattern: "ppat:132"});
     await invoke("click", {
       name: "desktop-pattern-black"
     });
@@ -170,9 +190,7 @@ describe("visible kernel UI operations", () => {
     });
     vi.advanceTimersByTime(1000);
     caller = os.kernel.createSession();
-    await invoke("open", {
-      app: "control_panel"
-    });
+    await openControlPanel();
     backend.delay = true;
     let completed = false;
     const click = invoke("click", {
@@ -206,10 +224,8 @@ describe("visible kernel UI operations", () => {
     expect(((await invoke("inspect")) as InspectionNode[]).some(n => n.text.includes("terminal-test\n"))).toBe(true);
   });
   it("rejects inactive and stale controls", async () => {
-    await invoke("open", {
-      app: "control_panel"
-    });
-    const first = getWindows().find(w => w.appId === "control_panel")!;
+    await openControlPanel();
+    const first = controlPanelWindow();
     const node = ((await invoke("inspect")) as InspectionNode[]).find(n => n.name === "desktop-pattern-black")!;
     await invoke("open", {
       app: "terminal"
@@ -260,10 +276,8 @@ describe("visible kernel UI operations", () => {
     })).rejects.toMatchObject({
       code: "ambiguity"
     });
-    await invoke("open", {
-      app: "control_panel"
-    });
-    const panel = getWindows().find(w => w.appId === "control_panel")!;
+    await openControlPanel();
+    const panel = controlPanelWindow();
     os.services.openApp("__dialog__", {
       message: "Modal",
       buttons: ["OK"],
@@ -279,6 +293,50 @@ describe("visible kernel UI operations", () => {
     })).rejects.toMatchObject({
       code: "permission"
     });
+  });
+  it("opens Finder-owned About and Control Panel windows once from the Apple menu", async () => {
+    const appleItems = async () => ((await invoke("menu")) as {label: string; items: {label?: string}[]}[]).find(m => m.label === APPLE_MENU_LABEL)!.items;
+    expect((await appleItems())[0].label).toBe(ABOUT_THIS_MACINTOSH_LABEL);
+    await invoke("menu", { menu: APPLE_MENU_LABEL, item: ABOUT_THIS_MACINTOSH_LABEL });
+    await invoke("menu", { menu: APPLE_MENU_LABEL, item: ABOUT_THIS_MACINTOSH_LABEL });
+    const aboutBoxes = getWindows().filter(w => w.title === ABOUT_BOX_TITLE);
+    expect(aboutBoxes).toHaveLength(1);
+    expect(aboutBoxes[0]).toMatchObject({ appId: FINDER_APP_ID, kind: "dialog", width: 343, height: 160 });
+    expect(getWindows().some(w => w.appId === "about" || w.appId === "control_panel")).toBe(false);
+    await openControlPanel();
+    await openControlPanel();
+    const panels = getWindows().filter(w => w.title === CONTROL_PANEL_TITLE);
+    expect(panels).toHaveLength(1);
+    expect(panels[0]).toMatchObject({ appId: FINDER_APP_ID, kind: "document", scrollable: true, resizable: true });
+    expect(getActiveWindowId()).toBe(panels[0].id);
+    // The About box stays the Finder's while a Finder window is frontmost.
+    expect((await appleItems())[0].label).toBe(ABOUT_THIS_MACINTOSH_LABEL);
+  });
+  it("names the Apple menu's first item after the frontmost app and opens its About box", async () => {
+    const CustomAbout = () => null;
+    registerApp({ id: "test-about", title: "Aboutful", icon: "icon/computer", defaultSize: { width: 100, height: 60 }, Component: () => null,
+      about: { Component: CustomAbout, size: { width: 200, height: 90 } } });
+    const firstLabel = async () => ((await invoke("menu")) as {label: string; items: {label?: string}[]}[]).find(m => m.label === APPLE_MENU_LABEL)!.items[0].label;
+    await invoke("open", { app: "terminal" });
+    expect(await firstLabel()).toBe("About Terminal…");
+    // Terminal declares no `about`: the OS draws its standard box under the Terminal's id.
+    await invoke("menu", { menu: APPLE_MENU_LABEL, item: "About Terminal…" });
+    await invoke("menu", { menu: APPLE_MENU_LABEL, item: "About Terminal…" });
+    const terminalAbout = getWindows().filter(w => w.appId === "terminal" && w.title === "About Terminal");
+    expect(terminalAbout).toHaveLength(1);
+    expect(terminalAbout[0].kind).toBe("dialog");
+    expect(((await invoke("inspect", { window: terminalAbout[0].id })) as InspectionNode[]).some(n => n.text === "Terminal")).toBe(true);
+    // An app with its own `about.Component` gets that, at the size it asked for.
+    await invoke("open", { app: "test-about" });
+    expect(await firstLabel()).toBe("About Aboutful…");
+    await invoke("menu", { menu: APPLE_MENU_LABEL, item: "About Aboutful…" });
+    const custom = getWindows().find(w => w.appId === "test-about" && w.title === "About Aboutful")!;
+    expect(custom).toMatchObject({ kind: "dialog", width: 200, height: 90 });
+    expect(custom.Component).toBe(CustomAbout);
+    // Back on the Finder, the item is the Finder's again.
+    for (const w of [...getWindows()]) os.services.closeWindow(w.id);
+    expect(getWindows()).toHaveLength(0);
+    expect(await firstLabel()).toBe(ABOUT_THIS_MACINTOSH_LABEL);
   });
   it("captures exact white and black desktop pixels", async () => {
     for (const [value, expected] of [["white", 0], ["black", 1]] as const) {

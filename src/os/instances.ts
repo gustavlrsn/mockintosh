@@ -2,7 +2,7 @@ import {Lifetime} from "./kernel/lifetime";
 /** Actual app launches own windows and registered cleanup. The window store
  * remains authoritative for window geometry and rendering. */
 export class AppInstances {
-  private records = new Map<string, {id: string; app: string; build?: string; windows: Set<string>; retained: number; lifetime: Lifetime; error?: string}>();
+  private records = new Map<string, {id: string; app: string; build?: string; windows: Set<string>; retained: number; lifetime: Lifetime; error?: string; kernelCaller?: {id: string; instance: string; generation: number}}>();
   private next = 0;
   constructor(private closeWindow: (id: string) => void) {}
   create(app: string, build?: string): string {
@@ -18,6 +18,11 @@ export class AppInstances {
     record.retained++;
     let released = false;
     return () => { if (released) return; released = true; record.retained--; this.finishOpen(id); };
+  }
+  kernelCaller(id: string) { return this.records.get(id)?.kernelCaller; }
+  setKernelCaller(id: string, caller: {id: string; instance: string; generation: number}) {
+    const record = this.records.get(id);
+    if (record) record.kernelCaller = caller;
   }
   own(id: string, cleanup: () => void) {
     const record = this.records.get(id);

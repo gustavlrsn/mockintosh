@@ -7,7 +7,11 @@ describe("capabilities", () => {
     const bare = createHeadlessPlatform({ width: 8, height: 8 });
     expect([...platformCapabilities(bare)]).toEqual([]);
 
-    const connected = { ...bare, fetch: async () => ({}) as never, hostCapabilities: ["camera"] as const };
+    const connected = {
+      ...bare,
+      fetch: async () => ({}) as never,
+      camera: { open: async () => ({ frame: () => null, width: 0, height: 0, close() {} }) },
+    };
     expect([...platformCapabilities(connected)].sort()).toEqual(["camera", "network"]);
   });
 

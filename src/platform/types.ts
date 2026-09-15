@@ -15,7 +15,15 @@ import type { BitMap } from "@mockintosh/quickdraw";
 import type { FSBackend } from "@mockintosh/fs";
 import type { PrinterTransport } from "@mockintosh/print";
 import type { UIClipboard, Modifiers } from "@mockintosh/ui";
-import type { Capability, FetchFunction } from "@mockintosh/sdk";
+import type {
+  AppCrypto,
+  BrowserService,
+  CameraService,
+  Capability,
+  FetchFunction,
+  ImageService,
+  VideoService,
+} from "@mockintosh/sdk";
 
 export interface PlatformDisplay {
   readonly width: number;
@@ -61,18 +69,20 @@ export interface PlatformInput {
  * `setInterval`) are assumed host globals — see `core-env.d.ts`.
  */
 export interface PlatformScheduler {
-  /** Run `callback` before the next display refresh (one-shot, like `requestAnimationFrame`). */
-  requestFrame(callback: (timeMs: number) => void): void;
+  /** Run `callback` before the next display refresh; returns a cancel function. */
+  requestFrame(callback: (timeMs: number) => void): () => void;
   /** Monotonic milliseconds. */
   now(): number;
 }
 
 /** Capabilities a platform declares outright; the rest follow from which services it provides. */
-export type HostCapability = Exclude<Capability, "network" | "clipboard" | "printer">;
+export type HostCapability = "browser";
 
 export interface PlatformEnv {
   /** Origin the OS is served from ("" when there is no such notion). */
   origin: string;
+  /** Host configuration (Vite `VITE_*` values on the web). */
+  config: Readonly<Record<string, string>>;
 }
 
 export interface Platform {
@@ -82,11 +92,16 @@ export interface Platform {
   /** Backing store for the file system. */
   storage: FSBackend;
   env: PlatformEnv;
-  /** Host features present beyond the services below (camera, video, …). */
+  /** Host features present beyond the services below (`browser`). */
   hostCapabilities: readonly HostCapability[];
   clipboard?: UIClipboard;
   printer?: PrinterTransport;
   fetch?: FetchFunction;
+  images?: ImageService;
+  video?: VideoService;
+  camera?: CameraService;
+  crypto: AppCrypto;
+  browser?: BrowserService;
   /**
    * Load a JavaScript module by URL, for installing third-party apps. Absent
    * on hosts that only run code linked into the firmware (an embedded build),

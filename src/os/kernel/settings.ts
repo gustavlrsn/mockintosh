@@ -3,12 +3,19 @@ import type { FileSystem } from "@mockintosh/fs";
 import { defineOperation, type Kernel } from "./index";
 import { ServiceError } from "./errors";
 import * as s from "./schema";
+import { desktopPatternRecord } from "../resourceCatalog/catalog";
 export const desktopPatternName = "desktop-pattern";
-export type DesktopPattern = "checker" | "white" | "black";
+export type NamedDesktopPattern = "checker" | "white" | "black";
+/** Named 1-bit solids, or a System 7.5 Desktop Patterns `ppat` id. */
+export type DesktopPattern = NamedDesktopPattern | `ppat:${number}`;
+const NAMED_PATTERNS = new Set<string>(["checker", "white", "black"]);
+
 export function parseDesktopPattern(body: string): DesktopPattern {
   const value = body.replace(/\r?\n$/, "");
-  if (value !== "checker" && value !== "white" && value !== "black") throw new ServiceError("invalid-argument", "Expected checker, white, or black");
-  return value;
+  if (NAMED_PATTERNS.has(value)) return value as NamedDesktopPattern;
+  const match = /^ppat:(-?\d+)$/.exec(value);
+  if (match && desktopPatternRecord(Number(match[1]))) return value as DesktopPattern;
+  throw new ServiceError("invalid-argument", "Expected checker, white, black, or ppat:<id>");
 }
 export async function createDesktopSettings(fs: FileSystem) {
   const preferences = fs.locate("preferences");
@@ -77,15 +84,13 @@ export async function createDesktopSettings(fs: FileSystem) {
 }
 export type DesktopSettings = Awaited<ReturnType<typeof createDesktopSettings>>;
 
-const patternEnum = { type: "string", enum: ["checker", "white", "black"] } as const;
-
 export function registerDesktopSettings(kernel: Kernel, settings: DesktopSettings) {
   kernel.register(defineOperation(
     "desktop_pattern",
-    "Read or set the persistent desktop pattern",
-    { value: patternEnum },
+    "Read or set the persistent desktop pattern (checker, white, black, or ppat:<id>)",
+    { value: s.string },
     [],
-    s.object({ pattern: patternEnum, diagnostic: s.string }),
+    s.object({ pattern: s.string, diagnostic: s.string }),
     async (a) => {
       if (a.value !== undefined) await settings.set(a.value);
       return { pattern: settings.pattern(), diagnostic: settings.diagnostic() ?? "" };

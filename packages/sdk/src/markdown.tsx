@@ -1,6 +1,9 @@
-import { For, type JSX } from "solid-js";
+import { For, useContext, type JSX } from "solid-js";
 import { parseMarkdown, type LayoutNode, type InlineSegment } from "@mockintosh/markdown";
-import { useApp } from "@mockintosh/sdk";
+import { AppServicesContext } from "./index";
+
+export type { LayoutNode, InlineSegment } from "@mockintosh/markdown";
+export { parseMarkdown } from "@mockintosh/markdown";
 
 function InlineRun(props: { segments: InlineSegment[] }): JSX.Element {
   return (
@@ -10,8 +13,9 @@ function InlineRun(props: { segments: InlineSegment[] }): JSX.Element {
   );
 }
 
-function Block(props: { node: LayoutNode }): JSX.Element {
-  const app = useApp();
+function Block(props: { node: LayoutNode; onLink?: (href: string) => void }): JSX.Element {
+  const app = useContext(AppServicesContext);
+  if (!app) throw new Error("useApp() must be called inside a Mockintosh app window");
   const node = props.node;
   if (node.type === "heading") {
     return <text font="menu">{node.text}</text>;
@@ -49,11 +53,17 @@ function Block(props: { node: LayoutNode }): JSX.Element {
   return <box height={6} />;
 }
 
-export function MarkdownView(props: { markdown: string }): JSX.Element {
-  const nodes = () => parseMarkdown(props.markdown || "");
+export interface MarkdownProps {
+  text: string;
+  onLink?: (href: string) => void;
+}
+
+/** Renders markdown through the 1-bit layout tree (`box` / `text` / `image`). */
+export function Markdown(props: MarkdownProps): JSX.Element {
+  const nodes = () => parseMarkdown(props.text || "");
   return (
     <box flexDirection="column" gap={4} width="100%">
-      <For each={nodes()}>{(n) => <Block node={n} />}</For>
+      <For each={nodes()}>{(n) => <Block node={n} onLink={props.onLink} />}</For>
     </box>
   );
 }

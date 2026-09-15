@@ -1,6 +1,6 @@
 # M2 app-building slice
 
-Mockintosh can now create a Counter project, compile its source, run it, edit and rebuild it, restart it, and restore its previous build. Source, compiled artifacts, and the selected build persist on the Mockintosh disk. This delivers the app-building slice of M2; shell S2 pipelines/scripts and a general multi-file project editor remain subsequent work.
+Mockintosh can now create a Counter project, compile its source, run it, edit and rebuild it, restart it, and restore its previous build. Source, compiled artifacts, and the selected build persist on the Mockintosh disk. This delivers the app-building slice of M2; shell S2 pipelines/scripts and a general multi-file project editor remain subsequent work. ChatGippity can drive the same traps (create, write, build, install, inspect, click) from a conversation; `/api/chat` only completes one model turn.
 
 ## Use it in the visible computer
 

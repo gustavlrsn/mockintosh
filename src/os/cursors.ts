@@ -8,6 +8,7 @@
  */
 import { globals, type Cursor, type Point } from "@mockintosh/quickdraw";
 import { defineSprite, type Sprite } from "@mockintosh/ui";
+import { cursorSprite, shippedCursor } from "./resourceCatalog/catalog";
 
 /**
  * Pack a sprite of at most 16×16 (data + mask, 1 byte per pixel) into a
@@ -46,21 +47,17 @@ const GRABBING_SPRITE = defineSprite(
   16,
   "AAAAAAAAAAAAAAAAAAAAAACiigACWWWgAlVVmACVVVgClVVYCVVVWAlVVVgJVVVgAlVVYACVVYAAJVWAACVVgA=="
 );
-const IBEAM_SPRITE = defineSprite(
-  7,
-  16,
-  "oCgiACAAgAIACAAgAIACAAgAIACAAgAIAIgoCg=="
-);
-const WATCH_SPRITE = defineSprite(
-  11,
-  16,
-  "CqoAKqgAqqACqoAlVYJVlYlWViVZWpalalVViVVWCVVgCqoAKqgAqqACqoA="
-);
+function systemCursor(id: number): Cursor {
+  const rec = shippedCursor(id);
+  if (!rec) throw new Error(`System CURS ${id} is missing from the 7.5.3 catalog`);
+  const { sprite, hotSpot } = cursorSprite(rec);
+  return cursorFromSprite(sprite, hotSpot);
+}
 
 export const cursors = {
   arrow: globals.arrow,
   grab: cursorFromSprite(GRAB_SPRITE, { v: 8, h: 8 }),
   grabbing: cursorFromSprite(GRABBING_SPRITE, { v: 8, h: 8 }),
-  iBeam: cursorFromSprite(IBEAM_SPRITE, { v: 7, h: 3 }),
-  watch: cursorFromSprite(WATCH_SPRITE, { v: 8, h: 8 }),
+  iBeam: systemCursor(1),
+  watch: systemCursor(4),
 } satisfies Record<string, Cursor>;

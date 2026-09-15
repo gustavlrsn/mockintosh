@@ -1,12 +1,26 @@
-import { encodeQR } from "@paulmillr/qr";
-import type { FetchFunction, FetchRequest, FetchResponse } from "@mockintosh/sdk";
+import { encodeQR, toBits, type AppCrypto, type BrowserService, type FetchFunction, type FetchRequest, type FetchResponse, type ImageService } from "@mockintosh/sdk";
 
-export const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID ?? "";
-export const REDIRECT_URI = `${
-  typeof window !== "undefined"
-    ? window.location.origin.replace("//localhost", "//[::1]").replace("//127.0.0.1", "//[::1]")
-    : ""
-}/callback.html`;
+export function spotifyRedirectUri(origin: string): string {
+  return `${origin.replace("//localhost", "//[::1]").replace("//127.0.0.1", "//[::1]")}/callback.html`;
+}
+
+function formBody(fields: Record<string, string>): string {
+  return Object.entries(fields)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+}
+
+function base64url(bytes: Uint8Array): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
+    out += alphabet[(n >> 18) & 63] + alphabet[(n >> 12) & 63];
+    if (i + 1 < bytes.length) out += alphabet[(n >> 6) & 63];
+    if (i + 2 < bytes.length) out += alphabet[n & 63];
+  }
+  return out;
+}
 export const SCOPES =
   "streaming user-read-playback-state user-modify-playback-state user-read-email playlist-read-private";
 const API_BASE = "https://api.spotify.com/v1";
@@ -28,6 +42,10 @@ export interface SpotifySession {
   onChange(tokens: SpotifyTokens | null): void;
   /** Network access from `useApp().fetch`; the API layer never reaches for a global. */
   fetch: FetchFunction;
+  clientId: string;
+  redirectUri: string;
+  crypto: AppCrypto;
+  images?: ImageService;
 }
 
 interface TokenResponse {
@@ -69,22 +87,12 @@ export interface DeviceFlowState {
   qrMatrix: boolean[][] | null;
 }
 
-export function generateCodeVerifier(): string {
-  const arr = new Uint8Array(64);
-  crypto.getRandomValues(arr);
-  return btoa(String.fromCharCode(...arr))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+export function generateCodeVerifier(crypto: AppCrypto): string {
+  return base64url(crypto.randomBytes(64));
 }
 
-export async function generateCodeChallenge(verifier: string): Promise<string> {
-  const data = new TextEncoder().encode(verifier);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+export async function generateCodeChallenge(verifier: string, crypto: AppCrypto): Promise<string> {
+  return base64url(await crypto.sha256(new TextEncoder().encode(verifier)));
 }
 
 export function isSpotifyTokens(v: unknown): v is SpotifyTokens {
@@ -102,11 +110,11 @@ export async function exchangeCodeForTokens(
   codeVerifier: string,
   session: SpotifySession
 ): Promise<SpotifyTokens> {
-  const body = new URLSearchParams({
+  const body = formBody({
     grant_type: "authorization_code",
     code,
-    redirect_uri: REDIRECT_URI,
-    client_id: CLIENT_ID,
+    redirect_uri: session.redirectUri,
+    client_id: session.clientId,
     code_verifier: codeVerifier,
   });
   const resp = await session.fetch("https://accounts.spotify.com/api/token", {
@@ -124,10 +132,10 @@ export async function exchangeCodeForTokens(
 }
 
 async function refreshAccessToken(refreshToken: string, session: SpotifySession): Promise<SpotifyTokens> {
-  const body = new URLSearchParams({
+  const body = formBody({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
-    client_id: CLIENT_ID,
+    client_id: session.clientId,
   });
   const resp = await session.fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
@@ -214,31 +222,20 @@ export async function fetchPlaylists(session: SpotifySession): Promise<SpotifyPl
   }));
 }
 
-let sdkLoaded = false;
-let sdkLoadPromise: Promise<void> | null = null;
-
-export function loadSpotifySDK(): Promise<void> {
-  if (sdkLoaded) return Promise.resolve();
-  if (sdkLoadPromise) return sdkLoadPromise;
-  sdkLoadPromise = new Promise<void>((resolve) => {
-    (window as unknown as { onSpotifyWebPlaybackSDKReady: () => void }).onSpotifyWebPlaybackSDKReady =
-      () => {
-        sdkLoaded = true;
-        resolve();
-      };
-    const script = document.createElement("script");
-    script.src = "https://sdk.scdn.co/spotify-player.js";
-    document.head.appendChild(script);
-  });
-  return sdkLoadPromise;
+export async function loadSpotifySDK(browser: BrowserService): Promise<{ Player: new (opts: unknown) => unknown } | undefined> {
+  const Spotify = await browser.loadScript("https://sdk.scdn.co/spotify-player.js", "Spotify");
+  return Spotify as { Player: new (opts: unknown) => unknown } | undefined;
 }
 
 export function buildQRMatrix(url: string): boolean[][] | null {
   try {
-    const raw = encodeQR(url, "raw") as Record<number, boolean[]>;
-    const size = Object.keys(raw).length;
+    const sprite = encodeQR(url);
     const matrix: boolean[][] = [];
-    for (let r = 0; r < size; r++) matrix.push(Array.from(raw[r]));
+    for (let y = 0; y < sprite.height; y++) {
+      const row: boolean[] = [];
+      for (let x = 0; x < sprite.width; x++) row.push(sprite.data[y * sprite.width + x] !== 0);
+      matrix.push(row);
+    }
     return matrix;
   } catch {
     return null;
@@ -252,35 +249,11 @@ export async function ditherImageFromUrl(
   session: SpotifySession
 ): Promise<Uint8Array | null> {
   try {
+    if (!session.images) return null;
     const resp = await session.fetch(url);
-    const blob = new Blob([await resp.arrayBuffer()]);
-    const bmp = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(targetW, targetH);
-    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-    ctx.drawImage(bmp, 0, 0, targetW, targetH);
-    bmp.close();
-    const imageData = ctx.getImageData(0, 0, targetW, targetH);
-    const out = new Uint8Array(targetW * targetH);
-    const lum = new Float32Array(targetW * targetH);
-    const rgba = imageData.data;
-    const len = targetW * targetH;
-    for (let i = 0; i < len; i++) {
-      const ri = i << 2;
-      lum[i] = rgba[ri] * 0.299 + rgba[ri + 1] * 0.587 + rgba[ri + 2] * 0.114;
-    }
-    for (let i = 0; i < len; i++) {
-      const val = lum[i];
-      const bit = val < 129 ? 1 : 0;
-      out[i] = bit;
-      const err = (val - (bit ? 0 : 255)) / 8;
-      lum[i + 1] += err;
-      lum[i + 2] += err;
-      lum[i + targetW - 1] += err;
-      lum[i + targetW] += err;
-      lum[i + targetW + 1] += err;
-      lum[i + (targetW << 1)] += err;
-    }
-    return out;
+    const bytes = new Uint8Array(await resp.arrayBuffer());
+    const frame = await session.images.decode(bytes, undefined, { maxWidth: targetW, maxHeight: targetH });
+    return toBits(frame, "atkinson");
   } catch {
     return null;
   }

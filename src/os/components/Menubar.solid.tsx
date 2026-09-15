@@ -90,7 +90,7 @@ export function Menubar(props: MenubarProps): JSX.Element {
   const openIdx   = () => getOpenMenuIndex();
   const openMenu  = () => {
     const idx = openIdx();
-    if (idx === -1) return appleMenu((id) => os.openApp(id));
+    if (idx === -1) return appleMenu(os);
     return idx !== null ? props.menus[idx] ?? null : null;
   };
   const openMenuX = () => openIdx() === -1 ? 0 : (openIdx() !== null ? menuXOffsets()[openIdx()!] : 0);

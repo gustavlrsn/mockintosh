@@ -4,9 +4,11 @@
  * extends one with the window a component is mounted in (`AppServices`).
  */
 
-import type { AppContext, WindowSpec } from "@mockintosh/sdk";
+import type { AppContext, KernelClient, WindowSpec } from "@mockintosh/sdk";
 import type { OSServices, IconScreenRect } from "./context";
 import { createAppStorage } from "./appStorage";
+import { getApp } from "./apps";
+import { Cancellation } from "./kernel/cancellation";
 
 export interface AppContextOptions {
   /**
@@ -16,6 +18,44 @@ export interface AppContextOptions {
    */
   fromRect?: IconScreenRect;
   instanceId?: string;
+}
+
+function cancellationFromSignal(signal?: AbortSignal): Cancellation {
+  const token = new Cancellation();
+  if (!signal) return token;
+  if (signal.aborted) token.cancel();
+  else signal.addEventListener("abort", () => token.cancel());
+  return token;
+}
+
+function kernelClientFor(os: OSServices, appId: string, instanceId?: string): KernelClient | undefined {
+  const app = getApp(appId);
+  const permissions = app?.permissions;
+  if (!permissions?.length || !os.kernel) return undefined;
+  const operations = permissions.includes("kernel:*")
+    ? undefined
+    : permissions.filter((p) => p.startsWith("kernel:")).map((p) => p.slice("kernel:".length));
+  let session = instanceId ? os.instances?.kernelCaller(instanceId) : undefined;
+  if (!session) {
+    session = os.kernel.createSession({ operations });
+    if (instanceId && os.instances) {
+      os.instances.setKernelCaller(instanceId, session);
+      os.instances.own(instanceId, () => os.kernel?.revokeSession(session.id));
+    }
+  }
+  const kernel = os.kernel;
+  return {
+    invoke(name, args = {}, options) {
+      return kernel.invoke(
+        session,
+        name,
+        args,
+        cancellationFromSignal(options?.signal),
+        options?.stdout || options?.stderr ? { stdout: options.stdout, stderr: options.stderr } : undefined,
+      );
+    },
+    describe: () => kernel.describe(session),
+  };
 }
 
 export function createAppContext(
@@ -41,9 +81,31 @@ export function createAppContext(
       pendingFromRect = undefined;
       return os.openWindow(appId, spec, fromRect, options.instanceId);
     },
-    env: os.env,
+    env: { origin: os.env.origin, config: os.env.config ?? {} },
+    crypto: os.crypto,
+    browser: os.browser,
     capabilities: os.capabilities,
     fetch: os.fetch,
     print: os.printer,
+    images: os.images,
+    video: os.video,
+    camera: os.camera,
+    kernel: kernelClientFor(os, appId, options.instanceId),
+    scheduler: {
+      now: () => os.scheduler.now(),
+      requestFrame(callback) {
+        let cancelled = false;
+        const stop = os.scheduler.requestFrame((timeMs) => {
+          if (!cancelled) callback(timeMs);
+        });
+        const cancel = () => {
+          if (cancelled) return;
+          cancelled = true;
+          stop();
+        };
+        if (options.instanceId) os.instances?.own(options.instanceId, cancel);
+        return cancel;
+      },
+    },
   };
 }

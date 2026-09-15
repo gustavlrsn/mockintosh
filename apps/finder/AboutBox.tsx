@@ -1,11 +1,25 @@
+/**
+ * "About This Macintosh…" — the Finder's About box. A Finder-owned dialog
+ * window, as in System 7; there is no standalone About program.
+ */
 import type { JSX } from "solid-js";
 import { For } from "solid-js";
-import pkg from "../package.json";
-import { defineApp, useApp } from "@mockintosh/sdk";
+import pkg from "../../package.json";
+import { useApp } from "@mockintosh/sdk";
+import type { OSServices } from "../../src/os/context";
+import { FINDER_APP_ID } from "../../src/os/state";
+import { openSystemWindow } from "../../src/os/systemWindows";
 
-const contributors = [{ username: "gustavlrsn", commits: 74 }];
+export const ABOUT_BOX_TITLE = "About This Macintosh";
 
-function About(props: Record<string, unknown>): JSX.Element {
+interface Contributor {
+  username: string;
+  commits: number;
+}
+
+const contributors: Contributor[] = [{ username: "gustavlrsn", commits: 74 }];
+
+export function AboutBox(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const computer = app.getSprite("icon/computer");
   const user = app.getSprite("user2");
@@ -47,13 +61,12 @@ function About(props: Record<string, unknown>): JSX.Element {
   );
 }
 
-export default defineApp({
-  id: "about",
-  title: "About This Mockintosh",
-  icon: "icon/computer",
-  defaultSize: { width: 343, height: 160 },
-  windowKind: "dialog",
-  scrollable: false,
-  singleInstance: true,
-  Component: About,
-});
+/** Open the Finder's About box, or bring the open one to the front. */
+export function openAboutBox(os: OSServices): string {
+  return openSystemWindow(os, FINDER_APP_ID, {
+    title: ABOUT_BOX_TITLE,
+    kind: "dialog",
+    size: { width: 343, height: 160 },
+    Component: AboutBox,
+  });
+}

@@ -24,7 +24,7 @@ Set `MOCKINTOSH_TOKEN` in the host environment to the pairing token, then discov
 ```sh
 npm run mockintosh-sh -- --list
 npm run mockintosh-sh -- --connect '<session from --list>' -c 'ls /disk; desktop_pattern'
-npm run mockintosh-sh -- --connect '<session>' -c 'desktop_pattern black; open control_panel; screenshot /disk/desktop.pbm'
+npm run mockintosh-sh -- --connect '<session>' -c 'desktop_pattern black; menu  "Control Panel"; screenshot /disk/desktop.pbm'
 ```
 
 Use `MOCKINTOSH_URL` to override `ws://127.0.0.1:4318`. Without `-c`, redirected stdin supplies the command text. Shell stdout and stderr are forwarded to their corresponding host streams as output is produced. Ctrl-C sends cancellation. Truncation is reported. For machine consumers that need clean output without npm's script banner, use `node --import tsx scripts/mockintosh-sh.ts` with the same arguments.
@@ -71,9 +71,11 @@ Commands whose help includes `[--json]` accept it immediately after the command,
 
 `write path text` submits one complete body. `rm -r path` is required for a nonempty directory. `screenshot path.pbm` writes binary PBM onto the disk.
 
+Control Panel and "About This Macintosh…" are Finder windows, not apps, so they open from the Apple menu (the Apple glyph is U+F8FF, ``): `menu  "Control Panel"`.
+
 ```text
 desktop_pattern white
-open control_panel
+menu  "Control Panel"
 inspect
 click desktop-pattern-black <window-id>
 screenshot /disk/desktop.pbm

@@ -19,6 +19,11 @@ import type {
 } from "../types";
 import { browserBuilder } from "./builder";
 import { CanvasPresenter } from "./CanvasPresenter";
+import { createWebImageService } from "./media/images";
+import { createWebVideoService } from "./media/video";
+import { createWebCameraService } from "./media/camera";
+import { createWebCrypto } from "./crypto";
+import { createWebBrowserService } from "./browser";
 
 export interface WebPlatformOptions {
   /** Element the screen canvas is appended to. */
@@ -69,7 +74,10 @@ export function createWebPlatform(options: WebPlatformOptions): Platform {
 
   // --- Clock ---
   const scheduler: PlatformScheduler = {
-    requestFrame: (cb) => void requestAnimationFrame(cb),
+    requestFrame(cb) {
+      const id = requestAnimationFrame(cb);
+      return () => cancelAnimationFrame(id);
+    },
     now: () => performance.now(),
   };
 
@@ -87,19 +95,28 @@ export function createWebPlatform(options: WebPlatformOptions): Platform {
       }
     : undefined;
 
-  const hostCapabilities: HostCapability[] = ["video", "images", "browser"];
-  if (navigator.mediaDevices?.getUserMedia) hostCapabilities.push("camera");
+  const hostCapabilities: HostCapability[] = [];
 
   return {
     display,
     input,
     scheduler,
     storage,
-    env: { origin: location.origin },
+    env: {
+      origin: location.origin,
+      config: {
+        SPOTIFY_CLIENT_ID: (import.meta.env.VITE_SPOTIFY_CLIENT_ID as string | undefined) ?? "",
+      },
+    },
     hostCapabilities,
+    crypto: createWebCrypto(),
+    browser: createWebBrowserService(),
     clipboard,
     printer: isWebUSBAvailable() ? new WebUSBPrinterTransport() : undefined,
     fetch: globalThis.fetch.bind(globalThis),
+    images: createWebImageService(),
+    video: createWebVideoService(),
+    camera: createWebCameraService(),
     builder: browserBuilder,
     async loadArtifact(code) {
       const url = URL.createObjectURL(new Blob([code], {type: "text/javascript"}));

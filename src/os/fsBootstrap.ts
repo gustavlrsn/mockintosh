@@ -21,6 +21,7 @@ const DESKTOP_SHORTCUTS: readonly DesktopShortcut[] = [
   { name: "ChatGippity",    appId: "chatgippity", icon: "icon/computer" },
   { name: "Spotify Player", appId: "spotify",     icon: "icon/spotify" },
   { name: "Icon Gallery",   appId: "icon_gallery", icon: "icon-gallery/icon" },
+  { name: "MacPaint",       appId: "macpaint",    icon: "macpaint/icon" },
 ];
 
 /** Create the startup volume and its standard folders on a fresh disk; repair them otherwise. */

@@ -11,4 +11,9 @@ describe("shared compiler policy", () => {
     expect(() => validateSources(request(" ".repeat(1048577)))).toThrow("oversized");
     expect(() => validateSources(request('import "./helper"'))).not.toThrow();
   });
+  it("rejects browser host globals so apps use the SDK", () => {
+    expect(() => validateSources(request('alert("saved")'))).toThrow(/Host API 'alert'/);
+    expect(() => validateSources(request("document.body"))).toThrow(/Host API 'document'/);
+    expect(() => validateSources(request("const x = { alert: 1 }; x.alert"))).not.toThrow();
+  });
 });

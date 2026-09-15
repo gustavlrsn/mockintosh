@@ -100,7 +100,7 @@ The following table records the starting point of the experience rewrite. Its M1
 | [FileViewer](../apps/FileViewer.tsx), UI TextInput | Read-only text display; single-line editing | A usable multiline source editor |
 | [ChatGippity](../apps/ChatGippity.tsx), [chat endpoint](../api/chat.ts) | Chat UI, provider proxy, a limited tool round | Matching request schema and repeated OS/build tool loop |
 | [generated chat context](../scripts/build-chat-context.ts) | Developer guide already embedded in the prompt | Serve exact runtime SDK/version/types/examples to both clients |
-| [Control Panel](../apps/ControlPanel.tsx), [Desktop](../src/os/components/Desktop.solid.tsx) | Place to expose desktop pattern | Persistent setting and editable control |
+| [Control Panel](../apps/finder/ControlPanel.tsx), [Desktop](../src/os/components/Desktop.solid.tsx) | Place to expose desktop pattern | Persistent setting and editable control |
 
 Concrete chat mismatch: the UI sends `messages`, while the endpoint expects `prompt` and `conversationHistory`; the UI also appends the new user message twice when constructing its request. The endpoint allows one tool round followed by a response with tools disabled. A multi-step app-building agent needs a different loop. Fix these during the chat milestone, preserving existing supported chat tools.
 
@@ -324,7 +324,7 @@ Proposed S2 syntax, once the named setting values and commands exist:
 ~~~sh
 cat /sys/settings/desktop-pattern
 echo checker > /sys/settings/desktop-pattern
-open control_panel
+menu  "Control Panel"
 render && screenshot /disk/check.pbm
 ls /apps | grep counter
 ~~~

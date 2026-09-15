@@ -350,12 +350,12 @@ export function registerUIOperations(kernel: Kernel, os: OSServices, host: UIHos
     }
   }, [], schemas.menuResult, async (a, e) => {
     const t = e.cancellation;
-    if (a.menu === undefined && a.item === undefined) return menus(os.openApp).map(m => ({
+    if (a.menu === undefined && a.item === undefined) return menus(os).map(m => ({
       label: m.label,
       items: m.items.map(i => JSON.parse(JSON.stringify(i)))
     }));
     if (typeof a.menu !== "string" || typeof a.item !== "string") throw new ServiceError("invalid-argument", "Provide menu and item");
-    runNamedMenu(os.openApp, a.menu, a.item);
+    runNamedMenu(os, a.menu, a.item);
     await host.render(t);
     return {
       menu: a.menu,

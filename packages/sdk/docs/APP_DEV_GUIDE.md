@@ -10,6 +10,27 @@ v1 `App.render` / `WindowContext` apps are not loaded. The App Store hides catal
 
 **SDK 2.1:** `<raster onPaint>` now receives a single `RasterSurface` argument instead of `(port, rect)`, and the framebuffer is packed 1 bpp — apps that indexed `port.portBits.baseAddr` directly must switch to `surface.setPixel` / `surface.blitPixels` (see below).
 
+## Bundled apps
+
+These ship with the OS. SDK-clean apps compile under the in-OS project compiler and are written against the public SDK exactly like a third-party app. Shell apps are part of the OS and use internal services.
+
+| App | Source | Kind |
+|---|---|---|
+| MacPaint | `MacPaint.tsx` | SDK-clean |
+| Safari | `Safari.tsx` | SDK-clean |
+| Testing | `Testing.tsx` | SDK-clean |
+| File | `FileViewer.tsx` | SDK-clean |
+| Picture | `Picture.tsx` | SDK-clean |
+| Video Player | `VideoPlayer.tsx` | SDK-clean |
+| Photo Booth | `PhotoBooth.tsx` | SDK-clean |
+| Source Editor | `SourceEditor.tsx` | SDK-clean |
+| Terminal | `Terminal.tsx` | SDK-clean |
+| ChatGippity | `ChatGippity.tsx` | SDK-clean |
+| Spotify | `SpotifyPlayer.tsx` | SDK-clean |
+| Finder | `Finder.solid.tsx` | Shell |
+| App Store | `AppStore.tsx` | Shell |
+| Icon Gallery | `IconGallery.tsx` | Shell |
+
 ## Quick Start
 
 ```tsx
@@ -34,17 +55,34 @@ export default defineApp({
 
 ## The Rendering Model
 
-JSX compiles through `@mockintosh/ui` (universal Solid renderer) into a retained `box` / `text` / `image` / `raster` tree. The OS layouts that tree with flexbox and paints it through QuickDraw into the framebuffer.
+JSX compiles through `@mockintosh/ui` (universal Solid renderer) into a retained `box` / `text` / `image` / `raster` / `bitmap` tree. The OS layouts that tree with flexbox and paints it through QuickDraw into the framebuffer.
 
 ```tsx
 <box padding={8} flexDirection="column" gap={6} background={0}>
   <text font="menu">Hello</text>
   <image width={32} height={32} src={icon} />
+  <bitmap width={80} height={40} pixels={buffer} />
   <raster width={80} height={40} onPaint={({ rect, setPixel }) => { /* pixel push */ }} />
 </box>
 ```
 
-Use `<raster onPaint>` when you need to write pixels directly (dithered photos, video frames). The callback receives a `RasterSurface`:
+**`<image>`** is a finished sprite asset. **`<bitmap>`** is a live unpacked pixel buffer you own (`Uint8Array`, `0` = white, nonzero = black, `width` bytes per row — not a QuickDraw `BitMap`). Replacing the array (typically `setPixels(new Uint8Array(old))`) is what redraws; there is no `onPaint` and no `revision`. Put `onMouseDown` / `onDrag` on the `<bitmap>` to ink it. Size the buffer smaller than the window if you also have chrome (buttons) in the same column.
+
+```tsx
+const [pixels, setPixels] = createSignal(new Uint8Array(80 * 40));
+<bitmap
+  width={80}
+  height={40}
+  pixels={pixels()}
+  onMouseDown={(x, y) => {
+    const next = new Uint8Array(pixels());
+    next[y * 80 + x] = 1;
+    setPixels(next);
+  }}
+/>
+```
+
+Use `<raster onPaint>` when the pixels come from somewhere Solid cannot see (dithered photos, video frames). The callback receives a `RasterSurface`:
 
 ```tsx
 <raster width={w} height={h} onPaint={(surface) => {
@@ -122,10 +160,25 @@ function MyView() {
   const icon = app.getSprite("myapp/icon");
   return (
     <box padding={8}>
-      <Button label="About" onClick={() => app.os.openApp("about")} />
+      <Button label="Paint" onClick={() => app.os.openApp("macpaint")} />
     </box>
   );
 }
+```
+
+### About boxes
+
+The first Apple-menu item is always the frontmost app's: "About My App…" while your window is active, "About This Macintosh…" when the Finder is. You do not add it yourself. By default it opens a standard OS About box with your icon and title; declare `about` on `defineApp` to add a version and description, or supply your own component:
+
+```tsx
+export default defineApp({
+  id: "myapp",
+  title: "My App",
+  icon: "myapp/icon",
+  about: { version: "1.2", description: "Draws things, in one bit." },
+  // or: about: { Component: MyAboutBox, size: { width: 300, height: 140 } },
+  // …
+});
 ```
 
 - `getSprite(name)` — OS sprites plus your exported `sprites`
@@ -137,8 +190,12 @@ function MyView() {
 - `setMenus(menus)` — this window's menubar (see [Menus](#menus))
 - `fetch` — network access, when this Macintosh has it (see [Capabilities](#capabilities))
 - `print` — the system printer, when the platform has one (see [Printing](#printing))
+- `images` / `video` / `camera` — decode rasters, play video, or open a camera (see [Capabilities](#capabilities))
+- `scheduler` — `requestFrame` / `now` (no `requestAnimationFrame` / `performance`)
 - `capabilities` — the set of things this Macintosh can do (see [Capabilities](#capabilities))
-- `env.origin`
+- `env.origin` / `env.config` — host origin and configuration (`SPOTIFY_CLIENT_ID`, …)
+- `crypto.randomBytes` / `crypto.sha256`
+- `browser` — `openExternal`, `authorize`, `loadScript`, when this Macintosh runs in a browser
 
 `useApp()` reads a per-window context, so call it during component setup (not in a callback created elsewhere).
 
@@ -151,10 +208,10 @@ Mockintosh runs in more than one place — a browser today, small devices with a
 | `network`   | `useApp().fetch` is available                                         |
 | `clipboard` | copy and paste work                                                   |
 | `printer`   | `useApp().print` is available                                         |
-| `camera`    | live camera frames can be captured                                    |
-| `video`     | compressed video can be decoded and played                            |
-| `images`    | PNG/JPEG and similar raster formats can be decoded                    |
-| `browser`   | the OS runs inside a web browser your app may use directly (DOM, OAuth redirects, …) |
+| `camera`    | `useApp().camera` is available                                        |
+| `video`     | `useApp().video` is available                                         |
+| `images`    | `useApp().images` is available                                        |
+| `browser`   | `useApp().browser` is available (`openExternal`, `authorize`, `loadScript`) |
 
 Two ways to use them:
 
@@ -208,6 +265,8 @@ async function saveNote(fs: AppFileSystem, text: string) {
 ```
 
 Files have one MIME `type` (`MIME.text`, `MIME.markdown`, `MIME.sprite`, …; `inferMimeType(name)` guesses from an extension). Mutations throw `FSError` (`isFSError(err, "exists")`) on name clashes and invalid moves — show the message in a dialog rather than swallowing it.
+
+`<Markdown text={src} />` (and `parseMarkdown`) render markdown through the 1-bit layout tree. Import them from `@mockintosh/sdk`, not `@mockintosh/markdown`.
 
 ### Opening documents
 
@@ -443,8 +502,8 @@ Installing from the App Store writes the manifest to `Applications/<title>` as a
 
 - **512×342 pixels** — the entire screen. Your window is smaller, unless it is `fullscreen`.
 - **Indexed pixels** — `BLACK`/`WHITE` are safest.
-- **No DOM UI** — hidden `<video>`/`<audio>` for media is fine; do not render HTML into the screen.
-- **No direct fetch / localStorage / OPFS** — use `useApp().fetch`, `useApp().storage` and `useApp().fs`. Import file-system types and `MIME` from `@mockintosh/sdk`, not `@mockintosh/fs`. Anything else you need from the host is a [capability](#capabilities): declare it in `requires` or check it at the point of use.
+- **No DOM UI** — do not render HTML into the screen. Decode images, video, and camera frames through `useApp().images` / `video` / `camera`.
+- **No browser globals** — `alert`, `confirm`, `prompt`, `document`, `localStorage`, `sessionStorage`, and `fetch` are not in the project type environment and fail the compile. Use `useApp().os.showDialog`, `useApp().storage`, `useApp().fs`, and `useApp().fetch`. Import file-system types and `MIME` from `@mockintosh/sdk`, not `@mockintosh/fs`. Anything else you need from the host is a [capability](#capabilities): declare it in `requires` or check it at the point of use.
 - `createUI` is a single-instance renderer inside the OS; third-party apps share that runtime via the import map.
 
 

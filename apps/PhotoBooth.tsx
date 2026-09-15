@@ -1,12 +1,14 @@
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Button, type Ink, type RasterSurface } from "@mockintosh/ui";
-import { defineApp, useApp, writeSpriteFile } from "@mockintosh/sdk";
 import {
+  createDitherer,
+  defineApp,
+  useApp,
+  writeSpriteFile,
+  type CameraSource,
   type DitherMode,
-  type DitherState,
-  ditherVideoFrame,
-  getOrCreateDitherState,
-} from "./photobooth/dither";
+  type ImageFrame,
+} from "@mockintosh/sdk";
 
 /** Viewfinder size in the app's own (windowed) window. */
 const PREVIEW = 288;
@@ -53,49 +55,50 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   /** The viewfinder fills the window above the button bar — the whole screen in full screen. */
   const view = (): Size => ({ width: win.width(), height: win.height() - BAR_H });
 
-  const ditherRef: { current: DitherState | null } = { current: null };
-  let video: HTMLVideoElement | null = null;
-  let stream: MediaStream | null = null;
-  let raf = 0;
+  let camera: CameraSource | null = null;
+  let live: Photo | null = null;
+  let dither: ((frame: ImageFrame, out: Uint8Array) => void) | null = null;
+  let ditherW = 0;
+  let ditherH = 0;
+  let ditherKind: DitherMode | null = null;
+  let cancelFrame: (() => void) | null = null;
   let countdownTimer: ReturnType<typeof setTimeout> | null = null;
   let flashTimer: ReturnType<typeof setTimeout> | null = null;
   let lastCapture = 0;
 
   function stopLoop(): void {
-    if (raf) cancelAnimationFrame(raf);
-    raf = 0;
+    cancelFrame?.();
+    cancelFrame = null;
   }
 
-  function captureLoop(): void {
+  function captureLoop(now: number): void {
     if (!win.isActive() || loading() || errorText() || viewingPhoto() !== null) {
-      raf = requestAnimationFrame(captureLoop);
+      cancelFrame = app.scheduler.requestFrame(captureLoop);
       return;
     }
-    const now = performance.now();
-    if (video && video.videoWidth > 0 && now - lastCapture >= CAPTURE_INTERVAL_MS) {
-      const { width, height } = view();
-      const state = getOrCreateDitherState(ditherRef, width, height);
-      ditherVideoFrame(video, state, ditherMode());
+    const src = camera?.frame() ?? null;
+    if (src && now - lastCapture >= CAPTURE_INTERVAL_MS) {
+      const mode = ditherMode();
+      if (!dither || ditherW !== src.width || ditherH !== src.height || ditherKind !== mode) {
+        ditherW = src.width;
+        ditherH = src.height;
+        ditherKind = mode;
+        dither = createDitherer(src.width, src.height, mode);
+        live = { pixels: new Uint8Array(src.width * src.height), width: src.width, height: src.height, timestamp: 0 };
+      }
+      dither(src, live!.pixels);
       lastCapture = now;
       setFrame((n) => n + 1);
     }
-    raf = requestAnimationFrame(captureLoop);
+    cancelFrame = app.scheduler.requestFrame(captureLoop);
   }
 
   async function startCamera(): Promise<void> {
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false,
-      });
-      video = document.createElement("video");
-      video.playsInline = true;
-      video.muted = true;
-      video.srcObject = stream;
-      await video.play();
+      camera = await app.camera!.open({ facing: "user" });
       setLoading(false);
       stopLoop();
-      raf = requestAnimationFrame(captureLoop);
+      cancelFrame = app.scheduler.requestFrame(captureLoop);
     } catch {
       setErrorText("Camera access denied.");
       setLoading(false);
@@ -104,14 +107,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
 
   /** The last dithered camera frame, as a picture. */
   function liveFrame(): Photo | null {
-    const state = ditherRef.current;
-    if (!state) return null;
-    return {
-      pixels: state.pixels,
-      width: state.canvas.width,
-      height: state.canvas.height,
-      timestamp: 0,
-    };
+    return live;
   }
 
   function takePhoto(): void {
@@ -215,9 +211,8 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
     stopLoop();
     if (countdownTimer) clearTimeout(countdownTimer);
     if (flashTimer) clearTimeout(flashTimer);
-    stream?.getTracks().forEach((t) => t.stop());
-    video = null;
-    stream = null;
+    camera?.close();
+    camera = null;
   });
 
   const viewing = () => {

@@ -11,6 +11,7 @@ import { InMemoryBackend } from "@mockintosh/fs";
 import type { BitMap } from "@mockintosh/quickdraw";
 import { pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
 import type {
+  HostCapability,
   Platform,
   PlatformKeyEvent,
   PlatformPointerEvent,
@@ -52,6 +53,9 @@ export function createHeadlessPlatform(options: HeadlessPlatformOptions): Headle
   const scheduler: PlatformScheduler = {
     requestFrame(cb) {
       frameCallbacks.push(cb);
+      return () => {
+        frameCallbacks = frameCallbacks.filter((pending) => pending !== cb);
+      };
     },
     now: () => clock,
   };
@@ -77,8 +81,12 @@ export function createHeadlessPlatform(options: HeadlessPlatformOptions): Headle
     },
     scheduler,
     storage: new InMemoryBackend(),
-    env: { origin: "" },
-    hostCapabilities: [],
+    env: { origin: "", config: {} },
+    hostCapabilities: [] as HostCapability[],
+    crypto: {
+      randomBytes(n) { return new Uint8Array(n); },
+      async sha256(bytes) { return bytes.slice(); },
+    },
 
     get frameCount() {
       return frameCount;

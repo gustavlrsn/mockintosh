@@ -161,6 +161,7 @@ function measureNode(
     node.type === "text" ||
     node.type === "image" ||
     node.type === "raster" ||
+    node.type === "bitmap" ||
     node.type === "_text_content"
   ) {
     if (node.type === "text") {
@@ -289,7 +290,15 @@ function positionNode(
 
   // --- Flex layout for relative children ---
   // flexBasis (when a number) replaces the measured main size before grow/shrink.
-  // flexShrink defaults to 0 so existing layouts that omit it stay stable.
+  // flexShrink defaults to 0 so existing layouts that omit it stay stable,
+  // except overflow:scroll/hidden — CSS treats those as min-size 0 and they
+  // must shrink or the pane grows with its content and never scrolls.
+  function flexShrinkOf(child: CanvasNode): number {
+    if (child.style.flexShrink !== undefined) return child.style.flexShrink;
+    const overflow = child.style.overflow;
+    return overflow === "scroll" || overflow === "hidden" ? 1 : 0;
+  }
+
   function baseMainSize(child: CanvasNode): number {
     const margin = resolveMargin(child.style);
     const basis = child.style.flexBasis;
@@ -311,9 +320,13 @@ function positionNode(
   for (let i = 0; i < relativeChildren.length; i++) {
     const child = relativeChildren[i];
     const fg = child.style.flexGrow ?? 0;
-    const fs = child.style.flexShrink ?? 0;
+    const fs = flexShrinkOf(child);
     const childMainSize = baseMainSize(child);
-    if (fg === 0) totalFixed += childMainSize;
+    // Include grow items' base size (content / padding / flex-basis). Free
+    // space is what remains after every sibling — CSS flexbox's hypothetical
+    // main size. Skipping it made `flexGrow` panes with padding overflow and
+    // clip a following fixed row (ChatGippity's compose bar).
+    totalFixed += childMainSize;
     totalFlexGrow += fg;
     totalFlexShrink += fs;
     if (i < relativeChildren.length - 1) totalFixed += gap;
@@ -326,7 +339,7 @@ function positionNode(
   const childMainSizes: number[] = relativeChildren.map((child) => {
     const margin = resolveMargin(child.style);
     const fg = child.style.flexGrow ?? 0;
-    const fs = child.style.flexShrink ?? 0;
+    const fs = flexShrinkOf(child);
     const base = baseMainSize(child);
     if (fg > 0 && remainingSpace > 0) {
       return base + growUnit * fg;

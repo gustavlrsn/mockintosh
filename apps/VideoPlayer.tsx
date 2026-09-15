@@ -1,59 +1,58 @@
 import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Button } from "@mockintosh/ui";
-import { defineApp, useApp } from "@mockintosh/sdk";
+import { createDitherer, defineApp, useApp, type VideoSource } from "@mockintosh/sdk";
 
 function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
-  const win = useApp().window;
+  const app = useApp();
+  const win = app.window;
   const [playing, setPlaying] = createSignal(false);
-  let video: HTMLVideoElement | null = null;
-  let frame: ImageData | null = null;
-  let raf = 0;
+  const [frame, setFrame] = createSignal(0);
+  let source: VideoSource | null = null;
+  let bits: Uint8Array | null = null;
+  let dither: ((src: { width: number; height: number; rgba: Uint8ClampedArray }, out: Uint8Array) => void) | null = null;
+  let bw = 0;
+  let bh = 0;
+  let cancelFrame: (() => void) | null = null;
 
-  onMount(() => {
-    video = document.createElement("video");
-    video.src = "/1984.mp4";
-    video.muted = true;
-    video.loop = true;
-    video.playsInline = true;
-  });
-  onCleanup(() => {
-    cancelAnimationFrame(raf);
-    video?.pause();
-    video = null;
-  });
+  function stopTick(): void {
+    cancelFrame?.();
+    cancelFrame = null;
+  }
 
   function tick(): void {
-    if (!video || video.readyState < 2) {
-      if (playing()) raf = requestAnimationFrame(tick);
-      return;
+    const f = source?.frame() ?? null;
+    if (f) {
+      if (!bits || !dither || bw !== f.width || bh !== f.height) {
+        bw = f.width;
+        bh = f.height;
+        bits = new Uint8Array(bw * bh);
+        dither = createDitherer(bw, bh, "threshold");
+      }
+      dither(f, bits);
+      setFrame((n) => n + 1);
     }
-    const w = Math.min(win.width(), video.videoWidth || 160);
-    const h = Math.min(win.height() - 20, video.videoHeight || 100);
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    const ctx = c.getContext("2d")!;
-    ctx.drawImage(video, 0, 0, w, h);
-    frame = ctx.getImageData(0, 0, w, h);
-    if (playing()) raf = requestAnimationFrame(tick);
+    if (playing()) cancelFrame = app.scheduler.requestFrame(tick);
   }
+
+  onMount(() => {
+    void app.video!.open("/1984.mp4", { loop: true, muted: true }).then((opened) => {
+      source = opened;
+    });
+  });
+  onCleanup(() => {
+    stopTick();
+    source?.close();
+    source = null;
+  });
 
   return (
     <box width={win.width()} height={win.height()} flexDirection="column" background={0}>
       <raster
         width={win.width()}
         height={win.height() - 20}
-        onPaint={({ rect, setPixel }) => {
-          if (!frame) return;
-          const w = Math.min(frame.width, rect.width);
-          const h = Math.min(frame.height, rect.height);
-          for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-              const i = (y * frame.width + x) * 4;
-              const lum = frame.data[i] * 0.3 + frame.data[i + 1] * 0.59 + frame.data[i + 2] * 0.11;
-              setPixel(x, y, lum < 128 ? 1 : 0);
-            }
-          }
+        revision={frame()}
+        onPaint={({ blitPixels }) => {
+          if (bits) blitPixels(bits, bw, bh);
         }}
       />
       <box height={20} flexDirection="row" alignItems="center" padding={2} gap={4}>
@@ -63,10 +62,12 @@ function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
             const next = !playing();
             setPlaying(next);
             if (next) {
-              void video?.play();
-              raf = requestAnimationFrame(tick);
+              void source?.play();
+              stopTick();
+              cancelFrame = app.scheduler.requestFrame(tick);
             } else {
-              video?.pause();
+              source?.pause();
+              stopTick();
             }
           }}
         />

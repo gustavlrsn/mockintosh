@@ -17,7 +17,7 @@ import {
   type NodeType,
 } from "./nodes";
 
-const ELEMENT_TYPES = new Set(["box", "text", "image", "raster"]);
+const ELEMENT_TYPES = new Set(["box", "text", "image", "raster", "bitmap"]);
 
 function toNodeType(tagName: string): NodeType {
   if (ELEMENT_TYPES.has(tagName)) return tagName as NodeType;
@@ -31,6 +31,11 @@ function toNodeType(tagName: string): NodeType {
 let _repaintHook: () => void = () => {};
 export function _setRepaintHook(fn: () => void): void {
   _repaintHook = fn;
+}
+
+/** Host repaint from non-Solid mutations (e.g. overflow=scroll wheel). */
+export function scheduleRepaint(): void {
+  _repaintHook();
 }
 
 export const {

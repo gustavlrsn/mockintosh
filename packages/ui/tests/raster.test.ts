@@ -59,6 +59,28 @@ describe("raster onPaint", () => {
     expect(pixels[8 * W + 8]).toBe(0); // clipped
     expect(pixels[6 * W + 8]).toBe(0); // clipped
   });
+
+  it("is clipped by a parent overflow=hidden, not by its own onPaint rect", () => {
+    const screen = newBitMap(W, H);
+    const ctx = createDrawContext(screen);
+    const root = createNode("_root");
+    root.style = { width: W, height: H };
+    const frame = createNode("box");
+    frame.style = { width: 6, height: 6, overflow: "hidden" };
+    const raster = createNode("raster");
+    raster.style = { width: 12, height: 12 };
+    raster.props.onPaint = (surface) => surface.fill(1);
+    raster.parent = frame;
+    frame.children = [raster];
+    frame.parent = root;
+    root.children = [frame];
+    computeLayout(root, W, H, noMeasure);
+    drawTree(root, ctx);
+    const pixels = pixelsFromBitMap(screen);
+    expect(pixels[0]).toBe(1);
+    expect(pixels[5 * W + 5]).toBe(1);
+    expect(pixels[6 * W + 6]).toBe(0);
+  });
 });
 
 describe("border protection", () => {
