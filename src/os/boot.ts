@@ -34,6 +34,7 @@ import {
   closeOSWindow,
   closeAllWindows,
   getWindows,
+  getActiveWindowId,
   setWindowOutline,
   bringToFront,
   getMenubarMenus,
@@ -110,19 +111,26 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     screenDirty = true;
   }
 
+  const instances = new AppInstances(id => closeOSWindow(id));
+
   // --- UI instance (full-screen Solid renderer) ---
   const ui = createUI({
     screen,
     scheduleRender: scheduleRepaint,
-    services: { clipboard: platform.clipboard },
+    services: {
+      clipboard: platform.clipboard,
+      onError(error) {
+        const active = getWindows().find((window) => window.id === getActiveWindowId());
+        if (active?.instanceId) instances.note(active.instanceId, error, "handler");
+      },
+    },
   });
 
   // --- File system ---
   const fs = await FileSystem.open({ backend: platform.storage });
   await bootstrapFileSystem(fs);
   const kernel = new Kernel();
-  registerFileOperations(kernel, fs);
-  const instances = new AppInstances(id => closeOSWindow(id));
+  registerFileOperations(kernel, fs, platform.source);
   const desktopSettings = await createDesktopSettings(fs);
 
   // --- Installed third-party apps (manifests live in /Applications) ---

@@ -236,6 +236,8 @@ export interface TextProps extends LayoutStyle, EventHandlers, SemanticProps {
   verticalAlign?: TextVerticalAlign;
   /** Word-wrap lines to the node's content width. Explicit `\n` always breaks. */
   wrap?: boolean;
+  /** Drag-select this text and copy with ⌘C / Ctrl+C. */
+  selectable?: boolean;
   /**
    * Draw text with a checkerboard overlay to simulate disabled/dimmed appearance.
    * Matches Classic Mac System's "grayed text" technique.
@@ -328,6 +330,12 @@ export interface CanvasNode {
   _dirty: boolean;
   _eventHandlers: EventHandlers;
   _scrollOffset: number;
+}
+
+/** Concatenate `_text_content` leaves. Used by measure, draw, and `<text selectable>`. */
+export function collectNodeText(node: CanvasNode): string {
+  if (node.type === "_text_content") return node.textContent;
+  return node.children.map(collectNodeText).join("");
 }
 
 export function createNode(type: NodeType): CanvasNode {

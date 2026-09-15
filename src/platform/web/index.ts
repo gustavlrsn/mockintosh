@@ -23,6 +23,7 @@ import { createWebImageService } from "./media/images";
 import { createWebVideoService } from "./media/video";
 import { createWebCameraService } from "./media/camera";
 import { createWebCrypto } from "./crypto";
+import { createWebSourceProvider } from "./source";
 import { createWebBrowserService } from "./browser";
 
 export interface WebPlatformOptions {
@@ -118,6 +119,7 @@ export function createWebPlatform(options: WebPlatformOptions): Platform {
     video: createWebVideoService(),
     camera: createWebCameraService(),
     builder: browserBuilder,
+    source: createWebSourceProvider(),
     async loadArtifact(code) {
       const url = URL.createObjectURL(new Blob([code], {type: "text/javascript"}));
       try { return await import(/* @vite-ignore */ url); } finally { URL.revokeObjectURL(url); }

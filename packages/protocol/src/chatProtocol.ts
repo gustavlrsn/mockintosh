@@ -31,7 +31,7 @@ export interface OpenAIToolCall {
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content?: string | null;
+  content?: ChatContent;
   name?: string;
   tool_call_id?: string;
   tool_calls?: OpenAIToolCall[];
@@ -41,11 +41,28 @@ export interface AgentToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  /** Raw JSON arguments when parse failed (truncated completion). */
+  rawArguments?: string;
+  truncated?: boolean;
 }
+
+export type FinishReason = "length" | "stop" | "tool_calls";
 
 export interface CompleteResult {
   message?: string;
   tool_calls?: AgentToolCall[];
+  finishReason?: FinishReason;
+}
+
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+export type ChatContent = string | ContentPart[] | null;
+
+export interface ChatRequestOptions {
+  mode?: "chat" | "build";
+  thinking?: "low" | "medium" | "high";
 }
 
 export const HTTP_TOOLS: OpenAITool[] = [
@@ -64,24 +81,6 @@ export const HTTP_TOOLS: OpenAITool[] = [
           },
         },
         required: ["prompt"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_mockintosh_repo_file",
-      description:
-        "Fetch the current content of a file from the Mockintosh GitHub repository (gustavlrsn/mockintosh). Good paths: ARCHITECTURE.md, README.md, packages/sdk/docs/APP_DEV_GUIDE.md.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: {
-            type: "string",
-            description: "Repository path to the file.",
-          },
-        },
-        required: ["path"],
       },
     },
   },
@@ -114,16 +113,9 @@ export function parseChatMessage(value: unknown): ChatMessage | null {
   if (!isRecord(value) || typeof value.role !== "string" || !ROLES.has(value.role)) return null;
   const role = value.role as ChatMessage["role"];
   const tool_calls = parseToolCalls(value.tool_calls);
-  const content =
-    value.content === undefined || value.content === null
-      ? role === "assistant" && tool_calls
-        ? null
-        : ""
-      : typeof value.content === "string"
-        ? value.content
-        : null;
-  if (role !== "assistant" && role !== "tool" && typeof content !== "string") return null;
-  if (role === "user" && !(content && content.trim())) return null;
+  const content = parseContent(value.content, role, tool_calls);
+  if (role !== "assistant" && role !== "tool" && content === null) return null;
+  if (role === "user" && !contentHasText(content)) return null;
   if (role === "tool" && typeof value.tool_call_id !== "string") return null;
   return {
     role,
@@ -173,12 +165,59 @@ export function parseClientTools(body: unknown): OpenAITool[] | undefined {
 }
 
 export function parseArguments(raw: string): Record<string, unknown> {
+  const parsed = parseArgumentsDetailed(raw);
+  return parsed.value;
+}
+
+export function parseArgumentsDetailed(raw: string): { value: Record<string, unknown>; ok: boolean } {
   try {
     const value = JSON.parse(raw || "{}");
-    return isRecord(value) ? value : {};
+    return isRecord(value) ? { value, ok: true } : { value: {}, ok: false };
   } catch {
-    return {};
+    return { value: {}, ok: false };
   }
+}
+
+export function parseChatOptions(body: unknown): ChatRequestOptions {
+  if (!isRecord(body)) return {};
+  const mode = body.mode === "build" || body.mode === "chat" ? body.mode : undefined;
+  const thinking =
+    body.thinking === "low" || body.thinking === "medium" || body.thinking === "high"
+      ? body.thinking
+      : undefined;
+  return { mode, thinking };
+}
+
+export function thinkingFromText(text: string): "low" | "medium" | "high" | undefined {
+  if (/\bultrathink\b/i.test(text)) return "high";
+  if (/\bthink hard\b/i.test(text)) return "medium";
+  if (/(^|\s)think(\s|$)/i.test(text) && !/\bthinking\b/i.test(text)) return "low";
+  return undefined;
+}
+
+export function messageText(content: ChatContent | undefined): string {
+  if (typeof content === "string") return content;
+  if (!content) return "";
+  return content.filter((part): part is { type: "text"; text: string } => part.type === "text").map((part) => part.text).join("");
+}
+
+export function parseContent(value: unknown, role: ChatMessage["role"], tool_calls?: OpenAIToolCall[]): ChatContent {
+  if (value === undefined || value === null) return role === "assistant" && tool_calls ? null : "";
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return null;
+  const parts: ContentPart[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.type !== "string") continue;
+    if (item.type === "text" && typeof item.text === "string") parts.push({ type: "text", text: item.text });
+    if (item.type === "image_url" && isRecord(item.image_url) && typeof item.image_url.url === "string") {
+      parts.push({ type: "image_url", image_url: { url: item.image_url.url } });
+    }
+  }
+  return parts.length ? parts : null;
+}
+
+function contentHasText(content: ChatContent): boolean {
+  return messageText(content).trim().length > 0;
 }
 
 /** Map one OpenAI chat-completion choice to the client complete result. */
@@ -186,26 +225,38 @@ export function completeFromLLMChoice(choice: unknown): CompleteResult {
   if (!isRecord(choice)) return { message: "" };
   const message = isRecord(choice.message) ? choice.message : {};
   const rawCalls = parseToolCalls(message.tool_calls);
+  const finishReason: FinishReason | undefined =
+    choice.finish_reason === "length" || choice.finish_reason === "stop" || choice.finish_reason === "tool_calls"
+      ? choice.finish_reason
+      : undefined;
   if (rawCalls?.length || choice.finish_reason === "tool_calls") {
     return {
-      tool_calls: (rawCalls ?? []).map((call) => ({
-        id: call.id,
-        name: call.function.name,
-        arguments: parseArguments(call.function.arguments),
-      })),
+      finishReason,
+      tool_calls: (rawCalls ?? []).map((call) => {
+        const parsed = parseArgumentsDetailed(call.function.arguments);
+        const truncated = !parsed.ok && !!call.function.arguments.trim();
+        return {
+          id: call.id,
+          name: call.function.name,
+          arguments: parsed.value,
+          ...(truncated ? { rawArguments: call.function.arguments, truncated: true } : {}),
+        };
+      }),
     };
   }
   const content = message.content;
-  return { message: typeof content === "string" ? content.trim() : "" };
+  return { finishReason, message: typeof content === "string" ? content.trim() : "" };
 }
 
 export const AGENT_BRIEF = `You can operate this Mockintosh through tools that call the same OS traps as Terminal and Source Editor.
 
 When the user asks you to build, create, or make an app:
-1. Call project_create with path /disk/Applications/<Title>.app, a unique id (lowercase, underscores), and a title.
-2. write src/index.tsx as SDK 2 Solid source: import { createSignal } from "solid-js", { defineApp } from "@mockintosh/sdk", components from "@mockintosh/ui". Put semantic={{name: "..."}} on values and Button name="..." on controls so you can inspect and click them (e.g. counter-value, counter-increment). For a drawing surface use <bitmap pixels={buf} width height> (1 byte/pixel, 0=white); replace the array to repaint; put onMouseDown/onDrag on the bitmap; leave room below it for chrome. Use <raster onPaint revision> only for camera/video. Never call browser globals (alert, document, window, fetch, localStorage); use useApp().os.showDialog, storage, fs, and fetch.
-3. build_submit the project path; the tool waits until the compile finishes. If it failed, read diagnostics, write a fix, and build again.
-4. app_install with the successful build id, then inspect and click to verify the app. open if you need the window again.
+1. Call project_create with path /disk/Applications/<Title>.app, a unique id, a title, and template "canvas" (drawing), "blank", or "counter".
+2. Read before you edit. Prefer edit (exact string replace + expectedRevision) after the first write. Keep files under ~200 lines.
+3. The running OS source is at /system/source. search /system/source for pointer events, JSX props, and SDK-clean exemplars (MacPaint). Model only on SDK-clean apps.
+4. build_submit waits until compile finishes. After write/edit you also get project_check diagnostics.
+5. app_install with the exact build id (or omit build for the latest), then inspect. For a drawing app, drag on the bitmap and screenshot. Read logs for runtime errors.
+6. A file the Finder should see goes on the Desktop: fs.locate("desktop") and writeFile with MIME.text. app.storage is private prefs, not the Desktop.
 
-Generated apps share this computer's JavaScript realm. A runaway app requires a reload. Do not invent trap names. Prefer tools over guessing source that is already on disk — read it first.
+Generated apps share this computer's JavaScript realm. A runaway app requires a reload. Do not invent trap names.
 `;

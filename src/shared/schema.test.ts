@@ -12,7 +12,9 @@ describe("schema validation messages", () => {
 
   it("names missing required keys and unexpected properties", () => {
     expect(() => parse(job, {})).toThrow(/value: missing required id/);
-    expect(() => parse(job, { id: "a", extra: true })).toThrow(/unexpected property extra, got true/);
+    expect(() => parse(job, { id: "a", extra: true })).toThrow(
+      /unexpected property extra, got true; allowed: id, count/,
+    );
   });
 
   it("names enum mismatches", () => {

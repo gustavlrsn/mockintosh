@@ -3,7 +3,7 @@ import { withHeadless } from "../../../scripts/companion/headless";
 import { counterSource } from "../projects";
 import { allAgentTools, openaiToolsFromKernel } from "./tools";
 import { runAgent, type CompleteFn } from "./loop";
-import type { ChatMessage, CompleteResult } from "../../shared/chatProtocol";
+import { messageText, type ChatMessage, type CompleteResult } from "../../shared/chatProtocol";
 
 const path = "/disk/Applications/AgentCounter.app";
 const broken = `${counterSource("agent_counter", "Agent Counter")}\nconst bad: number = "wrong";`;
@@ -16,7 +16,7 @@ function call(id: string, name: string, args: Record<string, unknown> = {}): Com
 function lastTool(messages: ChatMessage[]): unknown {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "tool" && messages[i].content) {
-      try { return JSON.parse(messages[i].content!); } catch { return messages[i].content; }
+      try { return JSON.parse(messageText(messages[i].content)); } catch { return messages[i].content; }
     }
   }
   return null;
@@ -43,6 +43,7 @@ describe("ChatGippity agent loop", () => {
 
       const complete = scripted([
         call("1", "project_create", { path, id: "agent_counter", title: "Agent Counter" }),
+        call("1b", "read_lines", { path: `${path}/src/index.tsx` }),
         call("2", "write", { path: `${path}/src/index.tsx`, body: broken }),
         call("3", "build_submit", { path }),
         (messages) => {
@@ -126,6 +127,20 @@ describe("ChatGippity agent loop", () => {
       expect(os.services.projects!.selectedBuild("cancel_me")).toBeUndefined();
       const toolCalls = result.messages.filter((m) => m.role === "assistant" && m.tool_calls?.length);
       expect(toolCalls.some((m) => m.tool_calls!.some((c) => c.function.name === "app_install"))).toBe(false);
+    });
+  }, 30000);
+
+  it("typechecks via project_check and journals instance errors for logs", async () => {
+    await withHeadless(async (os) => {
+      const caller = os.kernel.createSession();
+      const project = "/disk/Applications/Check.app";
+      await os.kernel.invoke(caller, "project_create", { path: project, id: "check_me", title: "Check Me", template: "blank" });
+      const check = await os.kernel.invoke(caller, "project_check", { path: project }) as { diagnostics: unknown[] };
+      expect(check.diagnostics).toEqual([]);
+      const instance = os.services.instances.create("check_me");
+      os.services.instances.note(instance, new Error("handler blew up"), "handler");
+      const logs = await os.kernel.invoke(caller, "logs", {}) as { message: string; source: string }[];
+      expect(logs.some((row) => row.message === "handler blew up" && row.source === "handler")).toBe(true);
     });
   }, 30000);
 });

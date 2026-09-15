@@ -276,7 +276,8 @@ function nearestFocusable(node: CanvasNode | null): CanvasNode | null {
 
 export function createPointerDispatcher(
   root: CanvasNode,
-  focusManager: FocusManager
+  focusManager: FocusManager,
+  onError?: (error: unknown) => void,
 ): PointerDispatcher {
   let hovered: CanvasNode | null = null;
   let captured: CanvasNode | null = null;
@@ -291,6 +292,15 @@ export function createPointerDispatcher(
 
   return {
     dispatch(type, x, y, extras) {
+      try {
+        dispatchInner(type, x, y, extras);
+      } catch (error) {
+        onError?.(error);
+      }
+    },
+  };
+
+  function dispatchInner(type: PointerType, x: number, y: number, extras?: { deltaY?: number }) {
       if (type === "scroll") {
         // Start from the box under the pointer, not only a hit-target. An
         // overflow:scroll pane (ChatGippity's message list) has no handlers
@@ -387,8 +397,7 @@ export function createPointerDispatcher(
           hit._eventHandlers.onDoubleClick?.(lx, ly);
         }
       }
-    },
-  };
+  }
 }
 
 function findScope(node: CanvasNode): CanvasNode | null {

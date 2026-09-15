@@ -87,7 +87,9 @@ export function validate(schema: Schema, value: unknown, path = "value"): void {
       const property = schema.properties && Object.hasOwn(schema.properties, key) ? schema.properties[key] : undefined;
       if (property) { if (field !== undefined) validate(property, field, `${path}.${key}`); }
       else if (schema.additionalProperties === false) {
-        throw new ValidationError(`${path}: unexpected property ${key}, got ${preview(field)}`, `${path}.${key}`);
+        const allowed = schema.properties ? Object.keys(schema.properties).join(", ") : "";
+        const extra = allowed ? `; allowed: ${allowed}` : "";
+        throw new ValidationError(`${path}: unexpected property ${key}, got ${preview(field)}${extra}`, `${path}.${key}`);
       }
       else if (typeof schema.additionalProperties === "object") validate(schema.additionalProperties, field, `${path}.${key}`);
     }

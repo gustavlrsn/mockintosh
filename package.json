@@ -13,6 +13,7 @@
     "build:content": "tsx scripts/build-content.ts && tsx scripts/build-chat-context.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.core.json && tsc -p tsconfig.host.json",
     "check:core": "tsc -p tsconfig.core.json",
+    "agent:eval": "tsx scripts/agent-eval.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "knip": "knip",

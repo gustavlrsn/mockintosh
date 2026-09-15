@@ -118,7 +118,7 @@ export function createUI(config: UIConfig): UIInstance {
   const measureFunc = createMeasureFunc();
   const measureApi = { measureText };
 
-  const pointer: PointerDispatcher = createPointerDispatcher(root, focusManager);
+  const pointer: PointerDispatcher = createPointerDispatcher(root, focusManager, (error) => services.onError?.(error));
 
   let autoFocusApplied = false;
 
@@ -177,7 +177,11 @@ export function createUI(config: UIConfig): UIInstance {
       modifiers?: Partial<Modifiers>
     ): void {
       const mods: Modifiers = { ...DEFAULT_MODIFIERS, ...modifiers };
-      focusManager.dispatchKeyboard(type, key, mods);
+      try {
+        focusManager.dispatchKeyboard(type, key, mods);
+      } catch (error) {
+        services.onError?.(error);
+      }
     },
 
     registerFont(name: string, data: string): void {

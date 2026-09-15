@@ -215,7 +215,7 @@ Mockintosh runs in more than one place — a browser today, small devices with a
 
 Two ways to use them:
 
-- **`requires`** — for things your app cannot work without. Put them on `defineApp` (and in the manifest, so the OS need not even load a bundle it cannot run). The OS refuses to launch the app and tells the user why: *"Snapshot" needs a camera, which this Macintosh does not have.*
+- **`requires`** — for things your app cannot work without. Put them on `defineApp`. Published App Store catalog entries may repeat `requires` so the OS can skip a bundle it cannot run. The OS refuses to launch the app and tells the user why: *"Snapshot" needs a camera, which this Macintosh does not have.*
 
   ```tsx
   export default defineApp({ id: "snapshot", requires: ["camera"], /* … */ });
@@ -449,6 +449,18 @@ createEffect(() => {
 
 ## The Manifest: mockintosh.json
 
+There are two JSON shapes. Do not mix them.
+
+**In-OS project** — the file `project_create` writes and `build_submit` reads. Extra keys fail the build. `project_create` already wrote a valid one; do not add catalog fields.
+
+```json
+{"id":"notes","title":"Notes","entry":"src/index.tsx","sdkVersion":"2"}
+```
+
+Allowed keys: `id`, `title`, `entry`, `sdkVersion` (`"2"` only). `entry` is the source path, not `./dist/index.js`. Icon and `requires` belong on `defineApp` in the source, not here.
+
+**App Store catalog** — published bundles only (`AppManifest` in `@mockintosh/sdk`). The store uses this to skip a download the machine cannot run. It is not what the in-OS compiler accepts.
+
 ```json
 {
   "id": "myapp",
@@ -464,9 +476,9 @@ createEffect(() => {
 }
 ```
 
-**Requires:** the capabilities the app cannot run without (see [Capabilities](#capabilities)); the OS skips loading the bundle on a machine that lacks any of them. Omit it if your app runs anywhere.
+**Requires** (catalog / `defineApp` only): capabilities the app cannot run without (see [Capabilities](#capabilities)). Omit if the app runs anywhere.
 
-**Permissions:**
+**Permissions** (catalog only):
 
 - `"network"` — enables `useApp().fetch`
 

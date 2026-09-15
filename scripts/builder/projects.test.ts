@@ -1,7 +1,7 @@
 import {describe, expect, it} from "vitest";
 import {InMemoryBackend} from "@mockintosh/fs";
 import {withHeadless} from "../companion/headless";
-import {counterSource, jobSchema} from "../../src/os/projects";
+import {counterSource, jobSchema, sortArtifactsNewestFirst} from "../../src/os/projects";
 import {parse} from "../../src/shared/schema";
 
 describe("complete M2 project workflow", () => {
@@ -85,6 +85,47 @@ describe("complete M2 project workflow", () => {
       await expect(invoke("app_install", {path, build: broken.id})).rejects.toThrow("initialization failed");
       expect(os.services.projects!.selectedBuild("recovery")).toBe(good.id);
       await invoke("click", {name: "counter-increment"});
+    });
+  }, 30000);
+
+  it("orders artifacts by creation time, then by trailing sequence, never lexically", () => {
+    const id = (seq: number) => `build-os-abc-1-${seq}`;
+    expect(sortArtifactsNewestFirst([
+      { id: id(9), createdAt: 100 },
+      { id: id(12), createdAt: 200 },
+      { id: id(10), createdAt: 150 },
+    ]).map(a => a.id)).toEqual([id(12), id(10), id(9)]);
+    // Same creation time (coarse clocks): "-12" beats "-9" even though "-9" sorts later as a string.
+    expect(sortArtifactsNewestFirst([
+      { id: id(9), createdAt: 100 },
+      { id: id(12), createdAt: 100 },
+    ]).map(a => a.id)).toEqual([id(12), id(9)]);
+    // A newer boot with a lower sequence still wins on time.
+    expect(sortArtifactsNewestFirst([
+      { id: "build-os-old-1-40", createdAt: 100 },
+      { id: "build-os-new-1-1", createdAt: 500 },
+    ])[0].id).toBe("build-os-new-1-1");
+  });
+
+  it("installs the latest build when build is omitted and names the exact id on a miss", async () => {
+    await withHeadless(async os => {
+      const caller = os.kernel.createSession();
+      const invoke = (name: string, args = {}) => os.kernel.invoke(caller, name, args);
+      const path = "/disk/Applications/Latest.app";
+      await invoke("project_create", {path, id: "latest_app", title: "Latest"});
+      let job = parse(jobSchema, await invoke("build_submit", {path}));
+      while (job.state === "building") {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        job = parse(jobSchema, await invoke("build_status", {id: job.id}));
+      }
+      expect(job.state).toBe("succeeded");
+      const truncated = job.id.replace(/^build-os-/, "");
+      await expect(invoke("app_install", {path, build: truncated})).rejects.toMatchObject({
+        code: "missing-resource",
+        message: expect.stringContaining(job.id),
+      });
+      await invoke("app_install", {path});
+      expect(os.services.projects!.selectedBuild("latest_app")).toBe(job.id);
     });
   }, 30000);
 });

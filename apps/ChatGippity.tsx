@@ -1,4 +1,4 @@
-import { For, createSignal, onCleanup, type JSX } from "solid-js";
+import { For, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Button, TextInput } from "@mockintosh/ui";
 import { useApp, defineApp } from "@mockintosh/sdk";
 import { allAgentTools, runAgent } from "@mockintosh/agent";
@@ -8,6 +8,9 @@ interface Line {
   kind: "user" | "assistant" | "activity";
   text: string;
 }
+
+const HISTORY_KEY = "session.json";
+const BUILD_INTENT = /\b(build|create|make|write)\b.*\b(app|counter|drawing|notes)\b/i;
 
 function ChatGippity(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
@@ -19,6 +22,7 @@ function ChatGippity(_props: Record<string, unknown>): JSX.Element {
   const [draft, setDraft] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   let history: ChatMessage[] = [];
+  let mode: "chat" | "build" = "chat";
   let controller = new AbortController();
   let closed = false;
 
@@ -27,14 +31,36 @@ function ChatGippity(_props: Record<string, unknown>): JSX.Element {
     controller.abort();
   });
 
+  onMount(async () => {
+    const raw = await app.storage.read(HISTORY_KEY);
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw) as ChatMessage[];
+      if (Array.isArray(saved) && saved.length) {
+        history = saved;
+        mode = saved.some((m) => m.role === "assistant" && m.tool_calls?.some((c) => c.function.name === "project_create"))
+          ? "build"
+          : "chat";
+        setLines([{ kind: "assistant", text: "I still have our last session. Send a message to continue, or start a new request." }]);
+      }
+    } catch {
+      await app.storage.remove(HISTORY_KEY);
+    }
+  });
+
   const invoke = (name: string, args: Record<string, unknown>, signal?: AbortSignal) =>
     kernel.invoke(name, args, { signal: signal ?? controller.signal });
 
+  async function persist(messages: ChatMessage[]): Promise<void> {
+    await app.storage.write(HISTORY_KEY, JSON.stringify(messages));
+  }
+
   async function complete(messages: ChatMessage[], nextTools: OpenAITool[]): Promise<CompleteResult> {
+    await persist(messages);
     const resp = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, tools: nextTools }),
+      body: JSON.stringify({ messages, tools: nextTools, mode }),
     });
     const data = (await resp.json()) as CompleteResult & { error?: unknown };
     if (data.error && !data.message && !data.tool_calls) throw new Error(String(data.error));
@@ -52,22 +78,13 @@ function ChatGippity(_props: Record<string, unknown>): JSX.Element {
     return JSON.stringify({ error: data.error ?? "Image generation failed" });
   }
 
-  async function fetchRepoFile(path: string): Promise<string> {
-    const resp = await fetch("/api/repo-file", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-    const data = (await resp.json()) as { content?: string; error?: string };
-    return data.content ?? JSON.stringify(data);
-  }
-
   async function send(): Promise<void> {
     const text = draft().trim();
     if (!text || busy()) return;
     setDraft("");
     setLines((rows) => [...rows, { kind: "user", text }]);
     history = [...history, { role: "user", content: text }];
+    if (BUILD_INTENT.test(text)) mode = "build";
     setBusy(true);
     controller.abort();
     controller = new AbortController();
@@ -78,12 +95,15 @@ function ChatGippity(_props: Record<string, unknown>): JSX.Element {
         tools,
         messages: history,
         signal: controller.signal,
-        http: { generateImage, fetchRepoFile },
+        http: { generateImage },
+        onBeforeComplete: persist,
         onActivity: (label) => {
           if (!closed) setLines((rows) => [...rows, { kind: "activity", text: label }]);
+          if (label.startsWith("Writing source") || label.includes("project_create")) mode = "build";
         },
       });
       history = result.messages;
+      await persist(history);
       if (!closed) setLines((rows) => [...rows, { kind: "assistant", text: result.reply }]);
     } catch (error) {
       if (!closed) {
@@ -113,7 +133,14 @@ function ChatGippity(_props: Record<string, unknown>): JSX.Element {
       >
         <For each={lines()}>
           {(line) => (
-            <text font="body" wrap>
+            <text
+              font="body"
+              wrap
+              selectable
+              semantic={{
+                name: line.kind === "user" ? "chat-user" : line.kind === "activity" ? "chat-activity" : "chat-assistant",
+              }}
+            >
               {line.kind === "user"
                 ? `You: ${line.text}`
                 : line.kind === "activity"

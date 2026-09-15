@@ -1,0 +1,95 @@
+import { describe, expect, it } from "vitest";
+import { newBitMap } from "@mockintosh/quickdraw/bits";
+import { createUI } from "../src/ui";
+
+function mount(ui: ReturnType<typeof createUI>, view: () => unknown) {
+  const dispose = ui.render(view as () => import("solid-js").JSX.Element);
+  ui.frame();
+  return dispose;
+}
+
+function copyKeys(ui: ReturnType<typeof createUI>) {
+  ui.dispatchKeyboard("keydown", "c", { meta: true });
+}
+
+describe("text selectable", () => {
+  it("copies a drag selection and ⌘A from a wrapped host text node", () => {
+    const copied: string[] = [];
+    const ui = createUI({
+      screen: newBitMap(240, 80),
+      services: { clipboard: { readText: async () => "", writeText: async (text) => { copied.push(text); } } },
+    });
+    const dispose = ui.render(() => (
+      <box width={220}>
+        <text wrap selectable semantic={{ name: "chat-user" }}>
+          You: hello there
+        </text>
+      </box>
+    ));
+    ui.frame();
+    const node = ui.inspect().find((n) => n.name === "chat-user");
+    expect(node).toBeTruthy();
+    const { x, y } = node!.bounds;
+    ui.dispatchPointer("mousedown", x + 2, y + 2);
+    ui.dispatchPointer("mousemove", x + 80, y + 2);
+    ui.dispatchPointer("mouseup", x + 80, y + 2);
+    ui.dispatchKeyboard("keydown", "c", { meta: true });
+    expect(copied.at(-1)).toBeTruthy();
+    expect("You: hello there".startsWith(copied.at(-1)!)).toBe(true);
+
+    ui.dispatchKeyboard("keydown", "a", { meta: true });
+    ui.dispatchKeyboard("keydown", "c", { meta: true });
+    expect(copied.at(-1)).toBe("You: hello there");
+    dispose();
+  });
+
+  it("replaces the previous selection when a second node is selected", () => {
+    const copied: string[] = [];
+    const ui = createUI({
+      screen: newBitMap(240, 80),
+      services: { clipboard: { readText: async () => "", writeText: async (text) => { copied.push(text); } } },
+    });
+    const dispose = mount(ui, () => (
+      <box width={220} flexDirection="column" gap={4}>
+        <text wrap selectable semantic={{ name: "a" }}>alpha</text>
+        <text wrap selectable semantic={{ name: "b" }}>bravo</text>
+      </box>
+    ));
+    const a = ui.inspect().find((n) => n.name === "a")!.bounds;
+    const b = ui.inspect().find((n) => n.name === "b")!.bounds;
+    ui.dispatchPointer("mousedown", a.x + 2, a.y + 2);
+    ui.dispatchKeyboard("keydown", "a", { meta: true });
+    copyKeys(ui);
+    expect(copied.at(-1)).toBe("alpha\nbravo");
+
+    ui.dispatchPointer("mousedown", b.x + 2, b.y + 2);
+    ui.dispatchPointer("mousemove", b.x + 40, b.y + 2);
+    ui.dispatchPointer("mouseup", b.x + 40, b.y + 2);
+    copyKeys(ui);
+    expect(copied.at(-1)).toBe("bravo");
+    expect(copied.at(-1)).not.toContain("alpha");
+    dispose();
+  });
+
+  it("selects across sibling text nodes in one drag", () => {
+    const copied: string[] = [];
+    const ui = createUI({
+      screen: newBitMap(240, 80),
+      services: { clipboard: { readText: async () => "", writeText: async (text) => { copied.push(text); } } },
+    });
+    const dispose = mount(ui, () => (
+      <box width={220} flexDirection="column" gap={4}>
+        <text wrap selectable semantic={{ name: "a" }}>alpha</text>
+        <text wrap selectable semantic={{ name: "b" }}>bravo</text>
+      </box>
+    ));
+    const a = ui.inspect().find((n) => n.name === "a")!.bounds;
+    const b = ui.inspect().find((n) => n.name === "b")!.bounds;
+    ui.dispatchPointer("mousedown", a.x + 1, a.y + 2);
+    ui.dispatchPointer("mousemove", b.x + Math.max(2, b.width - 2), b.y + 2);
+    ui.dispatchPointer("mouseup", b.x + Math.max(2, b.width - 2), b.y + 2);
+    copyKeys(ui);
+    expect(copied.at(-1)).toBe("alpha\nbravo");
+    dispose();
+  });
+});

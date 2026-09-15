@@ -9,23 +9,16 @@ import type { BoxProps, TextProps, ImageProps, RasterProps, BitmapProps } from "
 
 declare module "solid-js" {
   namespace JSX {
+    type HostProps<P> = P & {
+      /** Internal ref callback — receives the CanvasNode when mounted. */
+      ref?: (el: import("./nodes").CanvasNode) => void;
+    };
     interface IntrinsicElements {
-      box: BoxProps & {
-        /** Internal ref callback — receives the CanvasNode when mounted. */
-        ref?: (el: import("./nodes").CanvasNode) => void;
-      };
-      text: TextProps & {
-        ref?: (el: import("./nodes").CanvasNode) => void;
-      };
-      image: ImageProps & {
-        ref?: (el: import("./nodes").CanvasNode) => void;
-      };
-      raster: RasterProps & {
-        ref?: (el: import("./nodes").CanvasNode) => void;
-      };
-      bitmap: BitmapProps & {
-        ref?: (el: import("./nodes").CanvasNode) => void;
-      };
+      box: HostProps<BoxProps>;
+      text: HostProps<TextProps>;
+      image: HostProps<ImageProps>;
+      raster: HostProps<RasterProps>;
+      bitmap: HostProps<BitmapProps>;
     }
   }
 }

@@ -16,6 +16,7 @@ import {
   type CanvasNode,
   type NodeType,
 } from "./nodes";
+import { applySelectable } from "./selectable";
 
 const ELEMENT_TYPES = new Set(["box", "text", "image", "raster", "bitmap"]);
 
@@ -70,6 +71,7 @@ export const {
 
   setProperty(node: CanvasNode, name: string, value: unknown): void {
     setNodeProperty(node, name, value);
+    if (name === "selectable") applySelectable(node, value);
     _repaintHook();
   },
 
@@ -79,6 +81,7 @@ export const {
   },
 
   removeNode(parent: CanvasNode, node: CanvasNode): void {
+    applySelectable(node, false);
     removeChild(parent, node);
     _repaintHook();
   },

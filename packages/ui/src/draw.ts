@@ -55,6 +55,7 @@ import {
 } from "@mockintosh/quickdraw/bits";
 import {
   hasMouseHandlers,
+  collectNodeText,
   resolveBorderWidth,
   type CanvasNode,
   type HitRect,
@@ -73,8 +74,10 @@ import type { FocusManager } from "./focus";
 import type { Sprite } from "./sprite";
 import { requireFont } from "./fonts/registry";
 import { layoutText } from "./fonts/textLayout";
+import { textAdvance } from "./fonts/font";
 import { faceMetrics, middleCellTop } from "./fonts/metrics";
 import { encodeUiText, fontAscent, fontFamilyId } from "./fonts/strike";
+import { textSelectionOf } from "./selectable";
 
 // -------------------------------------------------------------------------
 // Pattern data — 8x8 bitmaps for dither fills
@@ -386,7 +389,7 @@ function drawText(
     TextMode(srcBic);
   }
 
-  const text = collectText(node);
+  const text = collectNodeText(node);
   if (!text) return;
 
   const s = node.style;
@@ -412,14 +415,37 @@ function drawText(
   else if (verticalAlign === "middle") lineY = innerY + Math.floor((innerH - block.height) / 2);
   else if (verticalAlign === "bottom") lineY = innerY + innerH - block.height;
 
+  const selection = textSelectionOf(node);
+
   for (const line of block.lines) {
+    let lineX = innerX;
+    if (align === "center") lineX = innerX + Math.floor((innerW - line.width) / 2);
+    else if (align === "right") lineX = innerX + innerW - line.width;
     if (line.text) {
-      let lineX = innerX;
-      if (align === "center") lineX = innerX + Math.floor((innerW - line.width) / 2);
-      else if (align === "right") lineX = innerX + innerW - line.width;
       const bytes = encodeUiText(font, line.text);
       MoveTo(lineX, lineY + strikeAscent);
       DrawText(bytes, 0, bytes.length);
+    }
+    if (selection && line.text) {
+      const a = Math.max(selection.lo, line.start);
+      const b = Math.min(selection.hi, line.start + line.text.length);
+      if (a < b) {
+        const localA = a - line.start;
+        const localB = b - line.start;
+        const slice = line.text.slice(localA, localB);
+        const left = lineX + textAdvance(font, line.text.slice(0, localA));
+        const sliceW = textAdvance(font, slice);
+        PaintRect(makeRect(lineY, left, lineY + block.lineHeight, left + sliceW));
+        ForeColor(whiteColor);
+        TextMode(srcBic);
+        const selected = encodeUiText(font, slice);
+        MoveTo(left, lineY + strikeAscent);
+        DrawText(selected, 0, selected.length);
+        if (color) {
+          ForeColor(blackColor);
+          TextMode(srcOr);
+        }
+      }
     }
     lineY += block.lineHeight;
   }
@@ -433,10 +459,6 @@ function drawText(
   }
 }
 
-function collectText(node: CanvasNode): string {
-  if (node.type === "_text_content") return node.textContent;
-  return node.children.map(collectText).join("");
-}
 
 // -------------------------------------------------------------------------
 // Sprites → packed BitMaps

@@ -61,7 +61,7 @@ export type { KernelClient, KernelInvokeOptions, KernelPermission, OperationCont
 export type { AppCrypto } from "./crypto";
 export type { BrowserService } from "./browser";
 export { encodeQR } from "./qr";
-export type { Resource, Job, Diagnostic, ChatMessage, CompleteResult, OpenAITool } from "@mockintosh/protocol";
+export type { Resource, Job, Diagnostic, ChatMessage, CompleteResult, OpenAITool, ContentPart, ChatContent } from "@mockintosh/protocol";
 export { parse, resource, jobSchema } from "@mockintosh/protocol";
 export {
   readSpriteFile,

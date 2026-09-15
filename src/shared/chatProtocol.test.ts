@@ -59,6 +59,7 @@ describe("chat protocol", () => {
       },
     });
     expect(result).toEqual({
+      finishReason: "tool_calls",
       tool_calls: [{ id: "1", name: "inspect", arguments: { window: "w" } }],
     });
     expect(result.message).toBeUndefined();
@@ -66,6 +67,15 @@ describe("chat protocol", () => {
 
   it("maps a text choice", () => {
     expect(completeFromLLMChoice({ message: { content: "  done  " } })).toEqual({ message: "done" });
+  });
+
+  it("marks truncated tool arguments", () => {
+    const result = completeFromLLMChoice({
+      finish_reason: "length",
+      message: { tool_calls: [{ id: "1", function: { name: "write", arguments: "{\"path\"" } }] },
+    });
+    expect(result.finishReason).toBe("length");
+    expect(result.tool_calls?.[0].truncated).toBe(true);
   });
 
   it("reads client-supplied OpenAI tools", () => {

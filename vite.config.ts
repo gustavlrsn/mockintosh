@@ -80,6 +80,7 @@ export default defineConfig({
       "@mockintosh/ui": resolve(__dirname, "packages/ui/src/index.ts"),
       "@mockintosh/protocol": resolve(__dirname, "packages/protocol/src/index.ts"),
       "@mockintosh/agent": resolve(__dirname, "packages/agent/src/index.ts"),
+      "@mockintosh/sdk": resolve(__dirname, "packages/sdk/src/index.ts"),
       "@mockintosh/print": resolve(__dirname, "packages/print/src/index.ts"),
       // mdast's default Vite `browser` condition reads `document` at import time.
       "decode-named-character-reference": resolve(
@@ -94,12 +95,16 @@ export default defineConfig({
     include: [
       "packages/quickdraw/tests/**/*.test.ts",
       "packages/ui/tests/**/*.test.ts",
+      "packages/ui/tests/**/*.test.tsx",
       "packages/agent/src/**/*.test.ts",
       "packages/fs/tests/**/*.test.ts",
       "packages/print/tests/**/*.test.ts",
       "src/os/**/*.test.ts",
+      "src/platform/**/*.test.ts",
+      "src/runtime/**/*.test.ts",
       "src/shared/**/*.test.ts",
       "scripts/**/*.test.ts",
+      "api/**/*.test.ts",
       "apps/**/*.test.ts",
     ],
   },

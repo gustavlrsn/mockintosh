@@ -121,4 +121,60 @@ describe("kernel persistent volume", () => {
       code: "stale-reference",
     });
   });
+
+  it("edits by exact string with uniqueness and CAS", async () => {
+    const { kernel, caller } = await setup();
+    const written = await kernel.invoke(caller, "write", { path: "/disk/a.ts", body: "const a = 1;\nconst b = 1;\n" }) as { revision: number };
+    await expect(kernel.invoke(caller, "edit", {
+      path: "/disk/a.ts", oldText: "const a = 1;", newText: "const a = 2;", expectedRevision: written.revision,
+    })).resolves.toMatchObject({ path: "/disk/a.ts" });
+    expect(await kernel.invoke(caller, "read", { path: "/disk/a.ts" })).toContain("const a = 2;");
+    const again = await kernel.invoke(caller, "stat", { path: "/disk/a.ts" }) as { revision: number };
+    await expect(kernel.invoke(caller, "edit", {
+      path: "/disk/a.ts", oldText: "const b = 1;", newText: "x", expectedRevision: 0,
+    })).rejects.toMatchObject({ code: "conflict" });
+    await expect(kernel.invoke(caller, "edit", {
+      path: "/disk/a.ts", oldText: "missing", newText: "x", expectedRevision: again.revision,
+    })).rejects.toMatchObject({ code: "conflict" });
+    await kernel.invoke(caller, "write", { path: "/disk/dup.ts", body: "aa aa\n" });
+    const dup = await kernel.invoke(caller, "stat", { path: "/disk/dup.ts" }) as { revision: number };
+    await expect(kernel.invoke(caller, "edit", {
+      path: "/disk/dup.ts", oldText: "aa", newText: "bb", expectedRevision: dup.revision,
+    })).rejects.toMatchObject({ code: "conflict" });
+    await expect(kernel.invoke(caller, "edit", {
+      path: "/disk/dup.ts", oldText: "aa", newText: "bb", expectedRevision: dup.revision, replaceAll: true,
+    })).resolves.toMatchObject({ path: "/disk/dup.ts" });
+  });
+
+  it("searches a subtree and lists recursively", async () => {
+    const { kernel, caller } = await setup();
+    await kernel.invoke(caller, "mkdir", { path: "/disk/src" });
+    await kernel.invoke(caller, "write", { path: "/disk/src/a.ts", body: "onDrag\n" });
+    expect(await kernel.invoke(caller, "search", { path: "/disk", pattern: "onDrag" })).toEqual([
+      { path: "/disk/src/a.ts", line: 1, text: "onDrag" },
+    ]);
+    const listed = await kernel.invoke(caller, "list", { path: "/disk", recursive: true }) as { path: string }[];
+    expect(listed.map(item => item.path)).toContain("/disk/src/a.ts");
+  });
+
+  it("exposes a read-only source volume", async () => {
+    const fs = await FileSystem.open({ backend: new InMemoryBackend() });
+    fs.mkdir(ROOT_ID, "Macintosh HD", { role: "volume" });
+    const kernel = new Kernel();
+    registerFileOperations(kernel, fs, {
+      async manifest() {
+        return { commit: "test", files: [{ path: "packages/ui/src/pointer.ts", size: 4 }] };
+      },
+      async read(path) { return path === "packages/ui/src/pointer.ts" ? "drag" : Promise.reject(new Error("missing")); },
+    });
+    const caller = kernel.createSession();
+    expect(await kernel.invoke(caller, "read", { path: "/system/source/packages/ui/src/pointer.ts" })).toBe("drag");
+    await expect(kernel.invoke(caller, "write", { path: "/system/source/x.ts", body: "no" })).rejects.toMatchObject({
+      code: "permission",
+    });
+    expect(await kernel.invoke(caller, "search", { path: "/system/source", pattern: "drag" })).toEqual([
+      { path: "/system/source/packages/ui/src/pointer.ts", line: 1, text: "drag" },
+    ]);
+    await fs.flush();
+  });
 });

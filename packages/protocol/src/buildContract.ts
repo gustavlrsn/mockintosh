@@ -24,6 +24,8 @@ export interface BuildCancellation {
 }
 export interface BuildProvider {
   build(request: BuildRequest, cancellation: BuildCancellation): Promise<BuildResult>;
+  /** Fast typecheck without bundling. */
+  typecheck?(request: BuildRequest, cancellation?: BuildCancellation): Promise<BuildResult["diagnostics"]>;
 }
 export function projectPath(path: string): boolean {
   return /^[\w./-]+$/.test(path) && !path.startsWith("/") && !path.split("/").some(part => !part || part === "." || part === ".." || part === "node_modules");

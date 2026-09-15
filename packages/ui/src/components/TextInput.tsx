@@ -57,10 +57,14 @@ export function TextInput(props: TextInputProps): JSX.Element {
   const pad = () => props.padding ?? 2;
   const bordered = () => !props.borderless;
   const borderW = () => (bordered() ? 1 : 0);
+  const fieldWidth = () => props.width ?? 120;
   const fieldHeight = () => props.height ?? 16;
   const innerTextH = () => Math.max(1, fieldHeight() - (pad() + borderW()) * 2);
+  const contentWidth = () => Math.max(1, fieldWidth() - (pad() + borderW()) * 2);
   /** Pointer x (border-box local) → x within the content box. */
   const localToContentX = (lx: number) => lx - borderW() - pad();
+  /** Horizontal pan so the caret stays inside the clipped content box. */
+  const [scrollX, setScrollX] = createSignal(0);
 
   // --- Focus management ---
   let isInitialFocus = true;
@@ -105,6 +109,26 @@ export function TextInput(props: TextInputProps): JSX.Element {
   });
 
   const resetBlink = () => setCursorVisible(true);
+
+  /**
+   * Parents may replace `value` without remounting (ChatGippity send,
+   * Terminal submit). The caret is local state — clamp it so Backspace
+   * still deletes instead of walking phantom positions past the end.
+   */
+  createEffect(() => {
+    const len = props.value.length;
+    if (cursorPos() > len) setCursorPos(len);
+    const ss = selStart();
+    const se = selEnd();
+    if (ss === null || se === null) return;
+    if (Math.min(ss, se) >= len || ss === se) {
+      setSelStart(null);
+      setSelEnd(null);
+      return;
+    }
+    if (ss > len) setSelStart(len);
+    if (se > len) setSelEnd(len);
+  });
 
   // --- Display text ---
   const displayValue = () =>
@@ -261,11 +285,15 @@ export function TextInput(props: TextInputProps): JSX.Element {
   }
 
   // --- Mouse ---
+  function indexAtPointer(lx: number): number {
+    return pixelsToCharIndex(localToContentX(lx) + scrollX());
+  }
+
   function handleMouseDown(lx: number, _ly: number): void {
     if (props.disabled) return;
     didPointerDrag = false;
     if (rootNode) focusManager.focus(rootNode);
-    const idx = pixelsToCharIndex(localToContentX(lx));
+    const idx = indexAtPointer(lx);
     dragAnchorIndex = idx;
     setCursorPos(idx);
     setSelStart(null);
@@ -278,20 +306,20 @@ export function TextInput(props: TextInputProps): JSX.Element {
       return;
     }
     if (rootNode) focusManager.focus(rootNode);
-    const idx = pixelsToCharIndex(localToContentX(lx));
+    const idx = indexAtPointer(lx);
     setCursorPos(idx);
     setSelStart(null); setSelEnd(null);
   }
 
   function handleDoubleClick(lx: number): void {
     if (rootNode) focusManager.focus(rootNode);
-    const idx = pixelsToCharIndex(localToContentX(lx));
+    const idx = indexAtPointer(lx);
     selectWordAtIndex(idx);
   }
 
   function handleDrag(lx: number): void {
     didPointerDrag = true;
-    const idx = pixelsToCharIndex(localToContentX(lx));
+    const idx = indexAtPointer(lx);
     const lo = Math.min(dragAnchorIndex, idx);
     const hi = Math.max(dragAnchorIndex, idx);
     if (lo === hi) {
@@ -304,14 +332,27 @@ export function TextInput(props: TextInputProps): JSX.Element {
     setCursorPos(idx);
   }
 
+  // Keep the insertion point inside the clipped content box.
+  createEffect(() => {
+    const caret = charOffsetToPixels(cursorPos());
+    const view = contentWidth();
+    const maxScroll = Math.max(0, charOffsetToPixels(displayValue().length) - view);
+    setScrollX((prev) => {
+      let next = Math.min(prev, maxScroll);
+      if (caret < next) next = caret;
+      if (caret + 1 > next + view) next = caret + 1 - view;
+      return Math.max(0, Math.min(maxScroll, next));
+    });
+  });
+
   // --- Computed pixel positions ---
   // Nudge 1px left so the bar sits in the gap between glyphs (metrics skew it right).
   const cursorPixelX = () =>
-    Math.max(pad(), charOffsetToPixels(cursorPos()) + pad() - 1);
+    Math.max(pad(), charOffsetToPixels(cursorPos()) + pad() - 1) - scrollX();
   const selPixelStart = () => {
     const ss = selStart(), se = selEnd();
     if (ss === null || se === null) return 0;
-    return charOffsetToPixels(Math.min(ss, se)) + pad();
+    return charOffsetToPixels(Math.min(ss, se)) + pad() - scrollX();
   };
   const selPixelWidth = () => {
     const ss = selStart(), se = selEnd();
@@ -332,11 +373,22 @@ export function TextInput(props: TextInputProps): JSX.Element {
     return { lo, hi };
   });
 
+  // Own memos — `<Show when>{(v) => …}</Show>` runs the callback untracked,
+  // so a slice captured on the first drag tick would never grow.
+  const selectedSlice = createMemo(() => {
+    const r = selectionRange();
+    return r ? displayValue().slice(r.lo, r.hi) : "";
+  });
+  const selectedSliceLeft = createMemo(() => {
+    const r = selectionRange();
+    return r ? pad() + charOffsetToPixels(r.lo) - scrollX() : 0;
+  });
+
   return (
     <box
       semantic={{ name: props.name, role: "textbox", value: props.value, password: props.password, enabled: !props.disabled }}
       ref={(el: CanvasNode) => { rootNode = el; }}
-      width={props.width ?? 120}
+      width={fieldWidth()}
       height={fieldHeight()}
       background={0}
       borderColor={bordered() ? 1 : undefined}
@@ -344,7 +396,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
       borderWidth={bordered() ? 1 : 0}
       padding={pad()}
       justifyContent="center"
-      overflow="visible"
+      overflow="hidden"
       tabIndex={props.disabled ? undefined : 0}
       onFocus={handleFocus}
       onBlur={handleBlur}
@@ -367,32 +419,32 @@ export function TextInput(props: TextInputProps): JSX.Element {
       </Show>
 
       <Show when={!!displayValue()}>
-        <text font={fontName()} color={1} verticalAlign="middle">
+        <text
+          position="absolute"
+          left={pad() - scrollX()}
+          top={pad()}
+          height={innerTextH()}
+          font={fontName()}
+          color={1}
+          verticalAlign="middle"
+        >
           {displayValue()}
         </text>
       </Show>
 
       {/* Selected slice in white so it stays visible on the black highlight bar */}
-      <Show when={selectionRange()}>
-        {(getRange) => {
-          const r = getRange();
-          if (!r) return undefined;
-          const slice = displayValue().slice(r.lo, r.hi);
-          if (!slice) return undefined;
-          return (
-            <text
-              position="absolute"
-              left={pad() + charOffsetToPixels(r.lo)}
-              top={pad()}
-              height={innerTextH()}
-              font={fontName()}
-              color={0}
-              verticalAlign="middle"
-            >
-              {slice}
-            </text>
-          );
-        }}
+      <Show when={selectedSlice()}>
+        <text
+          position="absolute"
+          left={selectedSliceLeft()}
+          top={pad()}
+          height={innerTextH()}
+          font={fontName()}
+          color={0}
+          verticalAlign="middle"
+        >
+          {selectedSlice()}
+        </text>
       </Show>
 
       <Show when={isFocused() && cursorVisible() && selStart() === null}>
@@ -407,7 +459,15 @@ export function TextInput(props: TextInputProps): JSX.Element {
       </Show>
 
       <Show when={showPlaceholder()}>
-        <text font={fontName()} color={1} verticalAlign="middle">
+        <text
+          position="absolute"
+          left={pad()}
+          top={pad()}
+          height={innerTextH()}
+          font={fontName()}
+          color={1}
+          verticalAlign="middle"
+        >
           {props.placeholder}
         </text>
       </Show>

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { layoutText } from "../src/fonts/textLayout";
+import { indexAtPoint, layoutText } from "../src/fonts/textLayout";
 import type { DeckerFont } from "../src/fonts/font";
 import { computeLayout } from "../src/layout";
 import { createDrawContext, drawTree } from "../src/draw";
@@ -67,8 +67,19 @@ describe("layoutText — line breaking", () => {
 
   it("empty text yields one empty line", () => {
     const b = layoutText(font, "");
-    expect(b.lines).toEqual([{ text: "", width: 0 }]);
+    expect(b.lines).toEqual([{ text: "", width: 0, start: 0 }]);
     expect(b.height).toBe(10);
+  });
+
+  it("records source starts so wrap gaps stay in the original string", () => {
+    const b = layoutText(font, "aa bb cc", 30);
+    expect(b.lines.map((l) => l.start)).toEqual([0, 6]);
+    expect("aa bb cc".slice(b.lines[0]!.start, b.lines[1]!.start).trimEnd()).toBe("aa bb");
+  });
+
+  it("maps a click on the second wrapped line back into the source", () => {
+    const b = layoutText(font, "aa bb cc", 30);
+    expect(indexAtPoint(b, font, 0, 12)).toBe(6);
   });
 });
 

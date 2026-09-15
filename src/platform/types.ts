@@ -111,6 +111,24 @@ export interface Platform {
   /** Load persisted bundled ESM through this host's shared runtime. */
   loadArtifact?: (code: string, identity: string) => Promise<unknown>;
   builder?: import("../shared/buildContract").BuildProvider;
+  /** Read-only OS source volume (`/system/source`). Absent = no source volume. */
+  source?: SourceProvider;
+}
+
+export interface SourceFile {
+  path: string;
+  size: number;
+  sdkClean?: boolean;
+}
+
+export interface SourceManifest {
+  commit: string;
+  files: SourceFile[];
+}
+
+export interface SourceProvider {
+  manifest(): Promise<SourceManifest>;
+  read(path: string): Promise<string>;
 }
 
 /** `import(url)` as a service — see {@link Platform.loadModule}. */

@@ -63,6 +63,8 @@ export { Button } from "./components/Button";
 export type { ButtonProps } from "./components/Button";
 export { TextInput } from "./components/TextInput";
 export type { TextInputProps } from "./components/TextInput";
+export { textSelectionOf, selectedPlainText } from "./selectable";
+export type { TextSelection } from "./selectable";
 export { Checkbox } from "./components/Checkbox";
 export type { CheckboxProps } from "./components/Checkbox";
 export { Divider, Spacer, ScrollView } from "./components/utilities";

@@ -8,7 +8,7 @@ import type { MeasureFunc } from "./layout";
 import { requireFont, initBuiltinFonts } from "./fonts/registry";
 import { layoutText } from "./fonts/textLayout";
 import { alignmentHeight } from "./fonts/metrics";
-import type { CanvasNode, TextVerticalAlign } from "./nodes";
+import { collectNodeText, type CanvasNode, type TextVerticalAlign } from "./nodes";
 
 /**
  * Create the MeasureFunc used by computeLayout.
@@ -33,7 +33,7 @@ export function createMeasureFunc(): MeasureFunc {
     if (node.type === "text") {
       const fontName = node.props["font"] as string | undefined ?? "body";
       const font = requireFont(fontName);
-      const text = collectTextContent(node);
+      const text = collectNodeText(node);
       const valign = (node.props["verticalAlign"] as TextVerticalAlign | undefined) ?? "top";
       if (!text) {
         return { width: 0, height: alignmentHeight(font, 1, font.glyphHeight, valign) };
@@ -54,11 +54,6 @@ export function createMeasureFunc(): MeasureFunc {
     }
     return { width: 0, height: 0 };
   };
-}
-
-function collectTextContent(node: CanvasNode): string {
-  if (node.type === "_text_content") return node.textContent;
-  return node.children.map(collectTextContent).join("");
 }
 
 // -------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { ServiceError } from "./errors";
 import { Cancellation } from "./cancellation";
 import { Disk } from "./disk";
 import type { FileSystem } from "@mockintosh/fs";
+import type { SourceProvider } from "../../platform/types";
 
 export { ServiceError, normalizePath, type ServiceErrorCode } from "./errors";
 export { Disk, type FileResource } from "./disk";
@@ -66,8 +67,8 @@ export class Kernel {
   /** `undefined` grant = every operation (shell callers). */
   private grants = new Map<string, ReadonlySet<string> | undefined>();
 
-  attachDisk(fs: FileSystem) {
-    this.disk = new Disk(fs);
+  attachDisk(fs: FileSystem, source?: SourceProvider) {
+    this.disk = new Disk(fs, source);
   }
 
   register(operation: Operation) {

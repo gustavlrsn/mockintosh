@@ -1,11 +1,16 @@
 import { MOCKINTOSH_CHAT_CONTEXT } from "./mockintosh-context";
+import { TYPE_DIGEST, SOURCE_MAP } from "./mockintosh-context.generated";
 import {
   AGENT_BRIEF,
   HTTP_TOOLS,
   completeFromLLMChoice,
+  messageText,
+  parseChatOptions,
   parseChatRequest,
   parseClientTools,
+  thinkingFromText,
   type ChatMessage,
+  type OpenAITool,
 } from "../src/shared/chatProtocol";
 
 const LLM_API_URL =
@@ -13,21 +18,70 @@ const LLM_API_URL =
 const LLM_API_KEY = process.env.LLM_API_KEY || "";
 const LLM_MODEL = process.env.LLM_MODEL || "gpt-5.6-sol";
 
-const SYSTEM_PROMPT = `You are ChatGippity, a friendly and witty AI assistant living inside Mockintosh, a 1-bit Macintosh simulator running in the browser. Keep your responses concise and conversational. You can help with general questions, creative writing, brainstorming, coding advice, casual chat, and building Mockintosh apps. You have a retro personality that fits the Mac aesthetic — think 1984, think different.
+const CHAT_PERSONA = `You are ChatGippity, a friendly and witty AI assistant living inside Mockintosh, a 1-bit Macintosh simulator running in the browser. Keep your responses concise and conversational. You can help with general questions, creative writing, brainstorming, coding advice, casual chat, and building Mockintosh apps. You have a retro personality that fits the Mac aesthetic — think 1984, think different.
 
-You have the ability to generate images. Use the generate_image tool whenever the user asks you to draw, generate, create, or show an image of something.
+You have the ability to generate images. Use the generate_image tool whenever the user asks you to draw, generate, create, or show an image of something.`;
 
-When users ask about Mockintosh (what it is, how it works), the @mockintosh/sdk, how to develop apps for it, or who built it, you can:
-1. Use the summary below for quick answers, or
-2. Call the get_mockintosh_repo_file tool to fetch the latest docs from the GitHub repo (e.g. ARCHITECTURE.md, README.md, packages/sdk/docs/APP_DEV_GUIDE.md) for detailed or up-to-date answers. Prefer the tool when the user wants specifics, code examples, or current docs.
-Keep answers accurate and point to the repo (https://github.com/gustavlrsn/mockintosh) or doc paths when helpful.
+const BUILD_PERSONA = `You are ChatGippity building a Mockintosh app. Do not be concise at the expense of correctness. Prefer edit over write after the first version. Keep files under ~200 lines and split modules.
 
-${AGENT_BRIEF}
-${MOCKINTOSH_CHAT_CONTEXT}`;
+Procedure: plan → scaffold (project_create with the right template) → engine module → view → build_submit → app_install → drag + screenshot → iterate → short report.
+For a drawing app use template "canvas". Read /system/source/apps/MacPaint.tsx and packages/ui/src/pointer.ts rather than guessing bitmap APIs.
+Saving to the Desktop is fs.locate("desktop") + writeFile (see Photo Booth and the App Developer Guide), not app.storage.
+When users ask about Mockintosh, use the digest and source volume; do not invent trap names.`;
 
-function toLLMMessages(messages: ChatMessage[]): object[] {
+const STATIC_GUIDE = `${AGENT_BRIEF}
+
+${MOCKINTOSH_CHAT_CONTEXT}
+
+## Type digest
+${TYPE_DIGEST}
+
+## Source volume
+${SOURCE_MAP}`;
+
+const CACHE_BOUNDARY = "--- session ---";
+
+export function buildSystemPrompt(mode: "chat" | "build"): string {
+  const persona = mode === "build" ? BUILD_PERSONA : CHAT_PERSONA;
+  return `${persona}
+
+${STATIC_GUIDE}`;
+}
+
+export function thinkingLevel(messages: ChatMessage[], requested?: "low" | "medium" | "high"): "low" | "medium" | "high" | undefined {
+  if (requested) return requested;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== "user") continue;
+    return thinkingFromText(messageText(messages[i].content));
+  }
+  return undefined;
+}
+
+const usesCompletionTokens = (model: string) => /^gpt-5/i.test(model) || /^o\d/i.test(model);
+
+/**
+ * `gpt-5.6-sol` (and likely other reasoning models) reject function tools
+ * together with a non-`none` `reasoning_effort` on `/v1/chat/completions`.
+ * Keep thinking only when this request has no tools, or the URL is not that
+ * completions shape.
+ */
+export function reasoningEffortForRequest(options: {
+  model: string;
+  thinking?: "low" | "medium" | "high";
+  toolCount: number;
+  apiUrl: string;
+}): "low" | "medium" | "high" | "none" | undefined {
+  if (!usesCompletionTokens(options.model)) return undefined;
+  if (options.toolCount > 0 && /\/chat\/completions\/?$/i.test(options.apiUrl)) return "none";
+  return options.thinking;
+}
+
+export function toLLMMessages(messages: ChatMessage[], mode: "chat" | "build", tools: OpenAITool[]): object[] {
+  const sorted = [...tools].sort((a, b) => a.function.name.localeCompare(b.function.name));
+  const toolList = sorted.map((tool) => `- ${tool.function.name}`).join("\n");
   return [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt(mode) },
+    { role: "system", content: `Tools (alphabetical):\n${toolList}\n${CACHE_BOUNDARY}\n${new Date().toISOString().slice(0, 10)}` },
     ...messages
       .filter((m) => m.role !== "system")
       .map((m) => {
@@ -38,6 +92,10 @@ function toLLMMessages(messages: ChatMessage[]): object[] {
         return out;
       }),
   ];
+}
+
+export function staticPromptPrefix(mode: "chat" | "build"): string {
+  return buildSystemPrompt(mode);
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -66,18 +124,27 @@ export default async function handler(req: Request): Promise<Response> {
       headers: { "Content-Type": "application/json" },
     });
   }
+  const options = parseChatOptions(body);
   const tools = parseClientTools(body) ?? HTTP_TOOLS;
+  const mode = options.mode ?? "chat";
+  const thinking = thinkingLevel(parsed, options.thinking) ?? (mode === "build" ? "medium" : undefined);
 
   try {
     const payload: Record<string, unknown> = {
       model: LLM_MODEL,
-      messages: toLLMMessages(parsed),
+      messages: toLLMMessages(parsed, mode, tools),
     };
-    // GPT-5+ / o-series use completion-token caps and reject sampling params.
-    if (/^gpt-5/i.test(LLM_MODEL) || /^o\d/i.test(LLM_MODEL)) {
-      payload.max_completion_tokens = 4096;
+    if (usesCompletionTokens(LLM_MODEL)) {
+      payload.max_completion_tokens = tools.length ? 32000 : 4096;
+      const effort = reasoningEffortForRequest({
+        model: LLM_MODEL,
+        thinking,
+        toolCount: tools.length,
+        apiUrl: LLM_API_URL,
+      });
+      if (effort) payload.reasoning_effort = effort;
     } else {
-      payload.max_tokens = 2048;
+      payload.max_tokens = tools.length ? 8192 : 2048;
       payload.temperature = 0.7;
     }
     if (tools.length) {
@@ -110,4 +177,4 @@ export default async function handler(req: Request): Promise<Response> {
   }
 }
 
-export const config = { runtime: "edge" };
+export const maxDuration = 300;

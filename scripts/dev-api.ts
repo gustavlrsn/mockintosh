@@ -80,12 +80,10 @@ const { default: spotifyDevicePollHandler } = await import(
   "../api/spotify/device-poll.js"
 );
 const { default: browseHandler } = await import("../api/browse.js");
-const { default: repoFileHandler } = await import("../api/repo-file.js");
 
 const routes: Record<string, (req: Request) => Promise<Response>> = {
   "/api/chat": chatHandler,
   "/api/generate-image": generateImageHandler,
-  "/api/repo-file": repoFileHandler,
   "/api/spotify/device-request": spotifyDeviceRequestHandler,
   "/api/spotify/device-poll": spotifyDevicePollHandler,
   "/api/browse": browseHandler,

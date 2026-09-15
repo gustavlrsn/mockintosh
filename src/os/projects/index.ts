@@ -1,3 +1,5 @@
+import { sourceForTemplate, type ProjectTemplate } from "./templates";
+export { counterSource, blankSource, canvasSource, type ProjectTemplate } from "./templates";
 import {diskPath} from "./paths";
 import {MIME} from "@mockintosh/fs";
 import {Kernel, ServiceError, defineOperation, type Disk, type Execution, type KernelSession} from "../kernel";
@@ -20,19 +22,22 @@ type Selection = s.Value<typeof selectionSchema>;
 const encoder = new TextEncoder(), decoder = new TextDecoder();
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 
-export const counterSource = (id: string, title: string) => `import { createSignal } from "solid-js";
-import { defineApp } from "@mockintosh/sdk";
-import { Button } from "@mockintosh/ui";
-function Counter() {
-  const [count, setCount] = createSignal(0);
-  return <box padding={12} gap={8}>
-    <text semantic={{name: "counter-value"}}>{String(count())}</text>
-    <Button name="counter-increment" label="Add one" onClick={() => setCount(count() + 1)} />
-  </box>;
+/** A successful build artifact under a project's `dist/`. */
+export interface Artifact {
+  id: string;
+  /** Creation time of the artifact's `build.json`, from the file system node. */
+  createdAt: number;
 }
-export default defineApp({ id: ${JSON.stringify(id)}, title: ${JSON.stringify(title)}, icon: "icon/computer",
-  defaultSize: {width: 220, height: 100}, Component: Counter });
-`;
+
+/**
+ * Newest first. Creation time is authoritative; ids are only a tiebreak and
+ * are compared by their trailing sequence number, never lexically
+ * (`…-12` is newer than `…-9`).
+ */
+export function sortArtifactsNewestFirst(artifacts: readonly Artifact[]): Artifact[] {
+  const sequence = (id: string) => Number(id.slice(id.lastIndexOf("-") + 1)) || 0;
+  return [...artifacts].sort((a, b) => b.createdAt - a.createdAt || sequence(b.id) - sequence(a.id));
+}
 
 /** Project/build state is OS data. Compilation and module loading are host adapters. */
 export class ProjectService {
@@ -88,14 +93,14 @@ export class ProjectService {
     // Sprites are registered only after module validation; names belong to the app's bundle.
     return {...module.default, sprites: {...module.default.sprites, ...module.sprites}};
   }
-  async create(path: string, id: string, title: string, e: Execution) {
+  async create(path: string, id: string, title: string, e: Execution, template: ProjectTemplate = "counter") {
     if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id)) throw new ServiceError("invalid-argument", "Use a lowercase app id with letters, digits, underscores or hyphens");
     if (getApp(id)) throw new ServiceError("conflict", "App id is already registered");
     await e.disk.mkdir(path);
     await e.disk.mkdir(path + "/src");
     await e.disk.mkdir(path + "/dist");
     await e.disk.write(path + "/mockintosh.json", encoder.encode(JSON.stringify({id, title, entry: "src/index.tsx", sdkVersion: "2"}, null, 2)), 0);
-    await e.disk.write(path + "/src/index.tsx", encoder.encode(counterSource(id, title)), 0);
+    await e.disk.write(path + "/src/index.tsx", encoder.encode(sourceForTemplate(template, id, title)), 0);
     await e.disk.write(path + "/README.md", encoder.encode("Edit src/index.tsx, build, then install. Restore switches to the previous successful build.\n"), 0);
     return e.disk.stat(path);
   }
@@ -130,6 +135,20 @@ export class ProjectService {
     const sourceRevision = resources.map(r => `${r.id}:${r.revision}`).sort().join("|");
     return {project, manifest, files, sourceRevision};
   }
+  async check(path: string, e: Execution) {
+    const builder = this.builder;
+    if (!builder?.typecheck) throw new ServiceError("unsupported-operation", "No typecheck provider");
+    const { files, manifest, sourceRevision } = await this.snapshot(path, e);
+    const diagnostics = await builder.typecheck({
+      requestId: `check-${this.kernel.instance}-${++this.sequence}`,
+      sourceRevision,
+      entry: manifest.entry,
+      sdkVersion: "2",
+      files,
+    });
+    return { diagnostics };
+  }
+
   async submit(path: string, e: Execution): Promise<Job> {
     const builder = this.builder;
     if (!builder) throw new ServiceError("unsupported-operation", "No build provider is available on this platform");
@@ -172,20 +191,56 @@ export class ProjectService {
     return {...job.value, diagnostics: job.value.diagnostics.map(d => ({...d}))};
   }
   cancel(id: string, caller: KernelSession) { this.status(id, caller); this.jobs.get(id)!.token.cancel(); }
-  async install(path: string, build: string, e: Execution, restore = false) {
+  /** Successful artifacts under `dist/`, newest first by the `build.json` creation time. */
+  private async artifacts(path: string, disk: Disk): Promise<Artifact[]> {
+    const found: Artifact[] = [];
+    let children: Awaited<ReturnType<Disk["list"]>>;
+    try { children = await disk.list(`${path}/dist`); } catch { return found; }
+    for (const child of children) {
+      if (child.kind !== "directory") continue;
+      const id = child.path.slice(child.path.lastIndexOf("/") + 1);
+      try {
+        const record = await disk.stat(`${child.path}/build.json`);
+        found.push({ id, createdAt: this.os.fs.node(record.id)?.createdAt ?? 0 });
+      } catch { /* incomplete artifact */ }
+    }
+    return sortArtifactsNewestFirst(found);
+  }
+
+  /** The exact artifact id to install: verify a given id cheaply, or pick the newest. */
+  private async resolveBuild(path: string, build: string | undefined, disk: Disk): Promise<string> {
+    if (build !== undefined) {
+      if (!/^[\w-]+$/.test(build)) throw new ServiceError("invalid-argument", "Invalid build id");
+      try { await disk.stat(`${path}/dist/${build}/build.json`); return build; } catch { /* explain below */ }
+    }
+    const ids = (await this.artifacts(path, disk)).map((item) => item.id);
+    if (build === undefined) {
+      if (!ids.length) throw new ServiceError("missing-resource", "No successful build in dist/; run build_submit first");
+      return ids[0];
+    }
+    const suffix = ids.filter((id) => id.endsWith(build));
+    const available = ids.length ? ids.join(", ") : "(none)";
+    const hint = suffix.length === 1
+      ? ` Use the full id from build_submit unchanged: ${suffix[0]}`
+      : " Use the full id from build_submit unchanged, or omit build to install the latest.";
+    throw new ServiceError("missing-resource", `No build "${build}" under ${path}/dist. Available: ${available}.${hint}`);
+  }
+
+  async install(path: string, build: string | undefined, e: Execution, restore = false) {
     const project = await e.disk.stat(path);
     const manifest = s.parse(manifestSchema, JSON.parse(decoder.decode(await e.disk.read(path + "/mockintosh.json"))));
-    if (!/^[\w-]+$/.test(build)) throw new ServiceError("invalid-argument", "Invalid build id");
+    const resolved = restore ? build : await this.resolveBuild(path, build, e.disk);
+    if (!resolved || !/^[\w-]+$/.test(resolved)) throw new ServiceError("invalid-argument", "Invalid build id");
     if (this.changing.has(manifest.id)) throw new ServiceError("conflict", "This app is already changing builds");
     const previous = this.selected.get(manifest.id);
     if (getApp(manifest.id) && (!previous || previous.projectId !== project.id)) throw new ServiceError("conflict", "App id belongs to another app");
-    if (restore && (!previous?.previous || previous.previous !== build)) throw new ServiceError("missing-resource", "No previous build");
+    if (restore && (!previous?.previous || previous.previous !== resolved)) throw new ServiceError("missing-resource", "No previous build");
     this.changing.add(manifest.id);
-    const selection: Selection = {projectId: project.id, app: manifest.id, build, ...(previous && previous.build !== build ? {previous: previous.build} : previous?.previous ? {previous: previous.previous} : {})};
+    const selection: Selection = {projectId: project.id, app: manifest.id, build: resolved, ...(previous && previous.build !== resolved ? {previous: previous.build} : previous?.previous ? {previous: previous.previous} : {})};
     const oldApp = getApp(manifest.id);
     let switched = false;
     try {
-      const current = !restore && previous?.build !== build ? await this.snapshot(path, e) : undefined;
+      const current = !restore && previous?.build !== resolved ? await this.snapshot(path, e) : undefined;
       const app = await this.load(selection, e.disk, current?.sourceRevision);
       e.cancellation.check();
       switched = true;
@@ -228,11 +283,13 @@ export async function registerProjects(kernel: Kernel, os: OSServices, platform:
   const projects = new ProjectService(kernel, os, platform, render);
   const add: typeof defineOperation = (...args) => { const op = defineOperation(...args); kernel.register(op); return op; };
   add("source_open", "Open a project in the source editor", {path: s.string}, ["path"], s.object({opened: s.string}), async (a, e) => { await e.disk.stat(a.path); os.openApp("source_editor", {path: a.path}); return {opened: a.path}; });
-  add("project_create", "Create an editable Counter app project", {path: s.string, id: s.string, title: s.string}, ["path", "id", "title"], s.resource, (a, e) => projects.create(a.path, a.id, a.title, e));
+  add("project_create", "Create an editable app project", {path: s.string, id: s.string, title: s.string, template: {type: "string", enum: ["counter", "blank", "canvas"]}}, ["path", "id", "title"], s.resource, (a, e) => projects.create(a.path, a.id, a.title, e, (a.template as ProjectTemplate | undefined) ?? "counter"));
+  add("project_check", "Typecheck a project without bundling", {path: s.string}, ["path"], s.object({diagnostics: s.array(s.object({message: s.string, file: s.string, line: s.integer, column: s.integer}, ["message"]))}), (a, e) => projects.check(a.path, e));
   add("build_submit", "Snapshot and compile a project; returns a caller-owned job", {path: s.string}, ["path"], jobSchema, (a, e) => projects.submit(a.path, e));
+  add("logs", "Read recent app-instance error journal entries", {instance: s.string}, [], s.array(s.object({instance: s.string, at: s.number, message: s.string, source: s.string})), async (a) => os.instances!.errors(a.instance));
   add("build_status", "Inspect a build job", {id: s.string}, ["id"], jobSchema, async (a, e) => projects.status(a.id, e.caller));
   add("build_cancel", "Cancel a build owned by this caller", {id: s.string}, ["id"], {type: "null"}, async (a, e) => { projects.cancel(a.id, e.caller); return null; });
-  add("app_install", "Install and launch an immutable successful project build", {path: s.string, build: s.string}, ["path", "build"], selectionSchema, (a, e) => projects.install(a.path, a.build, e));
+  add("app_install", "Install and launch an immutable successful project build. build is the full id returned by build_submit, unchanged; omit it to install the newest artifact.", {path: s.string, build: s.string}, ["path"], selectionSchema, (a, e) => projects.install(a.path, a.build, e));
   for (const name of ["app_restart", "app_restore"] as const) add(name, name === "app_restart" ? "Restart the selected build with clean app resources" : "Restore and launch the previous successful build", {app: s.string}, ["app"], selectionSchema, (a, e) => projects.restart(a.app, e, name === "app_restore"));
   add("instances", "Inspect actual app instances and their windows", {}, [], s.array(s.object({id: s.string, app: s.string, build: s.string, windows: s.array(s.string), error: s.string}, ["id", "app", "windows"])), async () => os.instances!.list());
   await projects.loadInstalled();

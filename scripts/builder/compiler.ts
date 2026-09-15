@@ -10,6 +10,29 @@ import {compilerOptions, sharedBuildImports as shared, validateSources} from "..
 import {APP_ENV_DTS} from "../../src/shared/appEnv";
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 
+export async function typecheckRequest(request: BuildRequest, directory?: string): Promise<BuildResult["diagnostics"]> {
+  const root = directory ?? await mkdtemp(join(tmpdir(), "mockintosh-check-"));
+  try {
+    validateSources(request);
+    for (const file of request.files) {
+      const destination = join(root, file.path);
+      await mkdir(dirname(destination), { recursive: true });
+      await writeFile(destination, file.text);
+    }
+    await symlink(join(repo, "node_modules"), join(root, "node_modules"), "dir");
+    const envPath = join(root, "src/app-env.d.ts");
+    await mkdir(dirname(envPath), { recursive: true });
+    await writeFile(envPath, APP_ENV_DTS);
+    const program = ts.createProgram([...request.files.map((file) => join(root, file.path)), envPath], compilerOptions);
+    return ts.getPreEmitDiagnostics(program).filter((d) => !d.file || d.file.fileName.startsWith(root + "/src/")).map((d) => {
+      const location = d.file && d.start !== undefined ? d.file.getLineAndCharacterOfPosition(d.start) : undefined;
+      return { message: ts.flattenDiagnosticMessageText(d.messageText, "\n"), ...(d.file ? { file: d.file.fileName.slice(root.length + 1) } : {}), ...(location ? { line: location.line + 1, column: location.character + 1 } : {}) };
+    });
+  } finally {
+    if (!directory) await rm(root, { recursive: true, force: true });
+  }
+}
+
 /** Fixed compiler configuration. Source is parsed/typechecked/bundled, never executed here. */
 export async function compile(request: BuildRequest, directory?: string): Promise<BuildResult> {
   const toolchain = `typescript-${ts.version}/vite-${viteVersion}/solid-universal-v1/sdk-2`;

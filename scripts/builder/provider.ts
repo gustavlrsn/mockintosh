@@ -6,6 +6,10 @@ import {join} from "node:path";
 import {parseBuildResult, type BuildProvider, type BuildResult} from "../../src/shared/buildContract";
 /** The parent owns the workspace, including when cancellation kills the worker. */
 export const localBuilder: BuildProvider = {
+  async typecheck(request) {
+    const { typecheckRequest } = await import("./compiler");
+    return typecheckRequest(request);
+  },
   async build(request, cancellation) {
     cancellation.check();
     const directory = await mkdtemp(join(tmpdir(), "mockintosh-build-"));

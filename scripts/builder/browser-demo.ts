@@ -73,6 +73,25 @@ try {
   await invoke("click", {name: "counter-increment"});
   assert.equal((await invoke("inspect")).find((n: any) => n.name === "counter-value").text, "1");
 
+  const useAppPath = "/disk/Applications/UseAppProbe.app", useAppId = "useapp_probe";
+  const useAppSource = `import { defineApp, useApp } from "@mockintosh/sdk";
+function Probe() {
+  const title = useApp().window ? "ok" : "missing";
+  return <text semantic={{name: "useapp-probe"}}>{title}</text>;
+}
+export default defineApp({ id: ${JSON.stringify(useAppId)}, title: "UseApp Probe", icon: "icon/computer",
+  defaultSize: {width: 180, height: 80}, Component: Probe });
+`;
+  await invoke("project_create", {path: useAppPath, id: useAppId, title: "UseApp Probe", template: "blank"});
+  await invoke("write", {path: `${useAppPath}/src/index.tsx`, body: useAppSource});
+  const job = await invoke("build_submit", {path: useAppPath});
+  await waitFor(async () => ["succeeded", "failed", "cancelled"].includes((await invoke("build_status", {id: job.id})).state));
+  const build = await invoke("build_status", {id: job.id});
+  assert.equal(build.state, "succeeded", JSON.stringify(build.diagnostics));
+  await invoke("app_install", {path: useAppPath});
+  await waitFor(async () => (await invoke("inspect")).some((n: any) => n.name === "useapp-probe"));
+  assert.equal((await invoke("inspect")).find((n: any) => n.name === "useapp-probe").text, "ok");
+
   // Exercise diagnostics, relative bundling, and hard cancellation at the same
   // provider seam the project service uses, with actual module workers.
   const checks = await page.evaluate<{badType: BuildResult; badSDK: BuildResult; relative: BuildResult; forbidden: BuildResult; cancelled: boolean}>(`(async () => {
@@ -121,5 +140,5 @@ try {
     await productionPage.close();
   } finally { await new Promise<void>((resolve, reject) => production.httpServer.close(error => error ? reject(error) : resolve())); }
   assert.deepEqual(errors, []);
-  console.log("PASS: no companion; Source Editor build, click, edit, rebuild, restore, reload; SDK diagnostics, relative modules, cancellation, and production worker/artifact loading.");
+  console.log("PASS: no companion; Source Editor build, click, edit, rebuild, restore, reload; useApp artifact context; SDK diagnostics, relative modules, cancellation, and production worker/artifact loading.");
 } finally { await browser.close(); await server.close(); }

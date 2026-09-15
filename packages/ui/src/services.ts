@@ -15,6 +15,8 @@ export interface UIClipboard {
 
 export interface UIServices {
   clipboard?: UIClipboard;
+  /** Host journal for errors thrown from pointer/key handlers. */
+  onError?(error: unknown): void;
 }
 
 export const UIServicesContext = createContext<UIServices>({});
