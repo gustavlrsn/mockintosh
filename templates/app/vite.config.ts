@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import solid from "vite-plugin-solid";
+import solid from "@solidjs/vite-plugin";
 
 export default defineConfig({
   plugins: [
@@ -16,7 +16,7 @@ export default defineConfig({
       formats: ["es"],
       fileName: "index",
     },
-    rollupOptions: {
+    rolldownOptions: {
       // The OS serves these through an import map so one runtime is shared.
       // Includes subpaths — JSX compiles to `@mockintosh/ui/renderer`.
       external: (id) => /^(@mockintosh\/(sdk|ui)|solid-js)(\/|$)/.test(id),

@@ -6,7 +6,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./renderer": "./src/renderer.ts"
+    "./renderer": "./src/renderer.ts",
+    "./jsx-runtime": "./src/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./src/jsx-runtime.ts"
   },
   "files": [
     "src"
@@ -14,11 +16,8 @@
   "license": "MIT",
   "description": "Solid.js-based canvas UI framework for Mockintosh — renders to a 1-bit pixel buffer via QuickDraw",
   "dependencies": {
-    "solid-js": "^1.9.0",
+    "solid-js": "2.0.0-rc.8",
+    "@solidjs/universal": "2.0.0-rc.8",
     "@mockintosh/quickdraw": "*"
-  },
-  "devDependencies": {
-    "vite-plugin-solid": "^2.11.0",
-    "babel-preset-solid": "^1.9.0"
   }
 }

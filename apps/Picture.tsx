@@ -1,4 +1,5 @@
-import { createSignal, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createEffect, Show, Loading } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { useApp, type PrintableImage, defineApp, Button, MIME, readSpriteFile, toBits, type Sprite } from "@mockintosh/sdk";
 
 const BROWSER_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif"];
@@ -11,50 +12,42 @@ function Picture(props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const win = app.window;
   const { print } = useApp();
-  const [sprite, setSprite] = createSignal<Sprite | undefined>(
-    props.src ? app.getSprite(String(props.src)) : undefined
-  );
-  const [pixels, setPixels] = createSignal<Uint8Array | null>(null);
-  const [pw, setPw] = createSignal(0);
-  const [ph, setPh] = createSignal(0);
+  const initialSprite = props.src ? app.getSprite(String(props.src)) : undefined;
 
-  onMount(async () => {
-    if (props.title) win.setTitle(String(props.title));
+  const loaded = createMemo(async () => {
     const fileId = props.fileId as string | undefined;
-    if (!fileId) return;
+    if (!fileId) return null;
     const file = app.fs.file(fileId);
-    if (!file) return;
-
+    if (!file) return null;
     if (file.type === MIME.sprite) {
       const s = await readSpriteFile(app.fs, fileId);
-      if (s) setSprite(s);
-      return;
+      return s ? { kind: "sprite" as const, sprite: s } : null;
     }
     if (!app.images) {
-      void app.os.showDialog({ message: `This Macintosh cannot decode "${file.name}".` });
-      return;
+      throw new Error(`This Macintosh cannot decode "${file.name}".`);
     }
     const bytes = await app.fs.readBytes(fileId);
-    if (!bytes) return;
-    try {
-      const frame = await app.images.decode(bytes, file.type, {
-        maxWidth: win.width() - 8,
-        maxHeight: win.height() - 28,
-      });
-      setPw(frame.width);
-      setPh(frame.height);
-      setPixels(toBits(frame, "threshold"));
-    } catch {
-      void app.os.showDialog({ message: `Couldn't decode "${file.name}".` });
-    }
+    if (!bytes) return null;
+    const frame = await app.images.decode(bytes, file.type, {
+      maxWidth: win.width() - 8,
+      maxHeight: win.height() - 28,
+    });
+    return { kind: "pixels" as const, pixels: toBits(frame, "threshold"), width: frame.width, height: frame.height };
   });
+
+  createEffect(
+    () => props.title,
+    (title) => { if (title) win.setTitle(String(title)); },
+  );
 
   /** The picture as shown, whichever way it was loaded. */
   function printableImage(): PrintableImage | null {
-    const s = sprite();
+    const value = loaded();
+    if (value?.kind === "sprite") return { width: value.sprite.width, height: value.sprite.height, data: value.sprite.data };
+    if (value?.kind === "pixels") return { width: value.width, height: value.height, data: value.pixels };
+    const s = initialSprite;
     if (s) return { width: s.width, height: s.height, data: s.data };
-    const px = pixels();
-    return px ? { width: pw(), height: ph(), data: px } : null;
+    return null;
   }
 
   async function printPicture(): Promise<void> {
@@ -72,27 +65,40 @@ function Picture(props: Record<string, unknown>): JSX.Element {
 
   return (
     <box width={win.width()} height={win.height()} padding={4} flexDirection="column" gap={4} background={0}>
+      <Loading fallback={<text font="body">Opening…</text>}>
+      {loaded()}
       <Show when={print}>
         <Button label="Print" disabled={!printableImage()} onClick={() => void printPicture()} />
       </Show>
-      <Show when={sprite()} fallback={
+      <Show when={loaded()?.kind === "sprite" ? loaded() : initialSprite ? { kind: "sprite" as const, sprite: initialSprite } : null} fallback={
         <raster
           width={win.width() - 8}
           height={win.height() - 28}
           onPaint={({ blitPixels }) => {
-            const px = pixels();
-            if (px) blitPixels(px, pw(), ph());
+            const value = loaded();
+            if (value?.kind === "pixels") blitPixels(value.pixels, value.width, value.height);
           }}
         />
       }>
-        {(s: () => Sprite) => (
-          <image
-            width={s().width}
-            height={s().height}
-            src={{ width: s().width, height: s().height, data: s().data, mask: s().mask }}
-          />
-        )}
+        {(entry) => {
+          const sprite = () => {
+            const v = entry();
+            return v && "sprite" in v ? v.sprite : initialSprite;
+          };
+          return (
+            <Show when={sprite()}>
+              {(s) => (
+                <image
+                  width={s().width}
+                  height={s().height}
+                  src={{ width: s().width, height: s().height, data: s().data, mask: s().mask }}
+                />
+              )}
+            </Show>
+          );
+        }}
       </Show>
+      </Loading>
     </box>
   );
 }

@@ -12,8 +12,7 @@
  * deleted — so a crash can leave an orphan blob (harmless) but never a
  * dangling entry.
  */
-import { batch as solidBatch } from "solid-js";
-import { createStore, produce, unwrap, type SetStoreFunction } from "solid-js/store";
+import { createStore, flush, getObserver, runWithOwner, snapshot, type StoreSetter } from "solid-js";
 import type { FSBackend } from "./backend";
 import { CURRENT_CATALOG_VERSION, parseCatalog, type CatalogDocument } from "./catalogDocument";
 import { FSError } from "./errors";
@@ -55,6 +54,8 @@ interface CatalogState {
 function roleKey(volumeId: NodeId, role: NodeRole): string {
   return `${volumeId}/${role}`;
 }
+
+let catalogFlushing = false;
 
 /** The volume containing `id` (or `id` itself when it is a volume), from a plain node map. */
 function volumeIdOf(nodes: Record<NodeId, FSNode>, id: NodeId): NodeId | undefined {
@@ -99,7 +100,7 @@ export class FileSystem {
   private readonly generateId: () => NodeId;
 
   private state: CatalogState;
-  private setState: SetStoreFunction<CatalogState>;
+  private setState: StoreSetter<CatalogState>;
 
   private catalogDirty = false;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -340,7 +341,7 @@ export class FileSystem {
       indexRole(s, dir.id);
       touch(s, parent.id, now);
     });
-    return this.state.nodes[dir.id] as FSDirectory;
+    return (this.state.nodes[dir.id] as FSDirectory | undefined) ?? dir;
   }
 
   /**
@@ -401,7 +402,7 @@ export class FileSystem {
       if (options.attributes) mergeAttributes(s, id, options.attributes);
       touch(s, parent.id, now);
     });
-    return this.state.nodes[id] as FSFile;
+    return (this.state.nodes[id] as FSFile | undefined) ?? file;
   }
 
   writeJSON(parentId: NodeId, name: string, value: unknown, options: WriteFileOptions = {}): Promise<FSFile> {
@@ -502,7 +503,7 @@ export class FileSystem {
   batch<T>(fn: () => T): T {
     this.batchDepth++;
     try {
-      return solidBatch(fn);
+      return fn();
     } finally {
       this.batchDepth--;
       if (this.batchDepth === 0 && this.catalogDirty) this.schedulePersist();
@@ -525,12 +526,26 @@ export class FileSystem {
 
   /** Serialised catalog — what `flush()` writes. */
   toJSON(): CatalogDocument {
-    const s = unwrap(this.state);
+    const s = snapshot(this.state);
     return { version: CURRENT_CATALOG_VERSION, nodes: s.nodes, attributes: s.attributes };
   }
 
   private commit(mutate: (s: CatalogState) => void): void {
-    this.setState(produce(mutate));
+    const inEffect = !!getObserver();
+    runWithOwner(null, () => {
+      this.setState(mutate);
+      // Store writes are staged until the microtask; the catalog API is
+      // synchronous (mkdir returns the new node; the next call reads it).
+      // Inside an effect apply, flush() is already running — don't reenter it.
+      if (!inEffect && !catalogFlushing) {
+        catalogFlushing = true;
+        try {
+          flush();
+        } finally {
+          catalogFlushing = false;
+        }
+      }
+    });
     this.markDirty();
     for (const listener of this.listeners) listener();
   }

@@ -1,9 +1,15 @@
+/// <reference types="vitest/config" />
 import { defineConfig, type Plugin } from "vite";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import solid from "vite-plugin-solid";
+import solid from "@solidjs/vite-plugin";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const isolationHeaders = {
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "credentialless",
+};
 
 function sharedRuntimeImportMap(): Plugin {
   return {
@@ -22,12 +28,10 @@ function sharedRuntimeImportMap(): Plugin {
         const renderer = chunkFile("ui-renderer-runtime");
         const sdk = chunkFile("sdk-runtime");
         const solidJs = chunkFile("solid-runtime");
-        const store = chunkFile("solid-store-runtime");
         if (!ui || !renderer || !sdk) return html;
         const map = {
           imports: {
             "solid-js": solidJs ?? "/node_modules/solid-js/dist/solid.js",
-            "solid-js/store": store ?? "/node_modules/solid-js/store/dist/store.js",
             "@mockintosh/ui": ui,
             // Third-party JSX compiles to calls into the universal renderer.
             "@mockintosh/ui/renderer": renderer,
@@ -45,12 +49,16 @@ function sharedRuntimeImportMap(): Plugin {
 }
 
 export default defineConfig({
-  // Babel 7 reads this Node-only feature flag. Empty strings are also falsy
-  // when Vite exposes defines to an SSR host through process.env.
-  define: {"process.env.BABEL_TYPES_8_BREAKING": '""', "process.env.BABEL_8_BREAKING": '""'},
-  // Prebundle the complete reactive runtime together. Late discovery of universal
-  // can otherwise serve the same Solid chunk under different cache identities.
-  optimizeDeps: {exclude: ["@rollup/browser"], include: ["solid-js", "solid-js/store", "solid-js/universal", "@babel/standalone", "babel-preset-solid", "typescript"]},
+  optimizeDeps: {
+    exclude: ["@rollup/browser", "@solidjs/compiler-wasm32-wasi"],
+    include: ["solid-js", "solid-js/refresh", "@solidjs/universal", "typescript"],
+  },
+  // The Oxc WASM loader uses top-level await and nested workers; IIFE
+  // worker bundles reject both. Keep the compiler worker as ESM so the
+  // 5.8 MB .wasm stays out of the desktop entry.
+  worker: {
+    format: "es",
+  },
   plugins: [
     // Only transform files in packages/ui and apps that use Solid JSX.
     // Must use "universal" generate mode so JSX compiles to the custom
@@ -70,27 +78,43 @@ export default defineConfig({
     sharedRuntimeImportMap(),
   ],
   resolve: {
-    alias: {
-      "@": __dirname,
-      // Solid’s Babel preset uses Node assertions inside the browser compiler.
-      "assert": "assert/",
-      "@mockintosh/quickdraw/bits": resolve(__dirname, "packages/quickdraw/src/bits.ts"),
-      "@mockintosh/quickdraw": resolve(__dirname, "packages/quickdraw/src/index.ts"),
-      "@mockintosh/ui/renderer": resolve(__dirname, "packages/ui/src/renderer.ts"),
-      "@mockintosh/ui": resolve(__dirname, "packages/ui/src/index.ts"),
-      "@mockintosh/protocol": resolve(__dirname, "packages/protocol/src/index.ts"),
-      "@mockintosh/agent": resolve(__dirname, "packages/agent/src/index.ts"),
-      "@mockintosh/sdk": resolve(__dirname, "packages/sdk/src/index.ts"),
-      "@mockintosh/print": resolve(__dirname, "packages/print/src/index.ts"),
+    alias: [
+      // Exact specifier only — `solid-js/refresh` must keep the package export
+      // (Vite's string alias is a prefix match and would look for solid.js/refresh).
+      { find: /^solid-js$/, replacement: resolve(__dirname, "node_modules/solid-js/dist/solid.js") },
+      { find: /^@\//, replacement: __dirname + "/" },
+      { find: "@mockintosh/quickdraw/bits", replacement: resolve(__dirname, "packages/quickdraw/src/bits.ts") },
+      { find: "@mockintosh/quickdraw", replacement: resolve(__dirname, "packages/quickdraw/src/index.ts") },
+      { find: "@mockintosh/ui/renderer", replacement: resolve(__dirname, "packages/ui/src/renderer.ts") },
+      { find: "@mockintosh/ui", replacement: resolve(__dirname, "packages/ui/src/index.ts") },
+      { find: "@mockintosh/protocol", replacement: resolve(__dirname, "packages/protocol/src/index.ts") },
+      { find: "@mockintosh/agent", replacement: resolve(__dirname, "packages/agent/src/index.ts") },
+      { find: "@mockintosh/sdk", replacement: resolve(__dirname, "packages/sdk/src/index.ts") },
+      { find: "@mockintosh/print", replacement: resolve(__dirname, "packages/print/src/index.ts") },
       // mdast's default Vite `browser` condition reads `document` at import time.
-      "decode-named-character-reference": resolve(
-        __dirname,
-        "node_modules/decode-named-character-reference/index.js"
-      ),
+      {
+        find: "decode-named-character-reference",
+        replacement: resolve(
+          __dirname,
+          "node_modules/decode-named-character-reference/index.js"
+        ),
+      },
+    ],
+  },
+  ssr: {
+    resolve: {
+      alias: [
+        { find: /^solid-js$/, replacement: resolve(__dirname, "node_modules/solid-js/dist/solid.js") },
+      ],
     },
   },
   test: {
     environment: "node",
+    server: {
+      deps: {
+        inline: ["solid-js", "@solidjs/universal", "@solidjs/signals"],
+      },
+    },
     setupFiles: ["scripts/vitest-setup.ts"],
     include: [
       "packages/quickdraw/tests/**/*.test.ts",
@@ -109,11 +133,11 @@ export default defineConfig({
     ],
   },
   build: {
+    target: "esnext",
     outDir: "dist",
-    rollupOptions: {
+    rolldownOptions: {
       // The *-runtime entries are served to third-party bundles through the
       // import map, so their public export names must survive minification.
-      // Vite defaults app builds to `false`, which mangles entry exports.
       preserveEntrySignatures: "strict",
       input: {
         main: resolve(__dirname, "index.html"),
@@ -123,14 +147,11 @@ export default defineConfig({
         "sdk-runtime": resolve(__dirname, "packages/sdk/src/index.ts"),
         "agent-runtime": resolve(__dirname, "packages/agent/src/index.ts"),
         "solid-runtime": resolve(__dirname, "node_modules/solid-js/dist/solid.js"),
-        "solid-store-runtime": resolve(
-          __dirname,
-          "node_modules/solid-js/store/dist/store.js"
-        ),
       },
     },
   },
   server: {
+    headers: isolationHeaders,
     proxy: {
       "/api": {
         target: "http://localhost:3001",
@@ -139,5 +160,8 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  preview: {
+    headers: isolationHeaders,
   },
 });

@@ -1,4 +1,5 @@
-import { For, Show, createEffect, createSignal, onMount, type JSX } from "solid-js";
+import { For, Show, createEffect, createSignal, onSettled } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import {
   defineApp,
   useApp,
@@ -117,7 +118,7 @@ function MacPaint(props: Record<string, unknown>): JSX.Element {
   const win = app.window;
   const { print } = app;
 
-  const [doc, setDoc] = createSignal(createBitmap(8, 8));
+  const [doc, setDoc] = createSignal(createBitmap(8, 8), { ownedWrite: true });
   const [rev, setRev] = createSignal(0);
   const [tool, setTool] = createSignal<ToolId>("pencil");
   const [pattern, setPattern] = createSignal<Pattern>(GRAY50_PATTERN);
@@ -150,18 +151,19 @@ function MacPaint(props: Record<string, unknown>): JSX.Element {
   const viewW = () => Math.max(8, win.width() - TOOLS_W);
   const viewH = () => Math.max(8, win.height() - PAT_H);
 
-  createEffect(() => {
-    const w = viewW();
-    const h = viewH();
-    const cur = doc();
-    if (cur.width === w && cur.height === h) return;
-    setDoc(resizeBitmap(cur, w, h));
-    bump();
-  });
+  createEffect(
+    () => ({ w: viewW(), h: viewH(), cur: doc() }),
+    ({ w, h, cur }) => {
+      if (cur.width === w && cur.height === h) return;
+      setDoc(resizeBitmap(cur, w, h));
+      bump();
+    },
+  );
 
-  createEffect(() => {
-    win.setTitle(dirty() ? `${fileName() ?? DEFAULT_NAME} •` : (fileName() ?? DEFAULT_NAME));
-  });
+  createEffect(
+    () => ({ dirty: dirty(), name: fileName() ?? DEFAULT_NAME }),
+    ({ dirty: isDirty, name }) => win.setTitle(isDirty ? `${name} •` : name),
+  );
 
   function pushUndo(): void {
     undoStack.push(cloneBitmap(doc()));
@@ -469,17 +471,19 @@ function MacPaint(props: Record<string, unknown>): JSX.Element {
     bump();
   }
 
-  onMount(() => {
+  onSettled(() => {
     if (typeof props.fileId !== "string") return;
     void loadFile(props.fileId, typeof props.title === "string" ? props.title : DEFAULT_NAME);
   });
 
-  createEffect(() => {
+  createEffect(
+    () => ({ dirty: dirty(), fileId: fileId(), canUndo: canUndo(), shapeStyle: shapeStyle(), penSize: penSize() }),
+    ({ dirty: isDirty, fileId: id, canUndo: undoable, shapeStyle: style, penSize: size }) => {
     const fileItems: MenubarItemDef[] = [
       { label: "New", shortcut: "N", onClick: () => void newPainting() },
       { label: "Open…", shortcut: "O", onClick: () => void openPainting() },
       { type: "separator" },
-      { label: "Save", shortcut: "S", onClick: () => void save(), disabled: !dirty() && !!fileId() },
+      { label: "Save", shortcut: "S", onClick: () => void save(), disabled: !isDirty && !!id },
       { label: "Save As…", onClick: () => void saveAs() },
     ];
     if (print) {
@@ -493,7 +497,7 @@ function MacPaint(props: Record<string, unknown>): JSX.Element {
       {
         label: "Edit",
         items: [
-          { label: "Undo", shortcut: "Z", disabled: !canUndo(), onClick: undo },
+          { label: "Undo", shortcut: "Z", disabled: !undoable, onClick: undo },
           { type: "separator" },
           { label: "Fill", onClick: editFill },
           { label: "Invert", onClick: editInvert },
@@ -505,7 +509,7 @@ function MacPaint(props: Record<string, unknown>): JSX.Element {
         items: [
           {
             type: "radiogroup",
-            value: shapeStyle(),
+            value: style,
             onValueChange: (v) => setShapeStyle(v as ShapeStyle),
             items: [
               { label: "Frame", value: "frame" },
@@ -515,14 +519,15 @@ function MacPaint(props: Record<string, unknown>): JSX.Element {
           { type: "separator" },
           {
             type: "radiogroup",
-            value: String(penSize()),
+            value: String(size),
             onValueChange: (v) => setPenSize(Number(v) as PenSize),
             items: PEN_SIZES.map((n) => ({ label: `${n}-pixel`, value: String(n) })),
           },
         ],
       },
     ]);
-  });
+    },
+  );
 
   const ants = () => draftSel() ?? selection();
 

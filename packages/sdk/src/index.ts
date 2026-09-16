@@ -6,7 +6,8 @@
  * from `useApp()`.
  */
 
-import { createContext, useContext, type Accessor, type JSX } from "solid-js";
+import { createContext, useContext, type Accessor } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import type { FileSystem } from "@mockintosh/fs";
 import type { GrafPort } from "@mockintosh/quickdraw";
 import type { Sprite } from "@mockintosh/ui";
@@ -468,7 +469,11 @@ export {
   createContext,
   useContext,
   onCleanup,
-  onMount,
+  onSettled,
+  flush,
+  Loading,
+  Errored,
+  isPending,
   Show,
   For,
   Button,

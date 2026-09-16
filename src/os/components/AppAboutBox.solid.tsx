@@ -4,7 +4,8 @@
  * draws this standard box from what the app declared — its icon and title,
  * plus `about.version` and `about.description` when given.
  */
-import { Show, type JSX } from "solid-js";
+import { Show } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { useOS, type OSServices } from "../context";
 import { getApp, type SolidApp } from "../apps";
 import { openSystemWindow } from "../systemWindows";

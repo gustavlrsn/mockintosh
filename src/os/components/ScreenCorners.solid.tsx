@@ -1,4 +1,5 @@
-import { JSX, For } from "solid-js";
+import { For } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { useOS } from "../context";
 
 /** One 5×5 masked sprite per screen corner, anchored to that corner via absolute layout. */

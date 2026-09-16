@@ -2,7 +2,7 @@ import ts from "typescript";
 import {buildRequest, projectPath, type BuildRequest} from "./buildContract";
 import {parse} from "./schema";
 
-export const sharedBuildImports = new Set(["solid-js", "solid-js/store", "@mockintosh/sdk", "@mockintosh/ui", "@mockintosh/ui/renderer", "@mockintosh/agent"]);
+export const sharedBuildImports = new Set(["solid-js", "@mockintosh/sdk", "@mockintosh/ui", "@mockintosh/ui/renderer", "@mockintosh/agent"]);
 /** Browser globals that share the OS JavaScript realm. Apps must use the SDK. */
 export const bannedHostGlobals = new Set([
   "alert", "confirm", "prompt",
@@ -11,7 +11,7 @@ export const bannedHostGlobals = new Set([
 ]);
 export const compilerOptions: ts.CompilerOptions = {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
-  jsx: ts.JsxEmit.Preserve, jsxImportSource: "solid-js", strict: true, noEmit: true, skipLibCheck: true,
+  jsx: ts.JsxEmit.Preserve, jsxImportSource: "@mockintosh/ui", strict: true, noEmit: true, skipLibCheck: true,
   allowJs: true, checkJs: true, types: [], lib: ["lib.es2022.d.ts"],
 };
 /** `foo.alert` / `{ alert }` bindings are not the host global. */

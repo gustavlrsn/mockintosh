@@ -4,11 +4,11 @@
 
 Mockintosh is a Macintosh-style simulator running in the browser. The entire UI is rendered on a single `<canvas>` element at **512×342 pixels** into a **1-bit** framebuffer (packed 8 pixels per byte, as on the original Macintosh): black, white, and dither patterns. There is no HTML/CSS inside the simulated screen.
 
-**SDK v2 is Solid-only.** Third-party apps are ES modules that `defineApp({ Component })` and optionally export `sprites`. They are loaded at runtime via dynamic `import()`. The OS shares one Solid runtime; externalize `solid-js`, `solid-js/store`, `@mockintosh/ui`, and `@mockintosh/sdk` in your Vite build and consume them through the OS import map.
+**SDK v3 is Solid 2-only.** Third-party apps are ES modules that `defineApp({ Component })` and optionally export `sprites`. They are loaded at runtime via dynamic `import()`. The OS shares one Solid runtime; externalize `solid-js`, `@mockintosh/ui`, and `@mockintosh/sdk` in your Vite build and consume them through the OS import map.
 
-v1 `App.render` / `WindowContext` apps are not loaded. The App Store hides catalog entries with `sdk` major &lt; 2.
+v1 `App.render` / `WindowContext` apps are not loaded. SDK 2 bundles cannot share a realm with Solid 2; the App Store hides catalog entries with `sdk` major &lt; 3, and the installer refuses them with a rebuild prompt.
 
-**SDK 2.1:** `<raster onPaint>` now receives a single `RasterSurface` argument instead of `(port, rect)`, and the framebuffer is packed 1 bpp — apps that indexed `port.portBits.baseAddr` directly must switch to `surface.setPixel` / `surface.blitPixels` (see below).
+**Raster surface:** `<raster onPaint>` receives a single `RasterSurface` (not `(port, rect)`), and the framebuffer is packed 1 bpp — apps that indexed `port.portBits.baseAddr` directly must switch to `surface.setPixel` / `surface.blitPixels` (see below).
 
 ## Bundled apps
 
@@ -52,6 +52,15 @@ export default defineApp({
   },
 });
 ```
+
+## Solid 2
+
+Import reactive primitives from `@mockintosh/sdk` (`createSignal`, `createEffect`, `createMemo`, `onSettled`, `onCleanup`, `Show`, `For`, `Loading`, `Errored`, `isPending`). Do not import `solid-js/store`, `onMount`, `Index`, `ErrorBoundary`, `Suspense`, or `Context.Provider` — contexts are used as components (`<ThemeContext>…</ThemeContext>`).
+
+- **Effects** are `createEffect(compute, apply)`. `compute` only reads signals and returns a value; `apply` uses that value (menus, host writes). `compute` runs immediately when the effect is created — declare every signal it reads *above* the `createEffect` call.
+- **Mount** is `onSettled`, not `onMount`. Do not call `flush()` from `onSettled` or from an effect `apply`.
+- **Async data** is a memo that returns a promise, wrapped in `<Loading>` (and `<Errored>` if you handle failure). Do not fill a signal from `onSettled(async () => …)`.
+- **`For`** keys by item identity. Use `keyed={false}` only when you want index-style reuse. Changing a key remounts that child and drops in-progress edits.
 
 ## The Rendering Model
 
@@ -245,7 +254,7 @@ await app.storage.remove("settings.json");
 
 ## Files
 
-`useApp().fs` is the user's file system — the same one the Finder shows. Catalog reads are reactive (call them inside `createMemo`/`createEffect` and they re-run when that folder changes); bodies are read with `readText`/`readBytes`/`readJSON`.
+`useApp().fs` is the user's file system — the same one the Finder shows. Catalog reads are reactive (call them inside `createMemo` or the `compute` half of `createEffect` and they re-run when that folder changes); bodies are read with `readText`/`readBytes`/`readJSON`.
 
 ```tsx
 import { useApp, MIME, createMemo, For } from "@mockintosh/sdk";
@@ -273,14 +282,15 @@ Files have one MIME `type` (`MIME.text`, `MIME.markdown`, `MIME.sprite`, …; `i
 Declare the types your app can open and the Finder will launch it on double-click, merging `FileDocumentProps` (`fileId`, `title`) into your props:
 
 ```tsx
+import { defineApp, useApp, createMemo, Loading, MIME, type FileDocumentProps } from "@mockintosh/sdk";
+
 export default defineApp<FileDocumentProps>({
   id: "notes",
   fileTypes: [MIME.text, MIME.markdown],
   Component(props) {
     const { fs } = useApp();
-    const [text, setText] = createSignal("");
-    onMount(async () => setText((await fs.readText(props.fileId)) ?? ""));
-    return <text font="body">{text()}</text>;
+    const text = createMemo(() => fs.readText(props.fileId).then((value) => value ?? ""));
+    return <Loading fallback={<text font="body">Opening…</text>}><text font="body">{text()}</text></Loading>;
   },
   // …
 });
@@ -352,16 +362,18 @@ export default defineApp({
     const [count, setCount] = createSignal(0);
     const [step, setStep] = createSignal(1);
 
-    createEffect(() => {
+    createEffect(
+      () => ({ count: count(), step: step() }),
+      ({ count: n, step: s }) => {
       app.setMenus([
         {
           label: "Counter",
           items: [
-            { label: "Reset", shortcut: "R", disabled: count() === 0, onClick: () => setCount(0) },
+            { label: "Reset", shortcut: "R", disabled: n === 0, onClick: () => setCount(0) },
             { type: "separator" },
             {
               type: "radiogroup",
-              value: String(step()),
+              value: String(s),
               onValueChange: (v) => setStep(Number(v)),
               items: [
                 { label: "Step by 1", value: "1" },
@@ -371,7 +383,8 @@ export default defineApp({
           ],
         },
       ]);
-    });
+      },
+    );
     // ...
   },
 });
@@ -437,12 +450,15 @@ The user must be able to leave (Human Interface Guidelines). Your menus stay liv
 ```tsx
 const { window: win } = useApp();
 const isFullScreen = () => win.kind() === "fullscreen";
-createEffect(() => {
-  app.setMenus([{ label: "View", items: [
-    { label: isFullScreen() ? "Exit Full Screen" : "Full Screen", shortcut: "F",
-      onClick: () => win.setFullScreen(!isFullScreen()) },
-  ]}]);
-});
+createEffect(
+  () => isFullScreen(),
+  (full) => {
+    app.setMenus([{ label: "View", items: [
+      { label: full ? "Exit Full Screen" : "Full Screen", shortcut: "F",
+        onClick: () => win.setFullScreen(!full) },
+    ]}]);
+  },
+);
 // …and in the JSX:
 <Show when={isFullScreen()}><Button label="Menu Bar" onClick={() => win.setFullScreen(false)} /></Show>
 ```
@@ -454,10 +470,10 @@ There are two JSON shapes. Do not mix them.
 **In-OS project** — the file `project_create` writes and `build_submit` reads. Extra keys fail the build. `project_create` already wrote a valid one; do not add catalog fields.
 
 ```json
-{"id":"notes","title":"Notes","entry":"src/index.tsx","sdkVersion":"2"}
+{"id":"notes","title":"Notes","entry":"src/index.tsx","sdkVersion":"3"}
 ```
 
-Allowed keys: `id`, `title`, `entry`, `sdkVersion` (`"2"` only). `entry` is the source path, not `./dist/index.js`. Icon and `requires` belong on `defineApp` in the source, not here.
+Allowed keys: `id`, `title`, `entry`, `sdkVersion` (`"3"` only). `entry` is the source path, not `./dist/index.js`. Icon and `requires` belong on `defineApp` in the source, not here.
 
 **App Store catalog** — published bundles only (`AppManifest` in `@mockintosh/sdk`). The store uses this to skip a download the machine cannot run. It is not what the in-OS compiler accepts.
 
@@ -469,7 +485,7 @@ Allowed keys: `id`, `title`, `entry`, `sdkVersion` (`"2"` only). `entry` is the 
   "icon": "myapp/icon",
   "author": "your-github-username",
   "version": "1.0.0",
-  "sdk": "^2.0.0",
+  "sdk": "^3.0.0",
   "permissions": [],
   "requires": ["network"],
   "entry": "./dist/index.js"
@@ -486,7 +502,7 @@ Allowed keys: `id`, `title`, `entry`, `sdkVersion` (`"2"` only). `entry` is the 
 
 ```ts
 import { defineConfig } from "vite";
-import solid from "vite-plugin-solid";
+import solid from "@solidjs/vite-plugin";
 
 export default defineConfig({
   plugins: [
@@ -499,8 +515,10 @@ export default defineConfig({
   ],
   build: {
     lib: { entry: "src/index.tsx", formats: ["es"], fileName: "index" },
-    rollupOptions: {
-      external: ["@mockintosh/sdk", "@mockintosh/ui", "solid-js", "solid-js/store"],
+    rolldownOptions: {
+      // The OS serves these through an import map so one runtime is shared.
+      // Includes subpaths — JSX compiles to `@mockintosh/ui/renderer`.
+      external: (id) => /^(@mockintosh\/(sdk|ui)|solid-js)(\/|$)/.test(id),
     },
   },
 });
@@ -536,6 +554,6 @@ These metadata fields do not grant kernel privileges to third-party apps. OS-own
 
 ## Editable project builds and instance cleanup
 
-Source Editor and the M2 project operations can compile SDK 2 source into an artifact loaded by the host. In the browser, Build & Run uses a local compiler worker without companion setup. A paired companion can optionally supply remote compilation through the same build-provider contract. Keep imports to the supported shared SDK/UI/Solid modules and relative project source modules. The OS shares one reactive runtime with installed apps. Compile errors preserve the working app; restart resets its instance and Restore selects the previous artifact without changing newer source.
+Source Editor and the M2 project operations can compile SDK 3 source into an artifact loaded by the host. In the browser, Build & Run uses a local compiler worker without companion setup. A paired companion can optionally supply remote compilation through the same build-provider contract. Keep imports to the supported shared SDK/UI/Solid modules and relative project source modules. The OS shares one reactive runtime with installed apps. Compile errors preserve the working app; restart resets its instance and Restore selects the previous artifact without changing newer source.
 
 For resources created outside a component, register cleanup through `app.onCleanup?.(() => clearInterval(timer))` in `onOpen`. Solid computations created during `onOpen` also have an owned root. To keep an instance alive after its last window closes, explicitly call `const release = app.keepAlive?.()` and call `release?.()` when that work finishes. Component `onCleanup` continues to handle component-owned resources. These lifetimes are local and cooperative; they do not create durable server jobs or preempt infinite loops.

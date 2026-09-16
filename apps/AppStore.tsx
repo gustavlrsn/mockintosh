@@ -1,4 +1,5 @@
-import { For, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
+import { For, Show, createMemo, createSignal, Loading, Errored } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { Button } from "@mockintosh/ui";
 import { useApp, type AppManifest, defineApp } from "@mockintosh/sdk";
 import { useOS } from "../src/os/context";
@@ -30,24 +31,15 @@ function AppStore(_props: Record<string, unknown>): JSX.Element {
   const fetch = app.fetch!; // present: the app requires "network"
   // Installing apps is a shell privilege, not an SDK power: reach the OS directly.
   const os = useOS();
-  const [entries, setEntries] = createSignal<RegistryEntry[]>([]);
+  const catalog = createMemo(async () => {
+    const r = await fetch(REGISTRY_URL);
+    const data = (await r.json()) as { apps?: RegistryEntry[] };
+    return (data.apps ?? []).filter((e) => sdkMajor(e.sdk) >= 3);
+  });
   // Reactive: installing (or trashing a .app in the Finder) updates the list.
   const installed = createMemo(() => new Set(installedAppIds(os.fs)));
-  const [status, setStatus] = createSignal("Loading catalog…");
+  const [status, setStatus] = createSignal("");
   const [busyId, setBusyId] = createSignal<string | null>(null);
-
-  onMount(() => {
-    fetch(REGISTRY_URL)
-      .then((r) => r.json())
-      .then((data) => {
-        const apps = ((data as { apps?: RegistryEntry[] }).apps ?? []).filter(
-          (e) => sdkMajor(e.sdk) >= 2
-        );
-        setEntries(apps);
-        setStatus(apps.length === 0 ? "No SDK v2 apps in the catalog." : "");
-      })
-      .catch(() => setStatus("Failed to load catalog."));
-  });
 
   async function install(e: RegistryEntry): Promise<void> {
     const installer = os.installer;
@@ -83,32 +75,40 @@ function AppStore(_props: Record<string, unknown>): JSX.Element {
   return (
     <box width={win.width()} height={win.height()} padding={8} flexDirection="column" gap={6} background={0}>
       <text font="menu">App Store</text>
-      <text font="body">SDK v2 apps only</text>
+      <text font="body">SDK v3 apps only</text>
       <Show when={status()}>
         <text font="body">{status()}</text>
       </Show>
       <box overflow="scroll" height={win.height() - 50} flexDirection="column" gap={4}>
-        <For each={entries()}>
-          {(e) => (
-            <box flexDirection="column" gap={2} borderColor={1} borderWidth={1} padding={4}>
-              <text font="menu">{e.title}</text>
-              <text font="body">{`${e.author} · ${e.version}`}</text>
-              <text font="body">{e.description}</text>
-              <Show
-                when={installed().has(e.id)}
-                fallback={
-                  <Button
-                    label={busyId() === e.id ? "…" : "Install"}
-                    disabled={busyId() === e.id || !e.entry}
-                    onClick={() => void install(e)}
-                  />
-                }
-              >
-                <Button label="Open" onClick={() => app.os.openApp(e.id)} />
-              </Show>
-            </box>
-          )}
-        </For>
+        <Loading fallback={<text font="body">Loading catalog…</text>}>
+          <Errored fallback={() => <text font="body">Failed to load catalog.</text>}>
+            <Show when={catalog().length === 0} fallback={
+              <For each={catalog()}>
+                {(e) => (
+                  <box flexDirection="column" gap={2} borderColor={1} borderWidth={1} padding={4}>
+                    <text font="menu">{e.title}</text>
+                    <text font="body">{`${e.author} · ${e.version}`}</text>
+                    <text font="body">{e.description}</text>
+                    <Show
+                      when={installed().has(e.id)}
+                      fallback={
+                        <Button
+                          label={busyId() === e.id ? "…" : "Install"}
+                          disabled={busyId() === e.id || !e.entry}
+                          onClick={() => void install(e)}
+                        />
+                      }
+                    >
+                      <Button label="Open" onClick={() => app.os.openApp(e.id)} />
+                    </Show>
+                  </box>
+                )}
+              </For>
+            }>
+              <text font="body">No SDK v3 apps in the catalog.</text>
+            </Show>
+          </Errored>
+        </Loading>
       </box>
     </box>
   );

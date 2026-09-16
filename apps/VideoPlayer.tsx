@@ -1,4 +1,5 @@
-import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { createSignal, onCleanup, onSettled } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { Button } from "@mockintosh/ui";
 import { createDitherer, defineApp, useApp, type VideoSource } from "@mockintosh/sdk";
 
@@ -34,7 +35,7 @@ function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
     if (playing()) cancelFrame = app.scheduler.requestFrame(tick);
   }
 
-  onMount(() => {
+  onSettled(() => {
     void app.video!.open("/1984.mp4", { loop: true, muted: true }).then((opened) => {
       source = opened;
     });

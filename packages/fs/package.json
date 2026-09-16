@@ -13,6 +13,6 @@
   "license": "MIT",
   "description": "Mockintosh virtual file system — a reactive catalog over a pluggable blob backend (OPFS in the browser, in-memory for tests)",
   "dependencies": {
-    "solid-js": "^1.9.0"
+    "solid-js": "2.0.0-rc.8"
   }
 }

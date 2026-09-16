@@ -5,8 +5,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createSignal, For } from "solid-js";
-import { render, createElement } from "../src/renderer";
+import { createSignal, flush, For } from "solid-js";
+import { render, createElement, applyRef, createComponent } from "../src/renderer";
 import { createNode, insertChild, type CanvasNode } from "../src/nodes";
 
 function ids(root: CanvasNode): string[] {
@@ -51,16 +51,38 @@ describe("insertChild", () => {
   });
 });
 
+describe("insert() array reconcile", () => {
+  it("reorders existing nodes when the accessor returns a new order", () => {
+    const root = createNode("_root");
+    const nodes = {
+      a: createElement("box"),
+      b: createElement("box"),
+      c: createElement("box"),
+    };
+    nodes.a.props.id = "a";
+    nodes.b.props.id = "b";
+    nodes.c.props.id = "c";
+    const [items, setItems] = createSignal(["a", "b", "c"] as const);
+    const dispose = render(() => () => items().map((id) => nodes[id]), root);
+    expect(ids(root)).toEqual(["a", "b", "c"]);
+    setItems(["a", "c", "b"]);
+    flush();
+    expect(ids(root)).toEqual(["a", "c", "b"]);
+    dispose();
+  });
+});
+
 describe("<For> through the renderer", () => {
   function mount() {
     const root = createNode("_root");
     const [items, setItems] = createSignal(["a", "b", "c"]);
     const dispose = render(
       () =>
-        For({
+        createComponent(For, {
           get each() {
             return items();
           },
+          keyed: true,
           children: (item: string) => {
             const n = createElement("box");
             n.props.id = item;
@@ -69,30 +91,50 @@ describe("<For> through the renderer", () => {
         }),
       root
     );
+    flush();
     return { root, setItems, dispose };
   }
 
-  it("reordering items reorders children without duplicates", () => {
+  it("reordering items reorders children without duplicates", async () => {
     const { root, setItems, dispose } = mount();
     expect(ids(root)).toEqual(["a", "b", "c"]);
 
     setItems(["a", "c", "b"]); // bring b to the front (paint order = last)
+    flush();
     expect(ids(root)).toEqual(["a", "c", "b"]);
 
     setItems(["c", "b", "a"]);
+    flush();
     expect(ids(root)).toEqual(["c", "b", "a"]);
 
     setItems(["b", "a", "c"]);
+    flush();
     expect(ids(root)).toEqual(["b", "a", "c"]);
     for (const child of root.children) expect(child.parent).toBe(root);
     dispose();
   });
 
-  it("removing an item after a reorder removes exactly that node", () => {
+  it("removing an item after a reorder removes exactly that node", async () => {
     const { root, setItems, dispose } = mount();
     setItems(["c", "a", "b"]);
+    flush();
     setItems(["c", "b"]);
+    flush();
     expect(ids(root)).toEqual(["c", "b"]);
     dispose();
+  });
+});
+
+describe("createElement static props and ref", () => {
+  it("applies static props from the second createElement argument", () => {
+    const node = createElement("text", { font: "body" });
+    expect(node.props.font).toBe("body");
+  });
+
+  it("applyRef invokes the callback with the CanvasNode", () => {
+    const node = createElement("box");
+    let seen: CanvasNode | undefined;
+    applyRef((el) => { seen = el; }, node);
+    expect(seen).toBe(node);
   });
 });

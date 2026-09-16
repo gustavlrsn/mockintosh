@@ -1,12 +1,12 @@
 /**
  * Solid universal renderer wired to the CanvasNode tree.
  *
- * Uses `createRenderer` from `solid-js/universal` to translate Solid JSX
+ * Uses `createRenderer` from `@solidjs/universal` to translate Solid JSX
  * into CanvasNode mutations. The rendered result is a retained node tree
  * that the draw pass traverses each frame.
  */
 
-import { createRenderer } from "solid-js/universal";
+import { createRenderer } from "@solidjs/universal";
 import {
   createNode,
   insertChild,
@@ -24,6 +24,14 @@ function toNodeType(tagName: string): NodeType {
   if (ELEMENT_TYPES.has(tagName)) return tagName as NodeType;
   // Unknown element types fall back to box (safe default for composition)
   return "box";
+}
+
+function applyProps(node: CanvasNode, props: Record<string, unknown> | undefined): void {
+  if (!props) return;
+  for (const [name, value] of Object.entries(props)) {
+    setNodeProperty(node, name, value);
+    if (name === "selectable") applySelectable(node, value);
+  }
 }
 
 // Module-level repaint hook — set by createUI so any reactive tree mutation
@@ -51,10 +59,13 @@ export const {
   spread,
   setProp,
   mergeProps,
-  use,
+  applyRef,
+  ref,
 } = createRenderer<CanvasNode>({
-  createElement(type: string): CanvasNode {
-    return createNode(toNodeType(type));
+  createElement(type: string, staticProps?: Record<string, unknown>): CanvasNode {
+    const node = createNode(toNodeType(type));
+    applyProps(node, staticProps);
+    return node;
   },
 
   createTextNode(value: string): CanvasNode {
@@ -69,14 +80,14 @@ export const {
     _repaintHook();
   },
 
-  setProperty(node: CanvasNode, name: string, value: unknown): void {
+  setProperty(node: CanvasNode, name: string, value: unknown, _prev?: unknown): void {
     setNodeProperty(node, name, value);
     if (name === "selectable") applySelectable(node, value);
     _repaintHook();
   },
 
-  insertNode(parent: CanvasNode, node: CanvasNode, anchor: CanvasNode | null): void {
-    insertChild(parent, node, anchor);
+  insertNode(parent: CanvasNode, node: CanvasNode, anchor?: CanvasNode): void {
+    insertChild(parent, node, anchor ?? null);
     _repaintHook();
   },
 
@@ -90,18 +101,18 @@ export const {
     return node.type === "_text_content";
   },
 
-  getParentNode(node: CanvasNode): CanvasNode | null {
-    return node.parent;
+  getParentNode(node: CanvasNode): CanvasNode | undefined {
+    return node.parent ?? undefined;
   },
 
-  getFirstChild(node: CanvasNode): CanvasNode | null {
-    return node.children[0] ?? null;
+  getFirstChild(node: CanvasNode): CanvasNode | undefined {
+    return node.children[0];
   },
 
-  getNextSibling(node: CanvasNode): CanvasNode | null {
+  getNextSibling(node: CanvasNode): CanvasNode | undefined {
     const parent = node.parent;
-    if (!parent) return null;
+    if (!parent) return undefined;
     const idx = parent.children.indexOf(node);
-    return parent.children[idx + 1] ?? null;
+    return parent.children[idx + 1];
   },
 });

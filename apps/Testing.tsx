@@ -1,4 +1,4 @@
-import type { JSX } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { Button, Checkbox, TextInput, createSignal } from "@mockintosh/ui";
 import { defineApp, useApp } from "@mockintosh/sdk";
 

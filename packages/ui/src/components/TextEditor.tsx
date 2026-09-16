@@ -1,4 +1,5 @@
-import {createSignal, createMemo, createEffect, untrack, For, Show, type JSX} from "solid-js";
+import { createSignal, createMemo, createEffect, untrack, For, Show } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import {getFocusManager} from "../focusContext";
 import {useUIServices} from "../services";
 import {measureText} from "../fonts/bridge";
@@ -13,8 +14,13 @@ export interface TextEditorProps {
 export function TextEditor(props: TextEditorProps): JSX.Element {
   const focus = getFocusManager(), {clipboard} = useUIServices();
   let node: CanvasNode;
-  const [caret, setCaret] = createSignal(0), [anchor, setAnchor] = createSignal(0);
-  const [top, setTop] = createSignal(0), [left, setLeft] = createSignal(0), [focused, setFocused] = createSignal(false);
+  // Locals stay current across staged Solid 2 writes so keydown+keypress in
+  // one turn (and the next key before paint) see the caret we just moved.
+  let caretAt = 0, anchorAt = 0, lastLine: number | undefined, draft: string | null = null;
+  const valueNow = () => draft ?? props.value;
+  const signalOpts = { ownedWrite: true as const };
+  const [caret, setCaret] = createSignal(0, signalOpts), [anchor, setAnchor] = createSignal(0, signalOpts);
+  const [top, setTop] = createSignal(0, signalOpts), [left, setLeft] = createSignal(0, signalOpts), [focused, setFocused] = createSignal(false, signalOpts);
   const charWidth = measureText("M", "mono"), lineHeight = 14;
   const rows = () => Math.max(1, Math.floor((props.height - 8) / lineHeight));
   const columns = () => Math.max(1, Math.floor((props.width - 8) / charWidth));
@@ -23,35 +29,52 @@ export function TextEditor(props: TextEditorProps): JSX.Element {
   const location = (index: number) => { const row = Math.max(0, offsets().findIndex((start, row) => index <= start + lines()[row].length)); return {row, column: index - offsets()[row]}; };
   const indexAt = (row: number, column: number) => { row = Math.max(0, Math.min(lines().length - 1, row)); return offsets()[row] + Math.max(0, Math.min(lines()[row].length, column)); };
   function move(index: number, extend = false) {
-    index = Math.max(0, Math.min(props.value.length, index));
-    setCaret(index); if (!extend) setAnchor(index);
+    index = Math.max(0, Math.min(valueNow().length, index));
+    caretAt = index;
+    setCaret(index);
+    if (!extend) {
+      anchorAt = index;
+      setAnchor(index);
+    }
     const {row, column} = location(index);
     setTop(t => Math.max(0, row < t ? row : row >= t + rows() ? row - rows() + 1 : t));
     setLeft(l => Math.max(0, column < l ? column : column >= l + columns() ? column - columns() + 1 : l));
   }
-  createEffect(() => { props.value; if (caret() > props.value.length) move(props.value.length); });
-  createEffect(() => { const line = props.line; if (line !== undefined) untrack(() => move(indexAt(line - 1, 0))); });
-  const range = () => ({lo: Math.min(caret(), anchor()), hi: Math.max(caret(), anchor())});
+  createEffect(
+    () => ({ value: props.value, caret: caret() }),
+    ({ value, caret: at }) => {
+      if (draft === value) draft = null;
+      if (at > value.length) move(value.length);
+    },
+  );
+  createEffect(() => props.line, (line) => {
+    if (line === undefined || line === lastLine) return;
+    lastLine = line;
+    untrack(() => move(indexAt(line - 1, 0)));
+  });
+  const range = () => ({lo: Math.min(caretAt, anchorAt), hi: Math.max(caretAt, anchorAt)});
   function insert(text: string) {
     if (props.disabled) return;
     const {lo, hi} = range();
     text = text.replace(/\r\n?/g, "\n").replace(/\t/g, "  ");
-    props.onChange(props.value.slice(0, lo) + text + props.value.slice(hi));
+    const next = valueNow().slice(0, lo) + text + valueNow().slice(hi);
+    draft = next;
+    props.onChange(next);
     move(lo + text.length);
   }
   function key(key: string, mods: Modifiers) {
     if (props.disabled) return;
-    const command = mods.meta || mods.ctrl, {lo, hi} = range(), at = location(caret());
+    const command = mods.meta || mods.ctrl, {lo, hi} = range(), at = location(caretAt);
     if (command) {
-      if (key.toLowerCase() === "a") { setAnchor(0); move(props.value.length, true); }
+      if (key.toLowerCase() === "a") { anchorAt = 0; setAnchor(0); move(valueNow().length, true); }
       if (key.toLowerCase() === "c" || key.toLowerCase() === "x") {
-        void clipboard?.writeText(props.value.slice(lo, hi)).catch(() => {});
+        void clipboard?.writeText(valueNow().slice(lo, hi)).catch(() => {});
         if (key.toLowerCase() === "x" && clipboard) insert("");
       }
       return;
     }
-    if (key === "ArrowLeft") move(caret() - 1, mods.shift);
-    else if (key === "ArrowRight") move(caret() + 1, mods.shift);
+    if (key === "ArrowLeft") move(caretAt - 1, mods.shift);
+    else if (key === "ArrowRight") move(caretAt + 1, mods.shift);
     else if (key === "ArrowUp") move(indexAt(at.row - 1, at.column), mods.shift);
     else if (key === "ArrowDown") move(indexAt(at.row + 1, at.column), mods.shift);
     else if (key === "Home") move(indexAt(at.row, 0), mods.shift);
@@ -59,7 +82,11 @@ export function TextEditor(props: TextEditorProps): JSX.Element {
     else if (key === "Enter") insert("\n" + (lines()[at.row].match(/^ */)?.[0] ?? ""));
     else if (key === "Tab") insert("  ");
     else if (key === "Backspace" || key === "Delete") {
-      if (lo === hi) setAnchor(key === "Backspace" ? Math.max(0, caret() - 1) : Math.min(props.value.length, caret() + 1));
+      if (lo === hi) {
+        const next = key === "Backspace" ? Math.max(0, caretAt - 1) : Math.min(valueNow().length, caretAt + 1);
+        anchorAt = next;
+        setAnchor(next);
+      }
       insert("");
     }
   }

@@ -1,4 +1,5 @@
-import { createSignal, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
+import { createSignal, createEffect, createMemo, onSettled } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { Show } from "solid-js";
 import { getFocusManager } from "../focusContext";
 import { useUIServices } from "../services";
@@ -47,11 +48,30 @@ export function TextInput(props: TextInputProps): JSX.Element {
     props.initialCaretIndex !== undefined
       ? Math.max(0, Math.min(initialLen, Math.floor(props.initialCaretIndex)))
       : initialLen;
-  const [cursorPos, setCursorPos] = createSignal(initialCaret);
-  const [selStart, setSelStart] = createSignal<number | null>(null);
-  const [selEnd, setSelEnd] = createSignal<number | null>(null);
-  const [cursorVisible, setCursorVisible] = createSignal(true);
-  const [isFocused, setIsFocused] = createSignal(false);
+  // Locals stay current across staged Solid 2 writes so sequential keystrokes
+  // (keydown select-all, then keypress insert) see the caret we just moved.
+  let cursorAt = initialCaret;
+  let selLo: number | null = null;
+  let selHi: number | null = null;
+  let draft: string | null = null;
+  const valueNow = () => draft ?? props.value;
+  const signalOpts = { ownedWrite: true as const };
+  const [cursorPos, setCursorPos] = createSignal(initialCaret, signalOpts);
+  const [selStart, setSelStart] = createSignal<number | null>(null, signalOpts);
+  const [selEnd, setSelEnd] = createSignal<number | null>(null, signalOpts);
+
+  function writeCursor(n: number): void {
+    cursorAt = n;
+    setCursorPos(n);
+  }
+  function writeSel(start: number | null, end: number | null): void {
+    selLo = start;
+    selHi = end;
+    setSelStart(start);
+    setSelEnd(end);
+  }
+  const [cursorVisible, setCursorVisible] = createSignal(true, signalOpts);
+  const [isFocused, setIsFocused] = createSignal(false, signalOpts);
 
   const fontName = () => props.font ?? "body";
   const pad = () => props.padding ?? 2;
@@ -64,7 +84,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
   /** Pointer x (border-box local) → x within the content box. */
   const localToContentX = (lx: number) => lx - borderW() - pad();
   /** Horizontal pan so the caret stays inside the clipped content box. */
-  const [scrollX, setScrollX] = createSignal(0);
+  const [scrollX, setScrollX] = createSignal(0, signalOpts);
 
   // --- Focus management ---
   let isInitialFocus = true;
@@ -80,9 +100,8 @@ export function TextInput(props: TextInputProps): JSX.Element {
     if (props.selectAllOnFocus && isInitialFocus) {
       isInitialFocus = false;
       if (props.initialCaretIndex === undefined) {
-        setSelStart(0);
-        setSelEnd(props.value.length);
-        setCursorPos(props.value.length);
+        writeSel(0, props.value.length);
+        writeCursor(props.value.length);
       }
     }
   }
@@ -92,7 +111,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
     props.onBlur?.();
   }
 
-  onMount(() => {
+  onSettled(() => {
     if (props.autoFocus) {
       Promise.resolve().then(() => {
         if (rootNode) focusManager.focus(rootNode);
@@ -102,11 +121,14 @@ export function TextInput(props: TextInputProps): JSX.Element {
 
   // Cursor blink — the signal update triggers setProperty in the renderer,
   // which calls the repaint hook automatically. No explicit scheduleRender needed.
-  createEffect(() => {
-    if (!isFocused()) return;
-    const id = setInterval(() => setCursorVisible((v) => !v), 530);
-    onCleanup(() => clearInterval(id));
-  });
+  createEffect(
+    () => isFocused(),
+    (focused) => {
+      if (!focused) return;
+      const id = setInterval(() => setCursorVisible((v) => !v), 530);
+      return () => clearInterval(id);
+    },
+  );
 
   const resetBlink = () => setCursorVisible(true);
 
@@ -115,20 +137,27 @@ export function TextInput(props: TextInputProps): JSX.Element {
    * Terminal submit). The caret is local state — clamp it so Backspace
    * still deletes instead of walking phantom positions past the end.
    */
-  createEffect(() => {
-    const len = props.value.length;
-    if (cursorPos() > len) setCursorPos(len);
-    const ss = selStart();
-    const se = selEnd();
-    if (ss === null || se === null) return;
-    if (Math.min(ss, se) >= len || ss === se) {
-      setSelStart(null);
-      setSelEnd(null);
-      return;
-    }
-    if (ss > len) setSelStart(len);
-    if (se > len) setSelEnd(len);
-  });
+  createEffect(
+    () => ({
+      value: props.value,
+      len: props.value.length,
+      cursor: cursorPos(),
+      ss: selStart(),
+      se: selEnd(),
+    }),
+    ({ value, len, cursor, ss, se }) => {
+      if (draft === value) draft = null;
+      else if (draft !== null && draft.length !== len) draft = null;
+      if (cursor > len) writeCursor(len);
+      if (ss === null || se === null) return;
+      if (Math.min(ss, se) >= len || ss === se) {
+        writeSel(null, null);
+        return;
+      }
+      if (ss > len) writeSel(len, se > len ? len : se);
+      else if (se > len) writeSel(ss, len);
+    },
+  );
 
   // --- Display text ---
   const displayValue = () =>
@@ -157,52 +186,55 @@ export function TextInput(props: TextInputProps): JSX.Element {
     let end = idx;
     while (start > 0 && /\S/.test(text[start - 1])) start--;
     while (end < text.length && /\S/.test(text[end])) end++;
-    setSelStart(start);
-    setSelEnd(end);
-    setCursorPos(end);
+    writeSel(start, end);
+    writeCursor(end);
   }
 
   // --- Text insertion ---
   function insertText(chars: string): void {
     if (props.disabled) return;
     resetBlink();
-    const text = props.value;
-    const cur = cursorPos();
-    const ss = selStart();
-    const se = selEnd();
+    const text = valueNow();
+    const cur = cursorAt;
+    const ss = selLo;
+    const se = selHi;
 
     if (ss !== null && se !== null) {
       const lo = Math.min(ss, se), hi = Math.max(ss, se);
-      props.onChange(text.slice(0, lo) + chars + text.slice(hi));
-      setCursorPos(lo + chars.length);
-      setSelStart(null); setSelEnd(null);
+      const next = text.slice(0, lo) + chars + text.slice(hi);
+      draft = next;
+      props.onChange(next);
+      writeCursor(lo + chars.length);
+      writeSel(null, null);
     } else {
-      props.onChange(text.slice(0, cur) + chars + text.slice(cur));
-      setCursorPos(cur + chars.length);
+      const next = text.slice(0, cur) + chars + text.slice(cur);
+      draft = next;
+      props.onChange(next);
+      writeCursor(cur + chars.length);
     }
   }
 
   // --- Keyboard ---
   function handleKeyDown(key: string, mod: Modifiers): void {
     if (props.onInterrupt && mod.ctrl && key.toLowerCase() === "c") { props.onInterrupt(); return; }
-    if (!props.disabled && props.onHistory && (key === "ArrowUp" || key === "ArrowDown")) { props.onHistory(key === "ArrowUp" ? -1 : 1); setCursorPos(props.value.length); setSelStart(null); setSelEnd(null); resetBlink(); return; }
+    if (!props.disabled && props.onHistory && (key === "ArrowUp" || key === "ArrowDown")) { props.onHistory(key === "ArrowUp" ? -1 : 1); writeCursor(props.value.length); writeSel(null, null); resetBlink(); return; }
     if (props.disabled) return;
     resetBlink();
-    const text = props.value;
-    const cur = cursorPos();
-    const ss = selStart();
-    const se = selEnd();
+    const text = valueNow();
+    const cur = cursorAt;
+    const ss = selLo;
+    const se = selHi;
 
     if (key === "ArrowLeft") {
       if (mod.shift) {
         const anchor = ss ?? cur;
         const newCur = Math.max(0, cur - 1);
-        if (newCur < anchor) { setSelStart(newCur); setSelEnd(anchor); }
-        else { setSelStart(anchor); setSelEnd(newCur); }
-        setCursorPos(newCur);
+        if (newCur < anchor) writeSel(newCur, anchor);
+        else writeSel(anchor, newCur);
+        writeCursor(newCur);
       } else {
-        setSelStart(null); setSelEnd(null);
-        setCursorPos(ss !== null ? Math.min(ss, se ?? ss) : Math.max(0, cur - 1));
+        writeSel(null, null);
+        writeCursor(ss !== null ? Math.min(ss, se ?? ss) : Math.max(0, cur - 1));
       }
       return;
     }
@@ -210,48 +242,56 @@ export function TextInput(props: TextInputProps): JSX.Element {
       if (mod.shift) {
         const anchor = ss ?? cur;
         const newCur = Math.min(text.length, cur + 1);
-        if (newCur > anchor) { setSelStart(anchor); setSelEnd(newCur); }
-        else { setSelStart(newCur); setSelEnd(anchor); }
-        setCursorPos(newCur);
+        if (newCur > anchor) writeSel(anchor, newCur);
+        else writeSel(newCur, anchor);
+        writeCursor(newCur);
       } else {
-        setSelStart(null); setSelEnd(null);
-        setCursorPos(se !== null ? Math.max(ss ?? se, se) : Math.min(text.length, cur + 1));
+        writeSel(null, null);
+        writeCursor(se !== null ? Math.max(ss ?? se, se) : Math.min(text.length, cur + 1));
       }
       return;
     }
     if (key === "Home") {
-      setSelStart(null); setSelEnd(null); setCursorPos(0);
+      writeSel(null, null); writeCursor(0);
       return;
     }
     if (key === "End") {
-      setSelStart(null); setSelEnd(null); setCursorPos(text.length);
+      writeSel(null, null); writeCursor(text.length);
       return;
     }
     if (key === "Backspace") {
       if (ss !== null && se !== null) {
         const lo = Math.min(ss, se), hi = Math.max(ss, se);
-        props.onChange(text.slice(0, lo) + text.slice(hi));
-        setCursorPos(lo);
-        setSelStart(null); setSelEnd(null);
+        const next = text.slice(0, lo) + text.slice(hi);
+        draft = next;
+        props.onChange(next);
+        writeCursor(lo);
+        writeSel(null, null);
       } else if (cur > 0) {
-        props.onChange(text.slice(0, cur - 1) + text.slice(cur));
-        setCursorPos(cur - 1);
+        const next = text.slice(0, cur - 1) + text.slice(cur);
+        draft = next;
+        props.onChange(next);
+        writeCursor(cur - 1);
       }
       return;
     }
     if (key === "Delete") {
       if (ss !== null && se !== null) {
         const lo = Math.min(ss, se), hi = Math.max(ss, se);
-        props.onChange(text.slice(0, lo) + text.slice(hi));
-        setCursorPos(lo);
-        setSelStart(null); setSelEnd(null);
+        const next = text.slice(0, lo) + text.slice(hi);
+        draft = next;
+        props.onChange(next);
+        writeCursor(lo);
+        writeSel(null, null);
       } else if (cur < text.length) {
-        props.onChange(text.slice(0, cur) + text.slice(cur + 1));
+        const next = text.slice(0, cur) + text.slice(cur + 1);
+        draft = next;
+        props.onChange(next);
       }
       return;
     }
     if ((mod.ctrl || mod.meta) && key.toLowerCase() === "a") {
-      setSelStart(0); setSelEnd(text.length); setCursorPos(text.length);
+      writeSel(0, text.length); writeCursor(text.length);
       return;
     }
     if ((mod.ctrl || mod.meta) && key.toLowerCase() === "c") {
@@ -263,7 +303,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
     }
 
     if (key === "Enter" || key === "Return") {
-      props.onSubmit?.(props.value);
+      props.onSubmit?.(valueNow());
       return;
     }
     if (key === "Escape") {
@@ -295,9 +335,8 @@ export function TextInput(props: TextInputProps): JSX.Element {
     if (rootNode) focusManager.focus(rootNode);
     const idx = indexAtPointer(lx);
     dragAnchorIndex = idx;
-    setCursorPos(idx);
-    setSelStart(null);
-    setSelEnd(null);
+    writeCursor(idx);
+    writeSel(null, null);
   }
 
   function handleClick(lx: number): void {
@@ -307,8 +346,8 @@ export function TextInput(props: TextInputProps): JSX.Element {
     }
     if (rootNode) focusManager.focus(rootNode);
     const idx = indexAtPointer(lx);
-    setCursorPos(idx);
-    setSelStart(null); setSelEnd(null);
+    writeCursor(idx);
+    writeSel(null, null);
   }
 
   function handleDoubleClick(lx: number): void {
@@ -322,28 +361,27 @@ export function TextInput(props: TextInputProps): JSX.Element {
     const idx = indexAtPointer(lx);
     const lo = Math.min(dragAnchorIndex, idx);
     const hi = Math.max(dragAnchorIndex, idx);
-    if (lo === hi) {
-      setSelStart(null);
-      setSelEnd(null);
-    } else {
-      setSelStart(lo);
-      setSelEnd(hi);
-    }
-    setCursorPos(idx);
+    if (lo === hi) writeSel(null, null);
+    else writeSel(lo, hi);
+    writeCursor(idx);
   }
 
   // Keep the insertion point inside the clipped content box.
-  createEffect(() => {
-    const caret = charOffsetToPixels(cursorPos());
-    const view = contentWidth();
-    const maxScroll = Math.max(0, charOffsetToPixels(displayValue().length) - view);
-    setScrollX((prev) => {
-      let next = Math.min(prev, maxScroll);
-      if (caret < next) next = caret;
-      if (caret + 1 > next + view) next = caret + 1 - view;
-      return Math.max(0, Math.min(maxScroll, next));
-    });
-  });
+  createEffect(
+    () => ({
+      caret: charOffsetToPixels(cursorPos()),
+      view: contentWidth(),
+      maxScroll: Math.max(0, charOffsetToPixels(displayValue().length) - contentWidth()),
+    }),
+    ({ caret, view, maxScroll }) => {
+      setScrollX((prev) => {
+        let next = Math.min(prev, maxScroll);
+        if (caret < next) next = caret;
+        if (caret + 1 > next + view) next = caret + 1 - view;
+        return Math.max(0, Math.min(maxScroll, next));
+      });
+    },
+  );
 
   // --- Computed pixel positions ---
   // Nudge 1px left so the bar sits in the gap between glyphs (metrics skew it right).

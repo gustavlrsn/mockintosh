@@ -96,7 +96,7 @@ export default defineApp({ id: ${JSON.stringify(useAppId)}, title: "UseApp Probe
   // provider seam the project service uses, with actual module workers.
   const checks = await page.evaluate<{badType: BuildResult; badSDK: BuildResult; relative: BuildResult; forbidden: BuildResult; cancelled: boolean}>(`(async () => {
     const {browserBuilder} = await import(/* @vite-ignore */ "/src/platform/web/builder/index.ts");
-    const make = (text, extra = []) => ({requestId: "check", sourceRevision: "1", entry: "src/index.tsx", sdkVersion: "2", files: [{path: "src/index.tsx", text}, ...extra]});
+    const make = (text, extra = []) => ({requestId: "check", sourceRevision: "1", entry: "src/index.tsx", sdkVersion: "3", files: [{path: "src/index.tsx", text}, ...extra]});
     const cancellation = {check() {}, subscribe() { return () => {}; }};
     const badType = await browserBuilder.build(make('const n: number = "wrong"; export default n'), cancellation);
     const badSDK = await browserBuilder.build(make('import {Button} from "@mockintosh/ui"; export default <Button unknown={true}/>'), cancellation);
@@ -128,7 +128,7 @@ export default defineApp({ id: ${JSON.stringify(useAppId)}, title: "UseApp Probe
         const timeout = setTimeout(() => {worker.terminate(); reject(new Error("Production worker timed out"));}, 60000);
         worker.onmessage = event => {clearTimeout(timeout); worker.terminate(); resolve(event.data);};
         worker.onerror = event => {clearTimeout(timeout); worker.terminate(); reject(new Error(event.message));};
-        worker.postMessage({requestId: "production", sourceRevision: "1", entry: "src/index.tsx", sdkVersion: "2", files: [{path: "src/index.tsx", text: source}]});
+        worker.postMessage({requestId: "production", sourceRevision: "1", entry: "src/index.tsx", sdkVersion: "3", files: [{path: "src/index.tsx", text: source}]});
       });
       if (result.diagnostics.length) return result;
       const url = URL.createObjectURL(new Blob([result.code], {type: "text/javascript"}));

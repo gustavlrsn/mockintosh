@@ -1,4 +1,4 @@
-import { JSX } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { useOS } from "../context";
 import { FinderDesktop } from "../../../apps/Finder.solid";
 import { desktopFill } from "../resourceCatalog/catalog";

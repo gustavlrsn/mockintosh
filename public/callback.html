@@ -6,8 +6,14 @@
   var params = new URLSearchParams(window.location.search);
   var code = params.get("code");
   var error = params.get("error");
+  var payload = { type: "spotify-callback", code: code, error: error };
+  try {
+    var channel = new BroadcastChannel("mockintosh-authorize");
+    channel.postMessage(payload);
+    channel.close();
+  } catch (e) {}
   if (window.opener) {
-    window.opener.postMessage({ type: "spotify-callback", code: code, error: error }, "*");
+    window.opener.postMessage(payload, "*");
   }
   window.close();
 </script>

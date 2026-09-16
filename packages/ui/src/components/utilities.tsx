@@ -1,4 +1,4 @@
-import { type JSX } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import type { Ink } from "../nodes";
 
 export function Divider(props: { color?: Ink }): JSX.Element {

@@ -1,5 +1,6 @@
 import { appleMenu, runMenuItem, runRadioItem } from "../kernel/menus";
-import { JSX, For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { measureText, COMMAND_KEY, CHECK_MARK } from "@mockintosh/ui";
 import { useOS } from "../context";
 import {

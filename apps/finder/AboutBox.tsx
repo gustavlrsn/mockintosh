@@ -2,7 +2,7 @@
  * "About This Macintosh…" — the Finder's About box. A Finder-owned dialog
  * window, as in System 7; there is no standalone About program.
  */
-import type { JSX } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { For } from "solid-js";
 import pkg from "../../package.json";
 import { useApp } from "@mockintosh/sdk";

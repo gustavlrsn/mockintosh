@@ -1,4 +1,5 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { Button, type Ink } from "@mockintosh/ui";
 import { useApp, defineApp } from "@mockintosh/sdk";
 import {
@@ -52,7 +53,7 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   const { storage } = app;
   const CLIENT_ID = app.env.config.SPOTIFY_CLIENT_ID ?? "";
   const REDIRECT_URI = spotifyRedirectUri(app.env.origin);
-  const [tokens, setTokens] = createSignal<SpotifyTokens | null>(null);
+  const [tokens, setTokens] = createSignal<SpotifyTokens | null>(null, { ownedWrite: true });
   const [playlists, setPlaylists] = createSignal<SpotifyPlaylist[]>([]);
   const [selected, setSelected] = createSignal(-1);
   const [player, setPlayer] = createSignal<PlayerState | null>(null);
@@ -78,28 +79,39 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
     },
   };
 
-  onMount(async () => {
+  const storedTokens = createMemo(async () => {
     const raw = await storage.read(TOKENS_KEY);
-    if (raw === null) return;
+    if (raw === null) return null;
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (isSpotifyTokens(parsed)) setTokens(parsed);
+      return isSpotifyTokens(parsed) ? parsed : null;
     } catch {
       await storage.remove(TOKENS_KEY);
+      return null;
     }
   });
+  createEffect(
+    () => storedTokens(),
+    (parsed) => {
+      if (parsed) setTokens(parsed);
+    },
+  );
 
   let codeVerifier = "";
   let deviceId: string | null = null;
   let sdkPlayer: { connect: () => Promise<void>; disconnect: () => void; setVolume: (v: number) => void; addListener: Function } | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-  createEffect(() => {
-    session.tokens = tokens();
-  });
+  createEffect(
+    () => tokens(),
+    (t) => {
+      session.tokens = t;
+    },
+  );
 
-  createEffect(() => {
-    const t = tokens();
+  createEffect(
+    () => tokens(),
+    (t) => {
     if (!t) return;
     void (async () => {
       try {
@@ -158,12 +170,14 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
     void fetchPlaylists(session).then((pls) => {
       if (pls.length) setPlaylists(pls);
     });
-  });
+    },
+  );
 
   // OAuth return is handled in startBrowser via `browser.authorize`.
 
-  createEffect(() => {
-    const flow = deviceFlow();
+  createEffect(
+    () => deviceFlow(),
+    (flow) => {
     if (!flow || flow.status !== "qr") return;
     const intervalMs = (flow.interval || 5) * 1000;
     pollTimer = setInterval(async () => {
@@ -190,11 +204,12 @@ function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
         /* keep polling */
       }
     }, intervalMs);
-    onCleanup(() => {
+    return () => {
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = null;
-    });
-  });
+    };
+    },
+  );
 
   onCleanup(() => {
     if (pollTimer) clearInterval(pollTimer);

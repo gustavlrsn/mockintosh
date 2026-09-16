@@ -1,5 +1,6 @@
-import { ErrorBoundary } from "solid-js";
-import { For, JSX, Show, createSignal, createMemo } from "solid-js";
+import { Errored, isPending } from "solid-js";
+import { For, Show, createSignal, createMemo } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { useOS } from "../context";
 import {
   getActiveWindowId,
@@ -48,7 +49,12 @@ interface WindowProps {
 
 export function Window(props: WindowProps): JSX.Element {
   const os = useOS();
-  const isActive = () => getActiveWindowId() === props.win.id;
+  const windowId = props.win.id;
+  const minH = props.win.minHeight ?? 60;
+  let bandHeader = props.win.headerHeight ?? 0;
+  let bandFooter = props.win.footerHeight ?? 0;
+  let bodyHeight = props.win.height;
+  const isActive = () => getActiveWindowId() === windowId;
 
   // Close / zoom box press tracking (signals so the sprite re-renders)
   const [closePressed, setClosePressed] = createSignal(false);
@@ -71,8 +77,12 @@ export function Window(props: WindowProps): JSX.Element {
   const bandH = createMemo(() => headerBandHeight(props.win));
   const footH = createMemo(() => footerBandHeight(props.win));
   const totalH = createMemo(() => windowTotalHeight(props.win));
-  const [headerView, setHeaderView] = createSignal<(() => JSX.Element) | null>(null);
-  const [footerView, setFooterView] = createSignal<(() => JSX.Element) | null>(null);
+  const [headerView, setHeaderView] = createSignal<(() => JSX.Element) | null>(null, {
+    ownedWrite: true,
+  });
+  const [footerView, setFooterView] = createSignal<(() => JSX.Element) | null>(null, {
+    ownedWrite: true,
+  });
 
   // Interior geometry (inside the outer hairline) — all children use these.
   const innerW = createMemo(() => props.win.width - 2 * outer());
@@ -88,6 +98,7 @@ export function Window(props: WindowProps): JSX.Element {
 
   // Title metrics — needed for the white clearance behind the title
   const titleW = createMemo(() => measureText(props.win.title, "menu"));
+  const titlePending = () => isPending(() => props.win.props);
   const titleX = createMemo(() => Math.floor((innerW() - titleW()) / 2));
 
   // Close/zoom boxes and stripes within the title bar interior
@@ -117,13 +128,12 @@ export function Window(props: WindowProps): JSX.Element {
   });
 
   function applyBandHeight(field: "headerHeight" | "footerHeight", next: number): void {
-    const prev = props.win[field] ?? 0;
+    const prev = field === "headerHeight" ? bandHeader : bandFooter;
     if (prev === next) return;
-    const minH = props.win.minHeight ?? 60;
-    updateOSWindow(props.win.id, {
-      [field]: next,
-      height: Math.max(minH, props.win.height + prev - next),
-    });
+    if (field === "headerHeight") bandHeader = next;
+    else bandFooter = next;
+    bodyHeight = Math.max(minH, bodyHeight + prev - next);
+    updateOSWindow(windowId, { [field]: next, height: bodyHeight });
   }
 
   function spriteSrc(s: ReturnType<typeof os.sprites.get>) {
@@ -403,7 +413,7 @@ export function Window(props: WindowProps): JSX.Element {
             align="center"
             verticalAlign="middle"
           >
-            {props.win.title}
+            {titlePending() ? `${props.win.title}…` : props.win.title}
           </text>
         </box>
         </Show>
@@ -698,25 +708,26 @@ function WindowContent(props: {
   slots: import("@mockintosh/sdk").WindowSlots;
 }): JSX.Element {
   const os = useOS();
+  const windowId = props.win.id;
   /** The window's own component when it was opened with one, else its app's main component. */
   const component = () => props.win.Component ?? getApp(props.win.appId)?.Component;
   const modalFront = () => isBlockedByModal(props.win, getWindows());
 
   const api: WindowAPI = {
-    id: props.win.id,
+    id: windowId,
     win: props.win,
     width: () => windowContentWidth(props.win),
     height: () => props.win.height,
-    isActive: () => getActiveWindowId() === props.win.id,
+    isActive: () => getActiveWindowId() === windowId,
     scrollY: () => props.win.scrollY,
     kind: () => props.win.kind,
-    setTitle: (title) => updateOSWindow(props.win.id, { title }),
+    setTitle: (title) => updateOSWindow(windowId, { title }),
     setContentSize: (width, height) =>
-      updateOSWindow(props.win.id, { contentWidth: width, contentHeight: height }),
-    setInfoBar: (items) => updateOSWindow(props.win.id, { infoBar: items ?? undefined }),
-    setMenus: (menus) => updateOSWindow(props.win.id, { menus }),
-    setFullScreen: (on) => setWindowFullScreen(props.win.id, on, os.resolution),
-    close: () => os.closeWindow(props.win.id),
+      updateOSWindow(windowId, { contentWidth: width, contentHeight: height }),
+    setInfoBar: (items) => updateOSWindow(windowId, { infoBar: items ?? undefined }),
+    setMenus: (menus) => updateOSWindow(windowId, { menus }),
+    setFullScreen: (on) => setWindowFullScreen(windowId, on, os.resolution),
+    close: () => os.closeWindow(windowId),
   };
 
   // SDK-facing services for this window: the app context plus the window.
@@ -740,21 +751,22 @@ function WindowContent(props: {
   };
 
   return (
-    <WindowCtx.Provider value={api}>
-      <AppServicesContext.Provider value={services}>
-      <WindowSlotsContext.Provider value={props.slots}>
+    <WindowCtx value={api}>
+      <AppServicesContext value={services}>
+      <WindowSlotsContext value={props.slots}>
       <box width="100%" height="100%" inert={modalFront()}>
-        <ErrorBoundary fallback={error => {
-          if (props.win.instanceId) os.instances?.fail(props.win.instanceId, error);
-          return <text wrap>{`Application failed: ${String(error)}`}</text>;
+        <Errored fallback={error => {
+          const err = error();
+          if (props.win.instanceId) os.instances?.fail(props.win.instanceId, err);
+          return <text wrap>{`Application failed: ${String(err)}`}</text>;
         }}>
         <Show when={component()} keyed>
           {(Comp) => <Comp {...props.win.props} />}
         </Show>
-        </ErrorBoundary>
+        </Errored>
       </box>
-      </WindowSlotsContext.Provider>
-      </AppServicesContext.Provider>
-    </WindowCtx.Provider>
+      </WindowSlotsContext>
+      </AppServicesContext>
+    </WindowCtx>
   );
 }

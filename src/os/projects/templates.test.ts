@@ -13,7 +13,7 @@ describe("project templates", () => {
         requestId: name,
         sourceRevision: "1",
         entry: "src/index.tsx",
-        sdkVersion: "2",
+        sdkVersion: "3",
         files: [{ path: "src/index.tsx", text: source }],
       });
       expect(result.diagnostics, name).toEqual([]);

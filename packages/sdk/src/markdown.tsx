@@ -1,4 +1,5 @@
-import { For, useContext, type JSX } from "solid-js";
+import { For, useContext } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { parseMarkdown, type LayoutNode, type InlineSegment } from "@mockintosh/markdown";
 import { AppServicesContext } from "./index";
 

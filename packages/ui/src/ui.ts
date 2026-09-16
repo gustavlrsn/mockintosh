@@ -25,8 +25,8 @@ import type { CanvasNode, Modifiers } from "./nodes";
 import type { FocusManager } from "./focus";
 import { type BitMap, type GrafPort } from "@mockintosh/quickdraw";
 import { bitMapHeight, bitMapWidth } from "@mockintosh/quickdraw/bits";
-import type { JSX } from "solid-js";
-import { createComponent as solidCreateComponent } from "solid-js";
+import { flush } from "solid-js";
+import type { JSX } from "./jsx-runtime";
 import { UIServicesContext, type UIServices } from "./services";
 
 export interface UIConfig {
@@ -122,8 +122,23 @@ export function createUI(config: UIConfig): UIInstance {
 
   let autoFocusApplied = false;
 
+  let flushing = false;
+  function uiFlush(): void {
+    if (flushing) return;
+    flushing = true;
+    try {
+      flush();
+    } finally {
+      flushing = false;
+    }
+  }
+
   const instance: UIInstance = {
-    inspect() { if (root._dirty) computeLayout(root, width, height, measureFunc); return inspectTree(root, focusManager); },
+    inspect() {
+      uiFlush();
+      if (root._dirty) computeLayout(root, width, height, measureFunc);
+      return inspectTree(root, focusManager);
+    },
     render(component: () => JSX.Element): () => void {
       let disposed = false;
       const focusContextValue = {
@@ -133,13 +148,13 @@ export function createUI(config: UIConfig): UIInstance {
 
       const cleanup = render(
         () =>
-          solidCreateComponent(UIServicesContext.Provider, {
+          UIServicesContext({
             value: services,
             get children() {
-              return solidCreateComponent(MeasureContext.Provider, {
+              return MeasureContext({
                 value: measureApi,
                 get children() {
-                  return solidCreateComponent(FocusContext.Provider, {
+                  return FocusContext({
                     value: focusContextValue,
                     get children() {
                       return component();
@@ -154,13 +169,17 @@ export function createUI(config: UIConfig): UIInstance {
 
       if (!autoFocusApplied) {
         autoFocusApplied = true;
-        Promise.resolve().then(() => { if (!disposed) applyAutoFocus(root, focusManager); });
+        Promise.resolve().then(() => {
+          uiFlush();
+          if (!disposed) applyAutoFocus(root, focusManager);
+        });
       }
 
       return () => { disposed = true; cleanup(); };
     },
 
     frame(): void {
+      uiFlush();
       if (root._dirty) {
         computeLayout(root, width, height, measureFunc);
       }
@@ -169,6 +188,7 @@ export function createUI(config: UIConfig): UIInstance {
 
     dispatchPointer(type, x, y, extras) {
       pointer.dispatch(type, x, y, extras);
+      uiFlush();
     },
 
     dispatchKeyboard(
@@ -177,11 +197,13 @@ export function createUI(config: UIConfig): UIInstance {
       modifiers?: Partial<Modifiers>
     ): void {
       const mods: Modifiers = { ...DEFAULT_MODIFIERS, ...modifiers };
+      uiFlush();
       try {
         focusManager.dispatchKeyboard(type, key, mods);
       } catch (error) {
         services.onError?.(error);
       }
+      uiFlush();
     },
 
     registerFont(name: string, data: string): void {

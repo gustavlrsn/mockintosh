@@ -69,7 +69,7 @@ function sourceMap(): string {
     "- JSX props → /system/source/packages/ui/src/jsx.d.ts and nodes.ts",
     "- SDK contract → /system/source/packages/sdk/src/index.ts",
     "- architecture → /system/source/ARCHITECTURE.md",
-    "- in-OS project mockintosh.json → {id, title, entry: \"src/index.tsx\", sdkVersion: \"2\"} only. author/icon/description/sdk belong to the App Store catalog, not this file. See /system/source/packages/sdk/docs/APP_DEV_GUIDE.md",
+    "- in-OS project mockintosh.json → {id, title, entry: \"src/index.tsx\", sdkVersion: \"3\"} only. author/icon/description/sdk belong to the App Store catalog, not this file. See /system/source/packages/sdk/docs/APP_DEV_GUIDE.md",
     "- save to Desktop → fs.locate(\"desktop\") + writeFile(..., { type: MIME.text }). app.storage is not the Desktop. Photo Booth writes sprites the same way.",
     "",
     "SDK-clean exemplars:",

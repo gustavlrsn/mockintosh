@@ -1,4 +1,5 @@
-import { For, Show, type JSX } from "solid-js";
+import { For, Show } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { Button, Spacer, TextInput, createSignal } from "@mockintosh/ui";
 import type { DialogVariant } from "@mockintosh/sdk";
 import { useWindow } from "../windowContext";

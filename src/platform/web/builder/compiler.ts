@@ -1,16 +1,23 @@
-import {transform, registerPreset} from "@babel/standalone";
-import {version} from "@babel/standalone/package.json";
-import solid from "babel-preset-solid";
+import {transform} from "@solidjs/compiler-wasm32-wasi";
 import {rollup, VERSION} from "@rollup/browser";
 import {relativeImport, sharedBuildImports, validateSources} from "../../../shared/buildPolicy";
 import type {BuildRequest, BuildResult} from "../../../shared/buildContract";
 import ts from "typescript";
 import {typecheck} from "./typecheck";
-registerPreset("mockintosh-solid", solid);
+
+const SOLID_JSX = {generate: "universal" as const, moduleName: "@mockintosh/ui/renderer", sourceMap: true};
+
+function compileModule(code: string, id: string): {code: string; map?: string | null} {
+  const erased = ts.transpileModule(code, {
+    compilerOptions: {target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.Preserve},
+    fileName: id,
+  }).outputText;
+  return transform(erased, {filename: id.replace(/\.[cm]?[tj]sx?$/, ".jsx"), ...SOLID_JSX});
+}
 
 /** Source is checked and transformed, never evaluated in the compiler worker. */
 export async function compile(request: BuildRequest): Promise<BuildResult> {
-  const toolchain = `browser-typescript-${ts.version}/babel-${version}/rollup-${VERSION}/solid-universal-v1/sdk-2`;
+  const toolchain = `browser-typescript-${ts.version}/oxc-wasm/rollup-${VERSION}/solid-universal-v2/sdk-3`;
   try {
     validateSources(request);
     const diagnostics = typecheck(request);
@@ -29,11 +36,8 @@ export async function compile(request: BuildRequest): Promise<BuildResult> {
       },
       load: id => files.get(id),
       transform(code, id) {
-        const result = transform(code, {filename: id, sourceMaps: true, presets: [
-          ["mockintosh-solid", {generate: "universal", moduleName: "@mockintosh/ui/renderer"}],
-          ["typescript", {allExtensions: true, isTSX: /[jt]sx$/.test(id)}],
-        ]});
-        return {code: result.code!, map: result.map};
+        const result = compileModule(code, id);
+        return {code: result.code, map: result.map ?? undefined};
       },
     }]});
     try {

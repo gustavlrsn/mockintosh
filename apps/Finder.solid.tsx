@@ -11,7 +11,8 @@
  * Importing this module registers the Finder app (`FINDER_APP_ID`).
  */
 
-import { JSX, For, Show, createSignal, createMemo, createEffect, onCleanup, type Accessor } from "solid-js";
+import { For, Show, createSignal, createMemo, createEffect, onCleanup, type Accessor } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { measureText, TextInput, type MouseEventHandlers } from "@mockintosh/ui";
 import { useOS, type OSServices } from "../src/os/context";
 import {
@@ -670,16 +671,17 @@ export function handleGlobalMouseUp(
 
 export function FinderDesktop(): JSX.Element {
   const os = useOS();
+  const [selectedSet, setSelectedSet] = createSignal<Set<string>>(new Set(), { ownedWrite: true });
+  const [renamingNodeId, setRenamingNodeId] = createSignal<string | null>(null, { ownedWrite: true });
+  const [renameCaretIndex, setRenameCaretIndex] = createSignal(0, { ownedWrite: true });
 
   // The desktop owns the Finder's app-level menus (shown when no window, or a
   // window without its own menus, is active). Folder windows override per window.
-  createEffect(() => {
-    setAppMenus(FINDER_APP_ID, buildFinderMenus(os.fs, undefined, {os, selected: [...selectedSet()]}));
-  });
-
-  const [selectedSet, setSelectedSet] = createSignal<Set<string>>(new Set());
-  const [renamingNodeId, setRenamingNodeId] = createSignal<string | null>(null);
-  const [renameCaretIndex, setRenameCaretIndex] = createSignal(0);
+  // Signals used here must already be declared: compute runs synchronously.
+  createEffect(
+    () => buildFinderMenus(os.fs, undefined, {os, selected: [...selectedSet()]}),
+    (menus) => setAppMenus(FINDER_APP_ID, menus),
+  );
   const { marquee, handlers: marqueeHandlers } = createMarquee({
     onSelect: (m) => updateMarqueeSelection(m),
     onPlainClick: () => {
@@ -688,13 +690,14 @@ export function FinderDesktop(): JSX.Element {
     },
   });
 
-  createEffect(() => {
-    const sel = selectedSet();
-    const rn = renamingNodeId();
-    if (rn && (sel.size !== 1 || !sel.has(rn))) {
-      setRenamingNodeId(null);
-    }
-  });
+  createEffect(
+    () => ({ sel: selectedSet(), rn: renamingNodeId() }),
+    ({ sel, rn }) => {
+      if (rn && (sel.size !== 1 || !sel.has(rn))) {
+        setRenamingNodeId(null);
+      }
+    },
+  );
 
   const icons = createMemo(() => {
     return buildDesktopIcons(os.fs);
@@ -854,9 +857,9 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
   const os = useOS();
   const windowApi = useWindow();
   const win = windowApi.win;
-  const [selectedSet, setSelectedSet] = createSignal<Set<string>>(new Set());
-  const [renamingNodeId, setRenamingNodeId] = createSignal<string | null>(null);
-  const [renameCaretIndex, setRenameCaretIndex] = createSignal(0);
+  const [selectedSet, setSelectedSet] = createSignal<Set<string>>(new Set(), { ownedWrite: true });
+  const [renamingNodeId, setRenamingNodeId] = createSignal<string | null>(null, { ownedWrite: true });
+  const [renameCaretIndex, setRenameCaretIndex] = createSignal(0, { ownedWrite: true });
   const { marquee, handlers: marqueeHandlers } = createMarquee({
     onSelect: (m) => updateMarqueeSelection(m),
     onPlainClick: () => {
@@ -865,13 +868,14 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
     },
   });
 
-  createEffect(() => {
-    const sel = selectedSet();
-    const rn = renamingNodeId();
-    if (rn && (sel.size !== 1 || !sel.has(rn))) {
-      setRenamingNodeId(null);
-    }
-  });
+  createEffect(
+    () => ({ sel: selectedSet(), rn: renamingNodeId() }),
+    ({ sel, rn }) => {
+      if (rn && (sel.size !== 1 || !sel.has(rn))) {
+        setRenamingNodeId(null);
+      }
+    },
+  );
 
   const directoryId = () => props.directoryId;
 
@@ -893,12 +897,15 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
       .sort((a, b) => a.icon.zOrder - b.icon.zOrder);
   });
 
-  createEffect(() => {
-    const h = computeFolderContentHeight(icons(), cols());
-    if (h !== win.contentHeight) {
-      updateOSWindow(win.id, { contentHeight: h });
-    }
-  });
+  createEffect(
+    () => {
+      const h = computeFolderContentHeight(icons(), cols());
+      return { h, current: win.contentHeight };
+    },
+    ({ h, current }) => {
+      if (h !== current) updateOSWindow(win.id, { contentHeight: h });
+    },
+  );
 
   const folderIconOffsetX = Math.floor((FOLDER_ICON_CELL_W - ICON_SIZE) / 2);
 
@@ -953,9 +960,10 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
   const dirId = () => directoryId();
 
   // This window's menus reflect its folder (Clean Up) and the trash state.
-  createEffect(() => {
-    windowApi.setMenus(buildFinderMenus(os.fs, dirId(), {os, selected: [...selectedSet()]}));
-  });
+  createEffect(
+    () => buildFinderMenus(os.fs, dirId(), {os, selected: [...selectedSet()]}),
+    (menus) => windowApi.setMenus(menus),
+  );
 
   function handleScroll(dy: number): void {
     const maxY = Math.max(0, win.contentHeight - win.height);
@@ -1162,8 +1170,10 @@ function IconCell(props: IconCellProps): JSX.Element {
         wasSelectedBeforeMouseDown = props.isSelected();
         mouseDownLY = ly;
         if (ly >= ICON_SIZE) lastLabelMouseDownX = lx;
-        if (!props.isSelected()) props.onClick();
-        bumpZOrder(os.fs, ic.nodeId);
+        if (!wasSelectedBeforeMouseDown) {
+          props.onClick();
+          bumpZOrder(os.fs, ic.nodeId);
+        }
         pendingDragInfo = {
           nodeId:             ic.nodeId,
           sourceDirectoryId:  props.sourceDirectoryId(),
@@ -1199,8 +1209,10 @@ function IconCell(props: IconCellProps): JSX.Element {
               }
             }, RENAME_DELAY_MS);
           }
-          props.onClick();
-          bumpZOrder(os.fs, icon().nodeId);
+          if (!wasSelectedBeforeMouseDown) {
+            props.onClick();
+            bumpZOrder(os.fs, icon().nodeId);
+          }
         }
       }}
       onDoubleClick={() => {
@@ -1291,7 +1303,16 @@ function IconCell(props: IconCellProps): JSX.Element {
             }
           }
 
-          onCleanup(commit);
+          // Remounts (z-order, For reconcile) must not cancel rename or the
+          // field disappears before keystrokes arrive. Only commit a real edit.
+          onCleanup(() => {
+            if (committed) return;
+            const trimmed = renameValue().trim();
+            if (trimmed && trimmed !== icon().title) {
+              committed = true;
+              props.onCommitRename(trimmed);
+            }
+          });
 
           return (
             <box position="absolute" left={renameInputLeft()} top={ICON_SIZE} width={renameInputW()}>
@@ -1299,7 +1320,14 @@ function IconCell(props: IconCellProps): JSX.Element {
                 name="rename"
                 value={renameValue()}
                 onChange={setRenameValue}
-                onSubmit={() => commit()}
+                onSubmit={(v) => {
+                  setRenameValue(v);
+                  if (committed) return;
+                  committed = true;
+                  const trimmed = v.trim();
+                  if (trimmed && trimmed !== icon().title) props.onCommitRename(trimmed);
+                  else props.onCancelRename();
+                }}
                 onCancel={() => { committed = true; props.onCancelRename(); }}
                 onBlur={() => commit()}
                 font={FONT}
@@ -1404,7 +1432,8 @@ export function buildFinderMenus(fs: FileSystem, activeDirId?: string, selection
           shortcut: "N",
           disabled: !newFolderParent,
           onClick: () => {
-            if (newFolderParent) fs.mkdir(newFolderParent, fs.availableName(newFolderParent, "untitled folder"));
+            const parent = activeDirId ?? getDesktopFolderId(fs);
+            if (parent) fs.mkdir(parent, fs.availableName(parent, "untitled folder"));
           },
         },
         { type: "separator" },

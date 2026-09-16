@@ -1,4 +1,5 @@
-import {createSignal, onCleanup, onMount, type JSX} from "solid-js";
+import { createSignal, onCleanup, onSettled, action } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import {Button, TextInput, TextEditor} from "@mockintosh/ui";
 import {defineApp, jobSchema, parse, resource, useApp} from "@mockintosh/sdk";
 
@@ -23,7 +24,7 @@ function SourceEditor(props: {path?: string}): JSX.Element {
   let controller = new AbortController();
   const invoke = (name: string, args: Record<string, unknown>) => kernel.invoke(name, args, { signal: controller.signal });
   onCleanup(() => { closed = true; controller.abort(); });
-  async function action(work: () => Promise<void>) {
+  async function run(work: () => Promise<void>) {
     if (busy()) return;
     setBusy(true); controller.abort(); controller = new AbortController();
     try { await work(); } catch (error) { if (!closed) setStatus(error instanceof Error ? error.message : String(error)); }
@@ -39,12 +40,12 @@ function SourceEditor(props: {path?: string}): JSX.Element {
     if (closed) return;
     revision = after.revision; loadedPath = file; setText(body); setSaved(body); setLine(1); setStatus("Loaded");
   }
-  async function save() {
+  const save = action(function* () {
     if (revision === undefined || loadedPath !== path() + "/src/index.tsx") throw new Error("Load the project before saving");
     const body = text();
-    const file = parse(resource, await invoke("write", {path: loadedPath, body, expectedRevision: revision}));
+    const file = parse(resource, yield invoke("write", {path: loadedPath, body, expectedRevision: revision}));
     revision = file.revision; if (!closed) { setSaved(body); setStatus("Saved"); }
-  }
+  });
   async function build() {
     if (text() !== saved()) await save();
     let job = parse(jobSchema, await invoke("build_submit", {path: path()}));
@@ -58,15 +59,15 @@ function SourceEditor(props: {path?: string}): JSX.Element {
     await invoke("app_install", {path: path(), build: job.id});
     if (!closed) setStatus("Build installed and running");
   }
-  onMount(() => { if (props.path) void action(load); });
+  onSettled(() => { if (props.path) void run(load); });
   return <box width={app.window.width()} height={app.window.height()} padding={6} gap={5}>
     <TextInput name="source-project-path" value={path()} onChange={setPath} width={app.window.width() - 12} disabled={busy()} />
     <box flexDirection="row" gap={4}>
-      <Button name="source-create" label="New Counter" disabled={busy()} onClick={() => void action(async () => { await invoke("project_create", {path: path(), id: "counter", title: "Counter"}); await load(); })} />
-      <Button name="source-load" label="Load" disabled={busy()} onClick={() => void action(load)} />
-      <Button name="source-save" label="Save" disabled={busy() || text() === saved()} onClick={() => void action(save)} />
-      <Button name="source-build" label="Build & Run" disabled={busy() || revision === undefined} onClick={() => void action(build)} />
-      <Button name="source-restore" label="Restore" disabled={busy()} onClick={() => void action(async () => {
+      <Button name="source-create" label="New Counter" disabled={busy()} onClick={() => void run(async () => { await invoke("project_create", {path: path(), id: "counter", title: "Counter"}); await load(); })} />
+      <Button name="source-load" label="Load" disabled={busy()} onClick={() => void run(load)} />
+      <Button name="source-save" label="Save" disabled={busy() || text() === saved()} onClick={() => void run(save)} />
+      <Button name="source-build" label="Build & Run" disabled={busy() || revision === undefined} onClick={() => void run(build)} />
+      <Button name="source-restore" label="Restore" disabled={busy()} onClick={() => void run(async () => {
         const manifest = JSON.parse(await invoke("read", {path: path() + "/mockintosh.json"}) as string);
         await invoke("app_restore", {app: manifest.id}); setStatus("Previous build restored");
       })} />

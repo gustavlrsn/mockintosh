@@ -1,4 +1,5 @@
-import { createSignal, type JSX } from "solid-js";
+import { createSignal } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import type { Ink, LayoutStyle, PatternName } from "../nodes";
 
 /**

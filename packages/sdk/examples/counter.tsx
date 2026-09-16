@@ -55,16 +55,18 @@ export default defineApp({
     const [count, setCount] = createSignal(0);
     const [step, setStep] = createSignal(1);
 
-    createEffect(() => {
+    createEffect(
+      () => ({ count: count(), step: step() }),
+      ({ count: n, step: s }) => {
       app.setMenus([
         {
           label: "Counter",
           items: [
-            { label: "Reset", shortcut: "R", disabled: count() === 0, onClick: () => setCount(0) },
+            { label: "Reset", shortcut: "R", disabled: n === 0, onClick: () => setCount(0) },
             { type: "separator" },
             {
               type: "radiogroup",
-              value: String(step()),
+              value: String(s),
               onValueChange: (v) => setStep(Number(v)),
               items: [
                 { label: "Step by 1", value: "1" },
@@ -74,7 +76,8 @@ export default defineApp({
           ],
         },
       ]);
-    });
+      },
+    );
 
     return (
       <box padding={8} flexDirection="column" gap={8} background={0}>

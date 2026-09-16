@@ -4,7 +4,7 @@
  * events reach the UI through `bootOS`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { JSX } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { useApp, type AppContext, type AppServices } from "@mockintosh/sdk";
 import { createElement, setProp } from "@mockintosh/ui/renderer";
 import { bootOS, type BootedOS } from "./boot";
@@ -217,8 +217,9 @@ describe("bootOS on the headless platform", () => {
     platform.click(pos!.labelX, pos!.labelY);
     platform.tick();
     vi.advanceTimersByTime(350);
+    await os.render();
     await Promise.resolve(); // TextInput autoFocus is scheduled on a microtask
-    platform.tick();
+    await os.render();
 
     platform.key({ type: "down", key: "a", modifiers: meta });
     platform.key({ type: "up", key: "a", modifiers: meta });

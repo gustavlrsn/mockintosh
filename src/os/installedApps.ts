@@ -38,11 +38,21 @@ export interface AppInstallerOptions {
   loadModule: ModuleLoader;
 }
 
+function sdkMajor(sdk: string | undefined): number {
+  const m = sdk?.match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
 export function createAppInstaller(options: AppInstallerOptions): AppInstaller {
   const { fs, sprites, capabilities, loadModule } = options;
   const loaded = new Set<string>();
 
   async function load(manifest: AppManifest): Promise<SolidApp<any>> {
+    if (sdkMajor(manifest.sdk) < 3) {
+      throw new Error(
+        `"${manifest.title}" was built for SDK ${manifest.sdk || "2"}. Rebuild the project for SDK 3.`,
+      );
+    }
     if (loaded.has(manifest.id)) {
       const existing = getApp(manifest.id);
       if (existing) return existing;
@@ -65,6 +75,10 @@ export function createAppInstaller(options: AppInstallerOptions): AppInstaller {
       const loadable: AppManifest[] = [];
       for (const manifest of await readInstalledManifests(fs)) {
         const missing: Capability[] = missingCapabilities(manifest.requires, capabilities);
+        if (sdkMajor(manifest.sdk) < 3) {
+          registerUnavailableApp({ id: manifest.id, title: manifest.title, missing: [] });
+          continue;
+        }
         if (missing.length === 0) loadable.push(manifest);
         else registerUnavailableApp({ id: manifest.id, title: manifest.title, missing });
       }

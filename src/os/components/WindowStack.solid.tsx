@@ -1,4 +1,5 @@
-import { JSX, For, createMemo } from "solid-js";
+import { For, createMemo } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { getWindows } from "../state";
 import { sortWindowsForPaint } from "../layering";
 import { Window } from "./Window.solid";

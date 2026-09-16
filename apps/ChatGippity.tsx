@@ -1,4 +1,5 @@
-import { For, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { For, createSignal, createMemo, createEffect, onCleanup } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { Button, TextInput } from "@mockintosh/ui";
 import { useApp, defineApp } from "@mockintosh/sdk";
 import { allAgentTools, runAgent } from "@mockintosh/agent";
@@ -18,7 +19,7 @@ function ChatGippity(_props: Record<string, unknown>): JSX.Element {
   const fetch = app.fetch!;
   const kernel = app.kernel!;
   const tools = allAgentTools(kernel.describe());
-  const [lines, setLines] = createSignal<Line[]>([]);
+  const [lines, setLines] = createSignal<Line[]>([], { ownedWrite: true });
   const [draft, setDraft] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   let history: ChatMessage[] = [];
@@ -31,22 +32,28 @@ function ChatGippity(_props: Record<string, unknown>): JSX.Element {
     controller.abort();
   });
 
-  onMount(async () => {
+  const restored = createMemo(async () => {
     const raw = await app.storage.read(HISTORY_KEY);
-    if (!raw) return;
+    if (!raw) return null;
     try {
       const saved = JSON.parse(raw) as ChatMessage[];
-      if (Array.isArray(saved) && saved.length) {
-        history = saved;
-        mode = saved.some((m) => m.role === "assistant" && m.tool_calls?.some((c) => c.function.name === "project_create"))
-          ? "build"
-          : "chat";
-        setLines([{ kind: "assistant", text: "I still have our last session. Send a message to continue, or start a new request." }]);
-      }
+      return Array.isArray(saved) && saved.length ? saved : null;
     } catch {
       await app.storage.remove(HISTORY_KEY);
+      return null;
     }
   });
+  createEffect(
+    () => restored(),
+    (saved) => {
+      if (!saved) return;
+      history = saved;
+      mode = saved.some((m) => m.role === "assistant" && m.tool_calls?.some((c) => c.function.name === "project_create"))
+        ? "build"
+        : "chat";
+      setLines([{ kind: "assistant", text: "I still have our last session. Send a message to continue, or start a new request." }]);
+    },
+  );
 
   const invoke = (name: string, args: Record<string, unknown>, signal?: AbortSignal) =>
     kernel.invoke(name, args, { signal: signal ?? controller.signal });

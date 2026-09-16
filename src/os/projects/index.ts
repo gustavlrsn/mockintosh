@@ -12,7 +12,7 @@ import type {Platform} from "../../platform/types";
 import {parseBuildResult, projectPath, jobSchema, type BuildProvider, type Job} from "../../shared/buildContract";
 import * as s from "../kernel/schema";
 
-const manifestSchema = s.object({id: s.string, title: s.string, entry: s.string, sdkVersion: {enum: ["2"]}});
+const manifestSchema = s.object({id: s.string, title: s.string, entry: s.string, sdkVersion: {enum: ["3"]}});
 const selectionSchema = s.object({projectId: s.string, app: s.string, build: s.string, previous: s.string}, ["projectId", "app", "build"]);
 const selectionsSchema = s.array(selectionSchema);
 const artifactSchema = s.object({id: s.string, sourceRevision: s.string, codeRevision: s.integer, toolchain: s.string});
@@ -99,7 +99,7 @@ export class ProjectService {
     await e.disk.mkdir(path);
     await e.disk.mkdir(path + "/src");
     await e.disk.mkdir(path + "/dist");
-    await e.disk.write(path + "/mockintosh.json", encoder.encode(JSON.stringify({id, title, entry: "src/index.tsx", sdkVersion: "2"}, null, 2)), 0);
+    await e.disk.write(path + "/mockintosh.json", encoder.encode(JSON.stringify({id, title, entry: "src/index.tsx", sdkVersion: "3"}, null, 2)), 0);
     await e.disk.write(path + "/src/index.tsx", encoder.encode(sourceForTemplate(template, id, title)), 0);
     await e.disk.write(path + "/README.md", encoder.encode("Edit src/index.tsx, build, then install. Restore switches to the previous successful build.\n"), 0);
     return e.disk.stat(path);
@@ -143,7 +143,7 @@ export class ProjectService {
       requestId: `check-${this.kernel.instance}-${++this.sequence}`,
       sourceRevision,
       entry: manifest.entry,
-      sdkVersion: "2",
+      sdkVersion: "3",
       files,
     });
     return { diagnostics };
@@ -165,7 +165,7 @@ export class ProjectService {
     for (const [key, prior] of this.jobs) if (this.jobs.size > 64 && prior.value.state !== "building") this.jobs.delete(key);
     void (async () => {
       try {
-        const result = parseBuildResult(await builder.build({requestId: id, sourceRevision, entry: manifest.entry, sdkVersion: "2", files}, token));
+        const result = parseBuildResult(await builder.build({requestId: id, sourceRevision, entry: manifest.entry, sdkVersion: "3", files}, token));
         token.check();
         if (result.code === undefined || result.diagnostics.length) {
           entry.value = {...entry.value, state: "failed", diagnostics: result.diagnostics};

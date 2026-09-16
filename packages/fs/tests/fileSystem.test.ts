@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createRoot, createMemo, createEffect } from "solid-js";
+import { createRoot, createMemo, createEffect, flush, resolve } from "solid-js";
 import { FileSystem, InMemoryBackend, ROOT_ID, MIME, FSError, type FSBackend } from "../src";
 
 let idCounter = 0;
@@ -178,14 +178,19 @@ describe("FileSystem — reactivity", () => {
         expect(desktopNames()).toEqual([]);
 
         await fs.writeFile(desktop.id, "a.txt", "");
+        flush();
+        await resolve(() => desktopNames());
         expect(desktopNames()).toEqual(["a.txt"]);
         expect(desktopRuns).toBe(2);
         expect(trashRuns).toBe(1);
 
         fs.mkdir(hd.id, "Unrelated");
+        flush();
         expect(desktopRuns).toBe(2);
 
         fs.rename(fs.child(desktop.id, "a.txt")!.id, "b.txt");
+        flush();
+        await resolve(() => desktopNames());
         expect(desktopNames()).toEqual(["b.txt"]);
         expect(trashRuns).toBe(1);
         dispose();
@@ -194,22 +199,26 @@ describe("FileSystem — reactivity", () => {
     );
   });
 
-  it("batch() coalesces mutations into one reactive update", async () => {
+  it("batch() still persists once while each mutation is visible immediately", async () => {
     const { fs, hd } = await openMac();
     let runs = 0;
     createRoot(() => {
-      createEffect(() => {
-        fs.children(hd.id);
-        runs++;
-      });
+      createEffect(
+        () => { fs.children(hd.id); },
+        () => { runs++; },
+      );
     });
+    flush();
     expect(runs).toBe(1);
     fs.batch(() => {
       fs.mkdir(hd.id, "A");
       fs.mkdir(hd.id, "B");
       fs.mkdir(hd.id, "C");
     });
-    expect(runs).toBe(2);
+    flush();
+    // commit() flushes the store after every mutation so mkdir/writeFile
+    // return live nodes. batch() only coalesces catalog persistence.
+    expect(runs).toBe(4);
   });
 });
 

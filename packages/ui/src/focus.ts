@@ -9,7 +9,7 @@
  * - `onFocus` fires on the newly focused node; `onBlur` fires on the old one.
  */
 
-import { createSignal, type Accessor } from "solid-js";
+import { createSignal, flush, type Accessor } from "solid-js";
 import type { CanvasNode, EventHandlers, Modifiers } from "./nodes";
 
 export interface FocusManager {
@@ -31,7 +31,9 @@ export interface FocusManager {
 }
 
 export function createFocusManager(root: CanvasNode): FocusManager {
-  const [focusedNode, setFocusedNode] = createSignal<CanvasNode | null>(null);
+  const [focusedNode, setFocusedNode] = createSignal<CanvasNode | null>(null, {
+    ownedWrite: true,
+  });
   let activeScope: CanvasNode | null = null;
   const lastFocusedInScope = new WeakMap<CanvasNode, CanvasNode>();
 
@@ -65,6 +67,7 @@ export function createFocusManager(root: CanvasNode): FocusManager {
       if (current === node) return;
       if (current) current._eventHandlers.onBlur?.();
       setFocusedNode(node);
+      flush();
       node._eventHandlers.onFocus?.();
       if (activeScope) lastFocusedInScope.set(activeScope, node);
     },
@@ -87,6 +90,7 @@ export function createFocusManager(root: CanvasNode): FocusManager {
       if (!current) return;
       current._eventHandlers.onBlur?.();
       setFocusedNode(null);
+      flush();
     },
 
     focusNext(): void {

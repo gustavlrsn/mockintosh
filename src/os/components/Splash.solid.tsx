@@ -1,4 +1,5 @@
-import { JSX, createSignal } from "solid-js";
+import { createSignal } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { useOS } from "../context";
 
 interface SplashProps {

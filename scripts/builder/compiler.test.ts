@@ -1,7 +1,7 @@
 import {describe, expect, it} from "vitest";
 import {compile} from "./compiler";
 import {counterSource} from "../../src/os/projects";
-const request = (text: string) => ({requestId: "test", sourceRevision: "one", entry: "src/index.tsx", sdkVersion: "2" as const, files: [{path: "src/index.tsx", text}]});
+const request = (text: string) => ({requestId: "test", sourceRevision: "one", entry: "src/index.tsx", sdkVersion: "3" as const, files: [{path: "src/index.tsx", text}]});
 describe("fixed app compiler", () => {
   it("typechecks and compiles Counter against the shared universal runtime", async () => {
     const result = await compile(request(counterSource("counter_test", "Counter")));

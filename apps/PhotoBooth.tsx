@@ -1,4 +1,5 @@
-import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onSettled } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { Button, type Ink, type RasterSurface } from "@mockintosh/ui";
 import {
   createDitherer,
@@ -161,9 +162,16 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
     win.setFullScreen(!isFullScreen());
   }
 
-  createEffect(() => {
-    const viewing = viewingPhoto();
-    const counting = countdown() !== null;
+  createEffect(
+    () => ({
+      viewing: viewingPhoto(),
+      counting: countdown() !== null,
+      loading: loading(),
+      errorText: errorText(),
+      isFullScreen: isFullScreen(),
+      ditherMode: ditherMode(),
+    }),
+    ({ viewing, counting, loading: isLoading, errorText: err, isFullScreen: full, ditherMode: mode }) => {
     app.setMenus([
       {
         label: "File",
@@ -171,7 +179,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
           {
             label: "Take Photo",
             shortcut: "T",
-            disabled: counting || viewing !== null || loading() || !!errorText(),
+            disabled: counting || viewing !== null || isLoading || !!err,
             onClick: () => startCountdown(),
           },
         ],
@@ -180,7 +188,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
         label: "View",
         items: [
           {
-            label: isFullScreen() ? "Exit Full Screen" : "Full Screen",
+            label: full ? "Exit Full Screen" : "Full Screen",
             shortcut: "F",
             onClick: toggleFullScreen,
           },
@@ -191,7 +199,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
         items: [
           {
             type: "radiogroup",
-            value: ditherMode(),
+            value: mode,
             onValueChange: (v) => setDitherMode(v as DitherMode),
             items: [
               { label: "Atkinson", value: "atkinson" },
@@ -201,9 +209,10 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
         ],
       },
     ]);
-  });
+    },
+  );
 
-  onMount(() => {
+  onSettled(() => {
     void startCamera();
   });
 

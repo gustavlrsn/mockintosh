@@ -4,7 +4,7 @@ import {join, resolve, dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 import ts from "typescript";
 import {build, version as viteVersion} from "vite";
-import solid from "vite-plugin-solid";
+import solid from "@solidjs/vite-plugin";
 import type {BuildRequest, BuildResult} from "../../src/shared/buildContract";
 import {compilerOptions, sharedBuildImports as shared, validateSources} from "../../src/shared/buildPolicy";
 import {APP_ENV_DTS} from "../../src/shared/appEnv";
@@ -35,7 +35,7 @@ export async function typecheckRequest(request: BuildRequest, directory?: string
 
 /** Fixed compiler configuration. Source is parsed/typechecked/bundled, never executed here. */
 export async function compile(request: BuildRequest, directory?: string): Promise<BuildResult> {
-  const toolchain = `typescript-${ts.version}/vite-${viteVersion}/solid-universal-v1/sdk-2`;
+  const toolchain = `typescript-${ts.version}/vite-${viteVersion}/solid-universal-v2/sdk-3`;
   const root = directory ?? await mkdtemp(join(tmpdir(), "mockintosh-build-"));
   try {
     validateSources(request);

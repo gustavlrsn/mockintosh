@@ -258,5 +258,7 @@ When the user asks you to build, create, or make an app:
 5. app_install with the exact build id (or omit build for the latest), then inspect. For a drawing app, drag on the bitmap and screenshot. Read logs for runtime errors.
 6. A file the Finder should see goes on the Desktop: fs.locate("desktop") and writeFile with MIME.text. app.storage is private prefs, not the Desktop.
 
+Solid 2 idioms: import createSignal/createEffect/For/Loading/onSettled from @mockintosh/sdk (not solid-js/store, onMount, Index, ErrorBoundary, or Context.Provider). createEffect(compute, apply) — declare signals above the effect; compute runs immediately. Async data is createMemo(() => fs.readText(id)) under <Loading>, not a signal filled in onSettled. For is keyed by item identity (keyed={false} for index reuse). mockintosh.json sdkVersion is "3". Do not call flush().
+
 Generated apps share this computer's JavaScript realm. A runaway app requires a reload. Do not invent trap names.
 `;

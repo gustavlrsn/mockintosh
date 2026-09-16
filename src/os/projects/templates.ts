@@ -1,9 +1,7 @@
 export type ProjectTemplate = "counter" | "blank" | "canvas";
 
 export function counterSource(id: string, title: string): string {
-  return `import { createSignal } from "solid-js";
-import { defineApp } from "@mockintosh/sdk";
-import { Button } from "@mockintosh/ui";
+  return `import { defineApp, createSignal, Button } from "@mockintosh/sdk";
 function Counter() {
   const [count, setCount] = createSignal(0);
   return <box padding={12} gap={8}>
@@ -36,9 +34,7 @@ export default defineApp({
 }
 
 export function canvasSource(id: string, title: string): string {
-  return `import { createSignal } from "solid-js";
-import { defineApp } from "@mockintosh/sdk";
-import { Button } from "@mockintosh/ui";
+  return `import { defineApp, createSignal, Button } from "@mockintosh/sdk";
 
 const W = 200;
 const H = 140;

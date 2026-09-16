@@ -1,4 +1,5 @@
-import { createSignal, onCleanup, type JSX } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { TextInput } from "@mockintosh/ui";
 import { defineApp, useApp } from "@mockintosh/sdk";
 

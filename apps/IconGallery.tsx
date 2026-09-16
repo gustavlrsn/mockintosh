@@ -1,4 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { TextInput } from "@mockintosh/ui";
 import { WindowFooter, WindowHeader, defineApp, useApp, type Sprite } from "@mockintosh/sdk";
 import {
@@ -82,9 +83,10 @@ function IconGallery(_props: Record<string, unknown>): JSX.Element {
     return n === 0 ? 0 : n * CELL_H + (n - 1) * CELL_GAP;
   });
 
-  createEffect(() => {
-    win.setContentSize(win.width(), contentHeight());
-  });
+  createEffect(
+    () => ({ width: win.width(), height: contentHeight() }),
+    ({ width, height }) => win.setContentSize(width, height),
+  );
 
   return (
     <>

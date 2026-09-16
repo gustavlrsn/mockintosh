@@ -41,7 +41,7 @@ function compileApp(entry: BundledAppEntry) {
     requestId: `sdk-clean-${entry}`,
     sourceRevision: "sdk-clean",
     entry: `src/${entry}`,
-    sdkVersion: "2",
+    sdkVersion: "3",
     files: projectFiles(entry),
   });
 }

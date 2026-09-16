@@ -2,7 +2,8 @@
  * Control Panel — a Finder-hosted window, as in System 7 (the Control Panel
  * desk accessory of System 6 was retired). Opened from the Apple menu.
  */
-import { createEffect, createMemo, createSignal, For, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { WindowHeader, useApp } from "@mockintosh/sdk";
 import type { Fill } from "@mockintosh/ui";
 import { desktopPatternName } from "../../src/os/kernel/settings";
@@ -66,9 +67,10 @@ export function ControlPanel(_props: Record<string, unknown>): JSX.Element {
     return n === 0 ? 0 : PAD * 2 + n * TILE + (n - 1) * GAP;
   });
 
-  createEffect(() => {
-    win.setContentSize(win.width(), contentHeight());
-  });
+  createEffect(
+    () => ({ width: win.width(), height: contentHeight() }),
+    ({ width, height }) => win.setContentSize(width, height),
+  );
 
   const apply = (value: string) => {
     void settings.set(value).then(

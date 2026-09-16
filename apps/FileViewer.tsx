@@ -1,4 +1,5 @@
-import { Show, createSignal, onMount, type JSX } from "solid-js";
+import { Show, createMemo, createEffect, Loading } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { MIME, Markdown, defineApp, useApp } from "@mockintosh/sdk";
 
 function looksLikeMarkdown(title: string, content: string): boolean {
@@ -9,18 +10,20 @@ function looksLikeMarkdown(title: string, content: string): boolean {
 function FileViewer(props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const win = app.window;
-  const [content, setContent] = createSignal((props.content as string) ?? "");
   const title = () => String(props.title ?? "File");
-
-  onMount(() => {
+  const content = createMemo(() => {
+    if (typeof props.content === "string") return props.content;
     const fileId = props.fileId as string | undefined;
-    if (fileId && !props.content) {
-      void app.fs.readText(fileId).then((text) => {
-        if (text !== null) setContent(text);
-      });
-    }
-    if (props.title) win.setTitle(String(props.title));
+    if (!fileId) return "";
+    return app.fs.readText(fileId).then((text) => text ?? "");
   });
+
+  createEffect(
+    () => props.title,
+    (value) => {
+      if (value) win.setTitle(String(value));
+    },
+  );
 
   return (
     <box
@@ -30,16 +33,18 @@ function FileViewer(props: Record<string, unknown>): JSX.Element {
       overflow="scroll"
       background={0}
     >
-      <Show
-        when={looksLikeMarkdown(title(), content())}
-        fallback={
-          <text font="body" wrap>
-            {content() || " "}
-          </text>
-        }
-      >
-        <Markdown text={content()} />
-      </Show>
+      <Loading fallback={<text font="body">Opening…</text>}>
+        <Show
+          when={looksLikeMarkdown(title(), content())}
+          fallback={
+            <text font="body" wrap>
+              {content() || " "}
+            </text>
+          }
+        >
+          <Markdown text={content()} />
+        </Show>
+      </Loading>
     </box>
   );
 }

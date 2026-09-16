@@ -9,7 +9,8 @@
  * keystroke and steals focus.
  */
 import { createContext, createEffect, onCleanup, useContext } from "@mockintosh/ui";
-import type { JSX } from "solid-js";
+import { runWithOwner } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 
 export type WindowBandView = (() => JSX.Element) | null;
 
@@ -28,20 +29,24 @@ function useWindowSlots(): WindowSlots {
 
 export function WindowHeader(props: { height: number; children: JSX.Element }): JSX.Element {
   const slots = useWindowSlots();
-  createEffect(() => {
-    const height = props.height;
-    slots.setHeader(() => props.children, height);
-  });
-  onCleanup(() => slots.setHeader(null, 0));
+  createEffect(
+    () => { props.height; props.children; return props.height; },
+    (height) => {
+      slots.setHeader(() => props.children, height);
+    },
+  );
+  onCleanup(() => runWithOwner(null, () => slots.setHeader(null, 0)));
   return null;
 }
 
 export function WindowFooter(props: { height: number; children: JSX.Element }): JSX.Element {
   const slots = useWindowSlots();
-  createEffect(() => {
-    const height = props.height;
-    slots.setFooter(() => props.children, height);
-  });
-  onCleanup(() => slots.setFooter(null, 0));
+  createEffect(
+    () => { props.height; props.children; return props.height; },
+    (height) => {
+      slots.setFooter(() => props.children, height);
+    },
+  );
+  onCleanup(() => runWithOwner(null, () => slots.setFooter(null, 0)));
   return null;
 }

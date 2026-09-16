@@ -95,16 +95,30 @@ export {
   createContext,
   useContext,
   onCleanup,
-  onMount,
-  batch,
+  onSettled,
+  flush,
+  runWithOwner,
+  createStore,
+  reconcile,
+  snapshot,
+  storePath,
+  merge,
+  omit,
+  Loading,
+  Errored,
+  isPending,
+  latest,
+  refresh,
+  action,
+  createOptimistic,
+  createOptimisticStore,
 } from "solid-js";
-export { Show, For, Index, Switch, Match } from "solid-js";
-export { createStore } from "solid-js/store";
+export { Show, For, Switch, Match } from "solid-js";
 
 // -------------------------------------------------------------------------
-// JSX — side-effect import to augment JSX namespace
+// JSX — renderer-owned types (`jsxImportSource: "@mockintosh/ui"`)
 // -------------------------------------------------------------------------
-import "./jsx.d.ts";
+export type { JSX, HostProps } from "./jsx-runtime";
 
 export { inspectTree, type InspectionNode, type SemanticMetadata } from "./inspection";
 export {TextEditor, type TextEditorProps} from "./components/TextEditor";

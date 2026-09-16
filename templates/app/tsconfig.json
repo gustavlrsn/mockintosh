@@ -7,7 +7,9 @@
     "declaration": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "lib": ["ES2020", "DOM"]
+    "lib": ["ES2020", "DOM"],
+    "jsx": "preserve",
+    "jsxImportSource": "@mockintosh/ui"
   },
   "include": ["src"]
 }

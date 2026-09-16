@@ -55,16 +55,19 @@ export default defineApp({
     const [n, setN] = createSignal(0);
 
     // Menus close over this window's state; the effect keeps them in sync.
-    createEffect(() => {
-      app.setMenus([
-        {
-          label: "File",
-          items: [
-            { label: "Reset", shortcut: "R", disabled: n() === 0, onClick: () => setN(0) },
-          ],
-        },
-      ]);
-    });
+    createEffect(
+      () => n(),
+      (count) => {
+        app.setMenus([
+          {
+            label: "File",
+            items: [
+              { label: "Reset", shortcut: "R", disabled: count === 0, onClick: () => setN(0) },
+            ],
+          },
+        ]);
+      },
+    );
 
     return (
       <box padding={8} flexDirection="column" gap={8} background={0}>

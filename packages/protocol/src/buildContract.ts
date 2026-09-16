@@ -1,6 +1,6 @@
 import * as s from "./schema";
 export const buildRequest = s.object({
-  requestId: s.string, sourceRevision: s.string, entry: s.string, sdkVersion: {enum: ["2"]},
+  requestId: s.string, sourceRevision: s.string, entry: s.string, sdkVersion: {enum: ["3"]},
   files: s.array(s.object({path: s.string, text: s.string})),
 });
 export const diagnostic = s.object({message: s.string, file: s.string, line: s.integer, column: s.integer}, ["message"]);

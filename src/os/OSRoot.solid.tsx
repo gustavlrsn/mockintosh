@@ -1,4 +1,5 @@
-import { JSX, Show } from "solid-js";
+import { Show } from "solid-js";
+import type { JSX } from "@mockintosh/ui";
 import { OSContext } from "./context";
 import type { OSServices } from "./context";
 import {
@@ -22,7 +23,7 @@ interface OSRootProps {
 
 export function OSRoot(props: OSRootProps): JSX.Element {
   return (
-    <OSContext.Provider value={props.services}>
+    <OSContext value={props.services}>
       <box width={props.services.resolution.width} height={props.services.resolution.height}>
         <Show when={getSplashVisible()}>
           <Splash onDismiss={() => setSplashVisible(false)} />
@@ -54,7 +55,7 @@ export function OSRoot(props: OSRootProps): JSX.Element {
         </Show>
         <ScreenCorners />
       </box>
-    </OSContext.Provider>
+    </OSContext>
   );
 }
 

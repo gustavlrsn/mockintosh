@@ -17,7 +17,6 @@ export async function withHeadless<T>(work: (os: BootedOS) => Promise<T>, storag
     // A headless screen still needs reactive Solid, not its SSR no-effect runtime.
     resolve: { alias: [
       { find: /^solid-js$/, replacement: fileURLToPath(new URL("../../node_modules/solid-js/dist/solid.js", import.meta.url)) },
-      { find: /^solid-js\/store$/, replacement: fileURLToPath(new URL("../../node_modules/solid-js/store/dist/store.js", import.meta.url)) },
     ] },
     appType: "custom",
     logLevel: "error",
