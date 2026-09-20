@@ -17,7 +17,7 @@ import {
   hasGlyph,
   type DeckerFont,
 } from "./font";
-import { requireFont } from "./registry";
+import { lookupFontInfo, requireFont } from "./registry";
 
 /** `GetFontInfo` integers — what the CDEF / WDEF / MDEF actually read. */
 export interface FontInfo {
@@ -34,7 +34,11 @@ export interface FontInfo {
 const SYSTEM_FONT_INFO: Readonly<Record<string, FontInfo>> = {
   menu: { ascent: 12, descent: 3, leading: 0 }, // Chicago 12
   body: { ascent: 10, descent: 2, leading: 0 }, // Geneva 9
+  bodyBold: { ascent: 10, descent: 2, leading: 0 }, // Geneva 9 Bold (FM smear)
+  geneva12: { ascent: 12, descent: 3, leading: 1 }, // FONT 396
+  geneva12Bold: { ascent: 12, descent: 3, leading: 1 }, // FONT 396 Bold (FM smear)
   mono: { ascent: 9, descent: 2, leading: 0 }, // Monaco 9
+  lisa: { ascent: 10, descent: 2, leading: 0 }, // LisaTerminal Paper Raw
 };
 
 export interface FontFaceMetrics extends FontInfo {
@@ -60,14 +64,15 @@ export function faceMetrics(font: DeckerFont): FontFaceMetrics {
   return computed;
 }
 
-export function faceMetricsByName(fontName: string = "body"): FontFaceMetrics {
-  return faceMetrics(requireFont(fontName));
+export function faceMetricsByName(fontName: string = "body", size?: number): FontFaceMetrics {
+  return faceMetrics(requireFont(fontName, size));
 }
 
 /**
  * Height of the box `<text>` measure and `verticalAlign` share.
- * Single-line `middle` uses FontInfo `lineHeight`; everything else uses
- * the Decker cell block so wrapping and descenders stay honest.
+ * `blockHeight` is the trimmed block (`layoutText`). Single-line `middle`
+ * still uses the FontInfo line box so a CDEF face can center the full
+ * ascent + descent + leading.
  */
 export function alignmentHeight(
   font: DeckerFont,
@@ -101,19 +106,25 @@ function computeFaceMetrics(font: DeckerFont): FontFaceMetrics {
   const capTop = caps?.minY ?? 0;
   const capHeight = caps ? caps.maxY - caps.minY + 1 : cellHeight;
   const capAscent = caps ? Math.min(cellHeight, caps.maxY + 1) : cellHeight;
-  const header = SYSTEM_FONT_INFO[font.name];
+  const header = lookupFontInfo(font) ?? SYSTEM_FONT_INFO[font.name];
   const info: FontInfo = header ?? {
     ascent: capAscent,
     descent: cellHeight - capAscent,
     leading: 0,
   };
+  const pad = font.outlinePad ?? 0;
+  const drop = font.shadowPad ?? 0;
+  const ascent = info.ascent + pad;
+  const descent = info.descent + pad + drop;
   return {
     cellHeight,
-    ...info,
+    ascent,
+    descent,
+    leading: info.leading,
     capAscent,
     capTop,
     capHeight,
-    lineHeight: info.ascent + info.descent + info.leading,
+    lineHeight: ascent + descent + info.leading,
   };
 }
 

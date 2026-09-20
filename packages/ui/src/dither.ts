@@ -1,8 +1,10 @@
 /**
  * RGBA → 1-byte-per-pixel (`0` = white, `1` = black) — the `<bitmap>` /
- * `blitPixels` contract. Atkinson and Bayer are lifted from Photo Booth;
- * threshold is the simple luminance cut Picture and Video Player used.
+ * `blitPixels` contract. Atkinson, Bayer, and ASCII are the Photo Booth
+ * converters; threshold is the simple luminance cut Picture and Video Player used.
  */
+
+import { asciiToBits, createAsciiDitherer, type AsciiDitherOptions } from "./asciiDither.ts";
 
 /** Decoded raster: 8-bit RGBA, row-major, as `ImageData` but without the DOM. */
 export interface ImageFrame {
@@ -11,9 +13,9 @@ export interface ImageFrame {
   rgba: Uint8ClampedArray;
 }
 
-export type DitherMode = "threshold" | "atkinson" | "bayer";
+export type DitherMode = "threshold" | "atkinson" | "bayer" | "ascii";
 
-export interface DitherOptions {
+export interface DitherOptions extends AsciiDitherOptions {
   /** Luminance cut for `threshold` and Bayer (default 128). */
   threshold?: number;
 }
@@ -68,7 +70,14 @@ function bayerTo1bit(rgba: Uint8ClampedArray, w: number, h: number, out: Uint8Ar
   }
 }
 
-function apply(frame: ImageFrame, mode: DitherMode, out: Uint8Array, lum: Float32Array | undefined, cut: number): void {
+function apply(
+  frame: ImageFrame,
+  mode: Exclude<DitherMode, "ascii">,
+  out: Uint8Array,
+  lum: Float32Array | undefined,
+  options?: DitherOptions,
+): void {
+  const cut = options?.threshold ?? 128;
   const len = frame.width * frame.height;
   if (mode === "atkinson") atkinsonTo1bit(frame.rgba, frame.width, frame.height, out, lum!);
   else if (mode === "bayer") bayerTo1bit(frame.rgba, frame.width, frame.height, out, cut);
@@ -77,9 +86,10 @@ function apply(frame: ImageFrame, mode: DitherMode, out: Uint8Array, lum: Float3
 
 /** RGBA → 1 byte per pixel, 0 = white, 1 = black — the `<bitmap pixels>` format. */
 export function toBits(frame: ImageFrame, mode: DitherMode = "threshold", options?: DitherOptions): Uint8Array {
+  if (mode === "ascii") return asciiToBits(frame, options);
   const out = new Uint8Array(frame.width * frame.height);
   const lum = mode === "atkinson" ? new Float32Array(frame.width * frame.height) : undefined;
-  apply(frame, mode, out, lum, options?.threshold ?? 128);
+  apply(frame, mode, out, lum, options);
   return out;
 }
 
@@ -88,13 +98,112 @@ export function createDitherer(
   width: number,
   height: number,
   mode: DitherMode,
+  options?: DitherOptions,
 ): (frame: ImageFrame, out: Uint8Array) => void {
+  if (mode === "ascii") return createAsciiDitherer(width, height, options);
   const lum = mode === "atkinson" ? new Float32Array(width * height) : undefined;
   return (frame, out) => {
     if (frame.width !== width || frame.height !== height) {
       throw new Error(`Ditherer is ${width}×${height}, frame is ${frame.width}×${frame.height}`);
     }
     if (mode === "atkinson") lum!.fill(0);
-    apply(frame, mode, out, lum, 128);
+    apply(frame, mode, out, lum, options);
   };
+}
+
+export interface CoverFrameOptions {
+  /** Flip horizontally — the usual selfie preview. */
+  mirror?: boolean;
+}
+
+/**
+ * Already-dithered 1-bit picture (`0` = white, `1` = black). Build-time
+ * `?dither=` imports produce this so the browser never sees the JPEG.
+ */
+export interface DitheredAsset {
+  width: number;
+  height: number;
+  pixels: Uint8Array;
+}
+
+export function isImageFrame(value: unknown): value is ImageFrame {
+  if (!value || typeof value !== "object") return false;
+  const frame = value as ImageFrame;
+  return typeof frame.width === "number" && typeof frame.height === "number" && frame.rgba instanceof Uint8ClampedArray;
+}
+
+export function isDitheredAsset(value: unknown): value is DitheredAsset {
+  if (!value || typeof value !== "object") return false;
+  const asset = value as DitheredAsset;
+  return (
+    typeof asset.width === "number" &&
+    typeof asset.height === "number" &&
+    asset.pixels instanceof Uint8Array &&
+    !("rgba" in asset)
+  );
+}
+
+/** Cover-crop `src` into `width`×`height` and dither to `<bitmap>` pixels. */
+export function rasterizeFrame(
+  src: ImageFrame,
+  width: number,
+  height: number,
+  mode: DitherMode = "threshold",
+  options?: DitherOptions & CoverFrameOptions,
+): Uint8Array {
+  const dest: ImageFrame = {
+    width,
+    height,
+    rgba: new Uint8ClampedArray(width * height * 4),
+  };
+  coverFrame(src, dest, options);
+  return toBits(dest, mode, options);
+}
+
+/**
+ * Center-crop `src` to `dest`'s aspect (CSS `object-fit: cover`) and
+ * nearest-neighbour scale into `dest`. Photo Booth uses this so a typical
+ * landscape camera fills the viewfinder instead of being blit 1:1 and clipped.
+ */
+export function coverFrame(src: ImageFrame, dest: ImageFrame, options?: CoverFrameOptions): void {
+  const srcW = src.width;
+  const srcH = src.height;
+  const dstW = dest.width;
+  const dstH = dest.height;
+  if (srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) return;
+
+  let cropW: number;
+  let cropH: number;
+  let cropX: number;
+  let cropY: number;
+  if (srcW * dstH > dstW * srcH) {
+    cropH = srcH;
+    cropW = Math.max(1, Math.floor((srcH * dstW) / dstH));
+    cropX = (srcW - cropW) >> 1;
+    cropY = 0;
+  } else {
+    cropW = srcW;
+    cropH = Math.max(1, Math.floor((srcW * dstH) / dstW));
+    cropX = 0;
+    cropY = (srcH - cropH) >> 1;
+  }
+
+  const mirror = options?.mirror === true;
+  const srcRgba = src.rgba;
+  const dstRgba = dest.rgba;
+  for (let y = 0; y < dstH; y++) {
+    const sy = cropY + Math.min(cropH - 1, Math.floor((y * cropH) / dstH));
+    const srcRow = sy * srcW;
+    const dstRow = y * dstW;
+    for (let x = 0; x < dstW; x++) {
+      const sx = cropX + Math.min(cropW - 1, Math.floor((x * cropW) / dstW));
+      const dx = mirror ? dstW - 1 - x : x;
+      const si = (srcRow + sx) << 2;
+      const di = (dstRow + dx) << 2;
+      dstRgba[di] = srcRgba[si];
+      dstRgba[di + 1] = srcRgba[si + 1];
+      dstRgba[di + 2] = srcRgba[si + 2];
+      dstRgba[di + 3] = srcRgba[si + 3];
+    }
+  }
 }

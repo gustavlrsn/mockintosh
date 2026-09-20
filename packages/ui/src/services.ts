@@ -7,14 +7,32 @@
  * browser globals.
  */
 import { createContext, useContext } from "solid-js";
+import type { ImageFrame } from "./dither";
 
 export interface UIClipboard {
   readText(): Promise<string>;
   writeText(text: string): Promise<void>;
 }
 
+export interface ImageDecodeOptions {
+  /** MIME hint when `source` is raw bytes. */
+  type?: string;
+  maxWidth?: number;
+  maxHeight?: number;
+}
+
+/**
+ * Host JPEG/PNG/GIF decoder. The UI kit is DOM-free; a browser host
+ * implements this with `createImageBitmap`, a device with its own decoder.
+ * `source` is a URL or encoded bytes — not an `ImageFrame`.
+ */
+export interface UIImageService {
+  decode(source: string | Uint8Array, options?: ImageDecodeOptions): Promise<ImageFrame>;
+}
+
 export interface UIServices {
   clipboard?: UIClipboard;
+  images?: UIImageService;
   /** Host journal for errors thrown from pointer/key handlers. */
   onError?(error: unknown): void;
 }

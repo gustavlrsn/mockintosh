@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { indexAtPoint, layoutText } from "../src/fonts/textLayout";
+import { indexAtPoint, layoutNodeText, layoutText } from "../src/fonts/textLayout";
 import type { DeckerFont } from "../src/fonts/font";
 import { computeLayout } from "../src/layout";
 import { createDrawContext, drawTree } from "../src/draw";
@@ -13,6 +13,7 @@ import { installFontBridge } from "../src/fonts/bridge";
 import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
 import { requireFont } from "../src/fonts/registry";
 import { faceMetrics } from "../src/fonts/metrics";
+import { textWraps } from "../src/nodes";
 
 // Synthetic monospace font: every printable ASCII glyph is 5px + 1px spacing = 6px advance.
 function monoFont(): DeckerFont {
@@ -83,6 +84,32 @@ describe("layoutText — line breaking", () => {
   });
 });
 
+describe("layoutText — FontInfo line box", () => {
+  it("advances Geneva 9 by 12 and trims the last-line extra", () => {
+    const body = requireFont("body");
+    const one = layoutText(body, "a");
+    const two = layoutText(body, "a\nb");
+    expect(body.glyphHeight).toBe(10);
+    expect(one.lineHeight).toBe(12);
+    expect(one.lastLineHeight).toBe(10);
+    expect(one.height).toBe(10);
+    expect(two.height).toBe(22);
+  });
+});
+
+describe("layoutNodeText", () => {
+  it("reuses the same block when font, text, and wrap width match", () => {
+    const font = monoFont();
+    const node = createNode("text");
+    const first = layoutNodeText(node, font, "aa bb cc", 30);
+    const second = layoutNodeText(node, font, "aa bb cc", 30);
+    expect(second).toBe(first);
+    const wider = layoutNodeText(node, font, "aa bb cc", 60);
+    expect(wider).not.toBe(first);
+    expect(wider.lines).toHaveLength(1);
+  });
+});
+
 // -------------------------------------------------------------------------
 // Rendered alignment — uses the real built-in fonts.
 // -------------------------------------------------------------------------
@@ -133,6 +160,7 @@ describe("<text> alignment", () => {
   const body = requireFont("body");
   const glyphH = body.glyphHeight;
   const bodyFace = faceMetrics(body);
+  const lineH = bodyFace.lineHeight;
 
   it("verticalAlign=top draws at the top of the box", () => {
     const px = render(textNode({ verticalAlign: "top" }, { width: W, height: H }, "Hi"), W, H);
@@ -153,7 +181,7 @@ describe("<text> alignment", () => {
   it("verticalAlign=bottom draws against the bottom edge", () => {
     const px = render(textNode({ verticalAlign: "bottom" }, { width: W, height: H }, "Hi"), W, H);
     const ink = inkBounds(px, W, H)!;
-    expect(ink.minY).toBeGreaterThanOrEqual(H - glyphH);
+    expect(ink.minY).toBeGreaterThanOrEqual(H - lineH);
   });
 
   it("single-line middle measures the FontInfo line box, not the cell", () => {
@@ -196,8 +224,9 @@ describe("<text> alignment", () => {
     const px = render(t, W, H);
     const ink = inkBounds(px, W, H)!;
     expect(t.layout.height).toBe(H);
-    expect(ink.minY).toBeGreaterThan(glyphH);
-    expect(ink.maxY).toBeLessThan(H - glyphH);
+    expect(ink.minY).toBeGreaterThan(0);
+    expect(ink.maxY).toBeLessThan(H - 1);
+    expect(ink.maxY - ink.minY).toBeGreaterThan(lineH);
   });
 
   it("align=right puts ink against the right edge; align=left against the left", () => {
@@ -211,8 +240,10 @@ describe("<text> alignment", () => {
   it("wrap measures multiple lines and honors padding", () => {
     const t = textNode({ wrap: true }, { width: 60, padding: 4 }, "one two three four five six");
     render(t, W, H);
-    expect(t.layout.height).toBeGreaterThan(glyphH * 2);
-    expect((t.layout.height - 8) % glyphH).toBe(0); // whole number of lines inside padding
+    const lineH = faceMetrics(requireFont("body")).lineHeight;
+    const inner = t.layout.height - 8;
+    expect(inner).toBeGreaterThan(glyphH);
+    expect((inner - glyphH) % lineH).toBe(0);
   });
 
   it("wrapped paragraph aligns each line to the right", () => {
@@ -221,5 +252,27 @@ describe("<text> alignment", () => {
     // Every line should touch the right edge region; check first-line row band.
     const firstBandInk = inkBounds(px.slice(0, W * glyphH), W, glyphH)!;
     expect(firstBandInk.maxX).toBeGreaterThan(W - 6);
+  });
+
+  it("wraps by default when the node has a width", () => {
+    const t = textNode({}, { width: 40 }, "one two three four");
+    render(t, W, H);
+    expect(t.layout.height).toBeGreaterThan(lineH);
+  });
+
+  it("nowrap keeps a single line in a narrow box", () => {
+    const t = textNode({ nowrap: true }, { width: 40 }, "one two three four");
+    render(t, W, H);
+    expect(t.layout.height).toBe(glyphH);
+  });
+});
+
+describe("textWraps", () => {
+  it("defaults on and treats nowrap / wrap={false} as off", () => {
+    expect(textWraps({})).toBe(true);
+    expect(textWraps({ wrap: true })).toBe(true);
+    expect(textWraps({ nowrap: true })).toBe(false);
+    expect(textWraps({ wrap: false })).toBe(false);
+    expect(textWraps({ wrap: true, nowrap: true })).toBe(false);
   });
 });

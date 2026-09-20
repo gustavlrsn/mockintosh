@@ -5,10 +5,11 @@
 
 import { createContext, useContext } from "solid-js";
 import type { MeasureFunc } from "./layout";
-import { requireFont, initBuiltinFonts } from "./fonts/registry";
-import { layoutText } from "./fonts/textLayout";
+import { initBuiltinFonts } from "./fonts/registry";
+import { layoutNodeText } from "./fonts/textLayout";
 import { alignmentHeight } from "./fonts/metrics";
-import { collectNodeText, type CanvasNode, type TextVerticalAlign } from "./nodes";
+import { fontFromProps, type FontStyle } from "./fonts/style";
+import { collectNodeText, textWraps, type CanvasNode, type TextVerticalAlign } from "./nodes";
 
 /**
  * Create the MeasureFunc used by computeLayout.
@@ -24,22 +25,20 @@ export function createMeasureFunc(): MeasureFunc {
       // Bare string child of a box — single line in the parent's font.
       const text = node.textContent;
       if (!text) return { width: 0, height: 0 };
-      const fontName = node.parent?.props["font"] as string | undefined ?? "body";
-      const font = requireFont(fontName);
-      const block = layoutText(font, text);
+      const font = fontFromProps(node.parent?.props);
+      const block = layoutNodeText(node, font, text);
       const valign = (node.parent?.props["verticalAlign"] as TextVerticalAlign | undefined) ?? "top";
       return { width: block.width, height: alignmentHeight(font, block.lines.length, block.height, valign) };
     }
     if (node.type === "text") {
-      const fontName = node.props["font"] as string | undefined ?? "body";
-      const font = requireFont(fontName);
+      const font = fontFromProps(node.props);
       const text = collectNodeText(node);
       const valign = (node.props["verticalAlign"] as TextVerticalAlign | undefined) ?? "top";
       if (!text) {
         return { width: 0, height: alignmentHeight(font, 1, font.glyphHeight, valign) };
       }
-      const wrap = node.props["wrap"] as boolean | undefined ?? false;
-      const block = layoutText(font, text, wrap ? availableWidth : undefined);
+      const wrap = textWraps(node.props);
+      const block = layoutNodeText(node, font, text, wrap ? availableWidth : undefined);
       return {
         width: block.width,
         height: alignmentHeight(font, block.lines.length, block.height, valign),
@@ -61,7 +60,7 @@ export function createMeasureFunc(): MeasureFunc {
 // -------------------------------------------------------------------------
 
 export interface MeasureAPI {
-  measureText(text: string, fontName?: string): number;
+  measureText(text: string, fontName?: string, style?: FontStyle, size?: number): number;
 }
 
 export const MeasureContext = createContext<MeasureAPI | null>(null);

@@ -42,6 +42,18 @@ describe("faceMetrics", () => {
     expect(m.capAscent).toBe(8);
   });
 
+  it("uses FONT 396 FontInfo for geneva12", () => {
+    const m = faceMetrics(requireFont("geneva12"));
+    expect(m.cellHeight).toBe(13);
+    expect(m.ascent).toBe(12);
+    expect(m.descent).toBe(3);
+    expect(m.leading).toBe(1);
+    expect(m.lineHeight).toBe(16);
+    expect(m.capTop).toBe(1);
+    expect(m.capHeight).toBe(9);
+    expect(m.capAscent).toBe(10);
+  });
+
   it("uses Monaco 9 FontInfo for mono", () => {
     const m = faceMetrics(requireFont("mono"));
     expect(m.cellHeight).toBe(11);

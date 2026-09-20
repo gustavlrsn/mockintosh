@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
-import { TextInput } from "../src/components/TextInput";
+import { TextInput } from "../src/widgets/TextInput";
 import { measureText } from "../src/fonts/bridge";
 import { createUI } from "../src/ui";
 
@@ -106,7 +106,7 @@ describe("TextInput", () => {
     const field = ui.inspect().find((node) => node.name === "draft");
     expect(field).toBeTruthy();
     const { x, y, height } = field!.bounds;
-    const contentLeft = x + 3;
+    const contentLeft = x + 5;
     const midY = y + Math.floor(height / 2);
     // Tick-by-tick so the overlay mounts on a 1-glyph range and must grow.
     ui.dispatchPointer("mousedown", contentLeft + measureText("WWWW") + 2, midY);
@@ -132,6 +132,36 @@ describe("TextInput", () => {
     const last = contentLeft + measureText("WWW") + Math.floor(measureText("W") / 2);
     expect(hasWhite(first)).toBe(true);
     expect(hasWhite(last)).toBe(true);
+    dispose();
+  });
+
+  it("blurs and stops accepting keys when the pointer lands outside", async () => {
+    const ui = createUI({ screen: newBitMap(200, 40) });
+    const [value, setValue] = createSignal("");
+    const dispose = ui.render(() =>
+      createComponent(TextInput, {
+        name: "draft",
+        get value() { return value(); },
+        onChange: setValue,
+        autoFocus: true,
+        width: 80,
+      }),
+    );
+    ui.frame();
+    await Promise.resolve();
+    ui.frame();
+
+    type(ui, "hi");
+    expect(value()).toBe("hi");
+    expect(ui.inspect().find((node) => node.name === "draft")?.focused).toBe(true);
+
+    ui.dispatchPointer("mousedown", 180, 20);
+    ui.dispatchPointer("mouseup", 180, 20);
+    ui.frame();
+
+    expect(ui.inspect().find((node) => node.name === "draft")?.focused).toBe(false);
+    type(ui, "x");
+    expect(value()).toBe("hi");
     dispose();
   });
 });

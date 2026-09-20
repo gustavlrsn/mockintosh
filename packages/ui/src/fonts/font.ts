@@ -3,6 +3,8 @@ import { extraOrdinalForCharCode } from "./extraGlyphs";
 
 export interface DeckerFont {
   name: string;
+  /** Native bitmap point size. Role aliases share the family name (geneva, not body). */
+  size?: number;
   maxWidth: number;
   glyphHeight: number;
   spacing: number;
@@ -10,6 +12,10 @@ export interface DeckerFont {
   glyphWidths: Uint8Array;
   glyphData: Uint8Array;
   sourceFormat: "FNT0" | "FNT1";
+  /** 1px inset reserved so Font Manager outline sits inside the cell. */
+  outlinePad?: number;
+  /** Extra 1px right/bottom so a south-east drop shadow stays in the cell. */
+  shadowPad?: number;
 }
 
 export interface DeckerTextSize {

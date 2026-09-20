@@ -117,18 +117,26 @@ function measureNode(
     const inset = resolveContentInset(node);
     const bw = resolveBorderWidth(node);
     const isRoot = node.type === "_root";
+    // Measure children against the clamped box, not the pre-maxWidth size.
+    // `width: 100%` + `maxWidth` would otherwise wrap text against the
+    // unconstrained percentage and then paint it into a shorter column.
+    const sizedW = explicitW !== undefined ? node.layout.width : undefined;
+    const sizedH = explicitH !== undefined ? node.layout.height : undefined;
+    // Children live in the content box. For an auto-sized node, assume we
+    // take the available border box (stretch / a flex share) so wrap text
+    // is not measured against a wider width than it will paint at.
     const contentW = isRoot
       ? availableWidth
-      : explicitW !== undefined ? Math.max(0, explicitW - inset.left - inset.right) : availableWidth;
+      : Math.max(0, (sizedW ?? availableWidth) - inset.left - inset.right);
     const contentH = isRoot
       ? availableHeight
-      : explicitH !== undefined ? Math.max(0, explicitH - inset.top - inset.bottom) : availableHeight;
+      : Math.max(0, (sizedH ?? availableHeight) - inset.top - inset.bottom);
     const paddingBoxW = isRoot
       ? availableWidth
-      : explicitW !== undefined ? Math.max(0, explicitW - 2 * bw) : availableWidth;
+      : Math.max(0, (sizedW ?? availableWidth) - 2 * bw);
     const paddingBoxH = isRoot
       ? availableHeight
-      : explicitH !== undefined ? Math.max(0, explicitH - 2 * bw) : availableHeight;
+      : Math.max(0, (sizedH ?? availableHeight) - 2 * bw);
 
     // Recurse to size children first
     const relativeChildren = node.children.filter(
@@ -155,6 +163,58 @@ function measureNode(
       if (explicitH === undefined) {
         const h = deriveContainerSize(node, "cross-or-main", "height", inset);
         node.layout.height = clamp(h, s, "height");
+      }
+
+      // `maxWidth` / minWidth clamp the border box after children wrapped
+      // against `availableWidth`. Paint uses the final content width (and
+      // stretch will too), so wrap height must be remasured or the extra
+      // lines spill into the next sibling — end-aligned chat bubbles on
+      // agent text, a padded card with maxWidth, etc.
+      const finalContentW = Math.max(0, node.layout.width - inset.left - inset.right);
+      const finalPadW = Math.max(0, node.layout.width - 2 * bw);
+      if (finalContentW !== contentW) {
+        for (const child of relativeChildren) {
+          measureNode(child, finalContentW, contentH, measure);
+        }
+        if (explicitH === undefined) {
+          node.layout.height = clamp(
+            deriveContainerSize(node, "cross-or-main", "height", inset),
+            s,
+            "height",
+          );
+        }
+      }
+      if (finalPadW !== paddingBoxW) {
+        for (const child of absoluteChildren) {
+          measureNode(child, finalPadW, paddingBoxH, measure);
+        }
+      }
+
+      // A row's children are first measured against the full row. Flex
+      // grow/shrink then gives each item a narrower share; wrap text
+      // measured at the full row becomes too short and the next sibling
+      // overlaps. Remasure each item against its flex width and only
+      // re-derive height (the row width stays definite).
+      const dir = s.flexDirection ?? "column";
+      if (dir === "row" && relativeChildren.length > 0) {
+        const innerW = Math.max(0, node.layout.width - inset.left - inset.right);
+        const shares = flexMainSizes(relativeChildren, innerW, true, s.gap ?? 0);
+        let remasured = false;
+        for (let i = 0; i < relativeChildren.length; i++) {
+          const child = relativeChildren[i];
+          const margin = resolveMargin(child.style);
+          const shareW = Math.max(0, shares[i] - margin.left - margin.right);
+          if (shareW === child.layout.width) continue;
+          measureNode(child, shareW, contentH, measure);
+          remasured = true;
+        }
+        if (remasured && explicitH === undefined) {
+          node.layout.height = clamp(
+            deriveContainerSize(node, "cross-or-main", "height", inset),
+            s,
+            "height",
+          );
+        }
       }
     }
   } else if (
@@ -246,6 +306,113 @@ function clamp(
   }
 }
 
+function flexShrinkOf(child: CanvasNode): number {
+  if (child.style.flexShrink !== undefined) return child.style.flexShrink;
+  const overflow = child.style.overflow;
+  return overflow === "scroll" || overflow === "hidden" ? 1 : 0;
+}
+
+function baseMainSize(child: CanvasNode, isRow: boolean): number {
+  const margin = resolveMargin(child.style);
+  const basis = child.style.flexBasis;
+  const content = isRow
+    ? child.layout.width + margin.left + margin.right
+    : child.layout.height + margin.top + margin.bottom;
+  if (typeof basis === "number") {
+    return isRow
+      ? basis + margin.left + margin.right
+      : basis + margin.top + margin.bottom;
+  }
+  return content;
+}
+
+/** Flex grow/shrink main sizes, including margins. Same math as the position pass. */
+function flexMainSizes(
+  children: CanvasNode[],
+  availableMain: number,
+  isRow: boolean,
+  gap: number,
+): number[] {
+  let totalFixed = 0;
+  let totalFlexGrow = 0;
+  let totalFlexShrink = 0;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    totalFixed += baseMainSize(child, isRow);
+    totalFlexGrow += child.style.flexGrow ?? 0;
+    totalFlexShrink += flexShrinkOf(child);
+    if (i < children.length - 1) totalFixed += gap;
+  }
+  const remainingSpace = availableMain - totalFixed;
+  const growUnit = totalFlexGrow > 0 && remainingSpace > 0 ? remainingSpace / totalFlexGrow : 0;
+  return children.map((child) => {
+    const margin = resolveMargin(child.style);
+    const fg = child.style.flexGrow ?? 0;
+    const fs = flexShrinkOf(child);
+    const base = baseMainSize(child, isRow);
+    if (fg > 0 && remainingSpace > 0) return base + growUnit * fg;
+    if (fs > 0 && remainingSpace < 0 && totalFlexShrink > 0) {
+      const share = (fs / totalFlexShrink) * -remainingSpace;
+      const minMain = isRow
+        ? (child.style.minWidth ?? 0) + margin.left + margin.right
+        : (child.style.minHeight ?? 0) + margin.top + margin.bottom;
+      return Math.max(minMain, base - share);
+    }
+    return base;
+  });
+}
+
+/**
+ * Re-run measure for descendants against `node.layout` size. Does not
+ * overwrite a locked width (stretch / flex already chose it). Auto height
+ * follows the new wrap unless `lockHeight` — then children see this box as
+ * definite so `height: 100%` resolves against the flex share, not the
+ * column's full available height.
+ */
+function remasureSubtree(node: CanvasNode, measure: MeasureFunc, lockHeight = false): void {
+  if (node.type === "text") {
+    const pad = resolvePadding(node.style);
+    const contentW = Math.max(0, node.layout.width - pad.left - pad.right);
+    const measured = measure(node, contentW, Infinity);
+    if (resolveSize(node.style.height, undefined) === undefined) {
+      node.layout.height = clamp(
+        measured.height + pad.top + pad.bottom,
+        node.style,
+        "height",
+      );
+    }
+    return;
+  }
+  if (node.type !== "box" && node.type !== "_root") return;
+
+  const inset = resolveContentInset(node);
+  const bw = resolveBorderWidth(node);
+  const s = node.style;
+  const explicitH = resolveSize(s.height, node.layout.height);
+  const definiteH = explicitH !== undefined || lockHeight;
+  const cw = Math.max(0, node.layout.width - inset.left - inset.right);
+  const ch = definiteH
+    ? Math.max(0, node.layout.height - inset.top - inset.bottom)
+    : Infinity;
+  const padW = Math.max(0, node.layout.width - 2 * bw);
+  const padH = definiteH ? Math.max(0, node.layout.height - 2 * bw) : Infinity;
+
+  for (const child of node.children) {
+    if ((child.style.position ?? "relative") === "relative") {
+      measureNode(child, cw, ch, measure);
+    } else {
+      measureNode(child, padW, padH, measure);
+    }
+  }
+  if (node.type !== "_root" && explicitH === undefined && !lockHeight) {
+    node.layout.height = clamp(
+      deriveContainerSize(node, "cross-or-main", "height", inset),
+      s,
+      "height",
+    );
+  }
+}
+
 // -------------------------------------------------------------------------
 // Position pass (top-down, assigns x/y to each node)
 // -------------------------------------------------------------------------
@@ -255,7 +422,8 @@ function positionNode(
   originX: number,
   originY: number,
   containerWidth: number,
-  containerHeight: number
+  containerHeight: number,
+  measure: MeasureFunc,
 ): void {
   // Snap to the pixel grid. Centering, percentages and space-* distribution
   // can yield fractions; QuickDraw draws nothing at half-pixels, so every node
@@ -293,66 +461,8 @@ function positionNode(
   // flexShrink defaults to 0 so existing layouts that omit it stay stable,
   // except overflow:scroll/hidden — CSS treats those as min-size 0 and they
   // must shrink or the pane grows with its content and never scrolls.
-  function flexShrinkOf(child: CanvasNode): number {
-    if (child.style.flexShrink !== undefined) return child.style.flexShrink;
-    const overflow = child.style.overflow;
-    return overflow === "scroll" || overflow === "hidden" ? 1 : 0;
-  }
-
-  function baseMainSize(child: CanvasNode): number {
-    const margin = resolveMargin(child.style);
-    const basis = child.style.flexBasis;
-    const content = isRow
-      ? child.layout.width + margin.left + margin.right
-      : child.layout.height + margin.top + margin.bottom;
-    if (typeof basis === "number") {
-      return isRow
-        ? basis + margin.left + margin.right
-        : basis + margin.top + margin.bottom;
-    }
-    return content;
-  }
-
-  let totalFixed = 0;
-  let totalFlexGrow = 0;
-  let totalFlexShrink = 0;
-
-  for (let i = 0; i < relativeChildren.length; i++) {
-    const child = relativeChildren[i];
-    const fg = child.style.flexGrow ?? 0;
-    const fs = flexShrinkOf(child);
-    const childMainSize = baseMainSize(child);
-    // Include grow items' base size (content / padding / flex-basis). Free
-    // space is what remains after every sibling — CSS flexbox's hypothetical
-    // main size. Skipping it made `flexGrow` panes with padding overflow and
-    // clip a following fixed row (ChatGippity's compose bar).
-    totalFixed += childMainSize;
-    totalFlexGrow += fg;
-    totalFlexShrink += fs;
-    if (i < relativeChildren.length - 1) totalFixed += gap;
-  }
-
   const availableMain = isRow ? innerW : innerH;
-  const remainingSpace = availableMain - totalFixed;
-  const growUnit = totalFlexGrow > 0 && remainingSpace > 0 ? remainingSpace / totalFlexGrow : 0;
-
-  const childMainSizes: number[] = relativeChildren.map((child) => {
-    const margin = resolveMargin(child.style);
-    const fg = child.style.flexGrow ?? 0;
-    const fs = flexShrinkOf(child);
-    const base = baseMainSize(child);
-    if (fg > 0 && remainingSpace > 0) {
-      return base + growUnit * fg;
-    }
-    if (fs > 0 && remainingSpace < 0 && totalFlexShrink > 0) {
-      const share = (fs / totalFlexShrink) * -remainingSpace;
-      const minMain = isRow
-        ? (child.style.minWidth ?? 0) + margin.left + margin.right
-        : (child.style.minHeight ?? 0) + margin.top + margin.bottom;
-      return Math.max(minMain, base - share);
-    }
-    return base;
-  });
+  const childMainSizes: number[] = flexMainSizes(relativeChildren, availableMain, isRow, gap);
 
   // justifyContent: distribute along main axis
   const justify = s.justifyContent ?? "flex-start";
@@ -389,9 +499,25 @@ function positionNode(
     // Apply grow / shrink / flexBasis to the child's laid-out main size
     if (fg > 0 || fs > 0 || typeof child.style.flexBasis === "number") {
       if (isRow) {
-        child.layout.width = clamp(Math.max(0, childMainSize - margin.left - margin.right), child.style);
+        const nextW = clamp(Math.max(0, childMainSize - margin.left - margin.right), child.style);
+        if (nextW !== child.layout.width) {
+          child.layout.width = nextW;
+          remasureSubtree(child, measure);
+        } else {
+          child.layout.width = nextW;
+        }
       } else {
-        child.layout.height = clamp(Math.max(0, childMainSize - margin.top - margin.bottom), child.style, "height");
+        const nextH = clamp(
+          Math.max(0, childMainSize - margin.top - margin.bottom),
+          child.style,
+          "height",
+        );
+        if (nextH !== child.layout.height) {
+          child.layout.height = nextH;
+          remasureSubtree(child, measure, true);
+        } else {
+          child.layout.height = nextH;
+        }
       }
       childMainSizes[i] = isRow
         ? child.layout.width + margin.left + margin.right
@@ -428,10 +554,18 @@ function positionNode(
             "height"
           );
         } else {
-          child.layout.width = clamp(
+          const nextW = clamp(
             Math.max(0, crossAxisAvailable - margin.left - margin.right),
             child.style
           );
+          if (nextW !== child.layout.width) {
+            child.layout.width = nextW;
+            const lockHeight = (child.style.flexGrow ?? 0) > 0 || child.style.height !== undefined;
+            remasureSubtree(child, measure, lockHeight);
+            if (child.style.height === undefined && !lockHeight) {
+              childMainSizes[i] = child.layout.height + margin.top + margin.bottom;
+            }
+          }
         }
       }
     }
@@ -447,8 +581,8 @@ function positionNode(
       childY = innerY + cursor + margin.top;
     }
 
-    positionNode(child, childX, childY, child.layout.width, child.layout.height);
-    cursor += childMainSize + (i < relativeChildren.length - 1 ? extraGap : 0);
+    positionNode(child, childX, childY, child.layout.width, child.layout.height, measure);
+    cursor += childMainSizes[i] + (i < relativeChildren.length - 1 ? extraGap : 0);
   }
 
   // Position absolute children relative to the padding box (inside the
@@ -472,7 +606,7 @@ function positionNode(
     else if (as.bottom !== undefined)
       childY = padY + padH - as.bottom - child.layout.height;
 
-    positionNode(child, childX, childY, child.layout.width, child.layout.height);
+    positionNode(child, childX, childY, child.layout.width, child.layout.height, measure);
   }
 }
 
@@ -494,6 +628,6 @@ export function computeLayout(
   measure: MeasureFunc
 ): void {
   measureNode(root, containerWidth, containerHeight, measure);
-  positionNode(root, 0, 0, containerWidth, containerHeight);
+  positionNode(root, 0, 0, containerWidth, containerHeight, measure);
   root._dirty = false;
 }

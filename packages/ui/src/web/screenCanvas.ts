@@ -1,0 +1,205 @@
+export interface ScreenCanvas {
+  readonly canvas: HTMLCanvasElement;
+  readonly ctx: CanvasRenderingContext2D;
+  readonly width: number;
+  readonly height: number;
+  zoom(): number;
+  toScreen(e: MouseEvent): { x: number; y: number };
+  /**
+   * The browser discarded the on-screen bitmap (pinch, DPR, tab restore)
+   * without changing the logical size. Re-blit the framebuffer.
+   */
+  subscribeInvalidate(cb: () => void): () => void;
+  dispose(): void;
+}
+
+export type ScreenCanvasSize =
+  | { width: number; height: number }
+  | { mode: "viewport"; scale?: number };
+
+export interface CreateScreenCanvasOptions {
+  /** Fires when the logical backing-store size changes (viewport mode). */
+  onLogicalSize?: (width: number, height: number) => void;
+}
+
+/** Logical framebuffer for a CSS viewport at `scale` CSS pixels per pixel. */
+export function viewportLogicalSize(
+  cssWidth: number,
+  cssHeight: number,
+  scale: number,
+): { width: number; height: number } {
+  const s = Math.max(1, Math.round(scale));
+  return {
+    width: Math.max(1, Math.floor(cssWidth / s)),
+    height: Math.max(1, Math.floor(cssHeight / s)),
+  };
+}
+
+export function createScreenCanvas(
+  root: HTMLElement,
+  width: number,
+  height: number,
+): ScreenCanvas;
+export function createScreenCanvas(
+  root: HTMLElement,
+  size: ScreenCanvasSize,
+  options?: CreateScreenCanvasOptions,
+): ScreenCanvas;
+export function createScreenCanvas(
+  root: HTMLElement,
+  widthOrSize: number | ScreenCanvasSize,
+  heightOrOptions?: number | CreateScreenCanvasOptions,
+): ScreenCanvas {
+  const size: ScreenCanvasSize =
+    typeof widthOrSize === "number"
+      ? { width: widthOrSize, height: heightOrOptions as number }
+      : widthOrSize;
+  const hooks = typeof heightOrOptions === "object" ? heightOrOptions : undefined;
+
+  const canvas = document.createElement("canvas");
+  canvas.tabIndex = 0;
+  canvas.style.display = "block";
+  canvas.style.outline = "none";
+  canvas.style.imageRendering = "pixelated";
+  canvas.style.touchAction = "none";
+  root.appendChild(canvas);
+
+  const rawCtx = canvas.getContext("2d", { alpha: false });
+  if (!rawCtx) throw new Error("2D canvas is unavailable");
+  const ctx: CanvasRenderingContext2D = rawCtx;
+
+  let logicalWidth = 1;
+  let logicalHeight = 1;
+  let zoom = 1;
+  const viewport = "mode" in size ? size : null;
+  const fixed = "mode" in size ? null : size;
+  const viewportScale = viewport?.scale ?? 1;
+  const invalidators = new Set<() => void>();
+
+  function invalidate(): void {
+    invalidators.forEach((cb) => cb());
+  }
+
+  function applyBackingStore(width: number, height: number): void {
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    ctx.imageSmoothingEnabled = false;
+    logicalWidth = width;
+    logicalHeight = height;
+  }
+
+  function fitFixed(width: number, height: number): void {
+    zoom = Math.max(
+      1,
+      Math.min(Math.floor(window.innerWidth / width), Math.floor(window.innerHeight / height)),
+    );
+    applyBackingStore(width, height);
+    canvas.style.width = `${width * zoom}px`;
+    canvas.style.height = `${height * zoom}px`;
+  }
+
+  function fitViewport(scale: number): boolean {
+    zoom = Math.max(1, Math.round(scale));
+    const next = viewportLogicalSize(window.innerWidth, window.innerHeight, zoom);
+    const changed = next.width !== logicalWidth || next.height !== logicalHeight;
+    applyBackingStore(next.width, next.height);
+    canvas.style.width = `${next.width * zoom}px`;
+    canvas.style.height = `${next.height * zoom}px`;
+    return changed;
+  }
+
+  /**
+   * Reallocate only when the logical size changes. Same-size events still
+   * wipe the GPU texture (pinch / DPR), so those go through `invalidate`.
+   */
+  function onWindowResize(): void {
+    if (viewport) {
+      if (fitViewport(viewportScale)) {
+        hooks?.onLogicalSize?.(logicalWidth, logicalHeight);
+        return;
+      }
+    } else if (fixed) {
+      fitFixed(fixed.width, fixed.height);
+    }
+    invalidate();
+  }
+
+  function preventGesture(e: Event): void {
+    e.preventDefault();
+  }
+
+  let dprMedia: MediaQueryList | null = null;
+  const onDprChange = () => {
+    watchDpr();
+    invalidate();
+  };
+  function watchDpr(): void {
+    dprMedia?.removeEventListener("change", onDprChange);
+    if (typeof matchMedia !== "function") return;
+    dprMedia = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    dprMedia.addEventListener("change", onDprChange);
+  }
+
+  const onVisible = () => {
+    if (document.visibilityState === "visible") invalidate();
+  };
+
+  if (viewport) {
+    fitViewport(viewportScale);
+  } else if (fixed) {
+    fitFixed(fixed.width, fixed.height);
+  }
+  window.addEventListener("resize", onWindowResize);
+  window.addEventListener("pageshow", invalidate);
+  document.addEventListener("visibilitychange", onVisible);
+  const vv = typeof visualViewport !== "undefined" ? visualViewport : null;
+  vv?.addEventListener("resize", onWindowResize);
+  vv?.addEventListener("scroll", invalidate);
+  watchDpr();
+  canvas.addEventListener("gesturestart", preventGesture);
+  canvas.addEventListener("gesturechange", preventGesture);
+  canvas.addEventListener("contextlost", invalidate);
+  canvas.addEventListener("contextrestored", () => {
+    ctx.imageSmoothingEnabled = false;
+    invalidate();
+  });
+
+  return {
+    canvas,
+    ctx,
+    get width() {
+      return logicalWidth;
+    },
+    get height() {
+      return logicalHeight;
+    },
+    zoom: () => zoom,
+    toScreen(e: MouseEvent) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: Math.floor((e.clientX - rect.left) / zoom),
+        y: Math.floor((e.clientY - rect.top) / zoom),
+      };
+    },
+    subscribeInvalidate(cb) {
+      invalidators.add(cb);
+      return () => {
+        invalidators.delete(cb);
+      };
+    },
+    dispose() {
+      window.removeEventListener("resize", onWindowResize);
+      window.removeEventListener("pageshow", invalidate);
+      document.removeEventListener("visibilitychange", onVisible);
+      vv?.removeEventListener("resize", onWindowResize);
+      vv?.removeEventListener("scroll", invalidate);
+      dprMedia?.removeEventListener("change", onDprChange);
+      canvas.removeEventListener("gesturestart", preventGesture);
+      canvas.removeEventListener("gesturechange", preventGesture);
+      canvas.removeEventListener("contextlost", invalidate);
+      canvas.remove();
+    },
+  };
+}

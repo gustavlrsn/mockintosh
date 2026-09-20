@@ -5,7 +5,8 @@
  * - A node is focusable if its `_eventHandlers.tabIndex` is a non-negative number.
  * - Tab / Shift+Tab cycle through focusable nodes in tabIndex ascending order,
  *   using document order (depth-first) as the tiebreaker — matches DOM behavior.
- * - Clicking a focusable node focuses it (handled externally in event dispatch).
+ * - Clicking a focusable node focuses it; clicking elsewhere blurs
+ *   (handled in pointer dispatch).
  * - `onFocus` fires on the newly focused node; `onBlur` fires on the old one.
  */
 

@@ -2,6 +2,7 @@ import { createSignal, createEffect, createMemo, onSettled } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
 import { Show } from "solid-js";
 import { getFocusManager } from "../focusContext";
+import { useRadius } from "../theme";
 import { useUIServices } from "../services";
 import { measureText } from "../fonts/bridge";
 import type { CanvasNode, Modifiers } from "../nodes";
@@ -17,9 +18,13 @@ export interface TextInputProps {
   onBlur?: () => void;
   placeholder?: string;
   font?: string;
+  size?: number;
   width?: number;
   height?: number;
-  /** Inner padding; also used for click→caret mapping. Default 2. */
+  /**
+   * Uniform inner padding (and click→caret inset). When omitted, the field
+   * uses 4px on x and 2px on y so the 16px face still fits the glyph cell.
+   */
   padding?: number;
   /** Omit the field border (e.g. inline rename over a label). */
   borderless?: boolean;
@@ -42,6 +47,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
   // component initialization, not inside event callbacks.
   const focusManager = getFocusManager();
   const { clipboard } = useUIServices();
+  const radius = useRadius("md");
 
   const initialLen = props.value.length;
   const initialCaret =
@@ -74,15 +80,17 @@ export function TextInput(props: TextInputProps): JSX.Element {
   const [isFocused, setIsFocused] = createSignal(false, signalOpts);
 
   const fontName = () => props.font ?? "body";
-  const pad = () => props.padding ?? 2;
+  const fontSize = () => props.size;
+  const padY = () => props.padding ?? 2;
+  const padX = () => props.padding ?? 4;
   const bordered = () => !props.borderless;
   const borderW = () => (bordered() ? 1 : 0);
   const fieldWidth = () => props.width ?? 120;
   const fieldHeight = () => props.height ?? 16;
-  const innerTextH = () => Math.max(1, fieldHeight() - (pad() + borderW()) * 2);
-  const contentWidth = () => Math.max(1, fieldWidth() - (pad() + borderW()) * 2);
+  const innerTextH = () => Math.max(1, fieldHeight() - (padY() + borderW()) * 2);
+  const contentWidth = () => Math.max(1, fieldWidth() - (padX() + borderW()) * 2);
   /** Pointer x (border-box local) → x within the content box. */
-  const localToContentX = (lx: number) => lx - borderW() - pad();
+  const localToContentX = (lx: number) => lx - borderW() - padX();
   /** Horizontal pan so the caret stays inside the clipped content box. */
   const [scrollX, setScrollX] = createSignal(0, signalOpts);
 
@@ -166,14 +174,14 @@ export function TextInput(props: TextInputProps): JSX.Element {
   // --- Pixel offset helpers ---
   function charOffsetToPixels(index: number): number {
     const sub = displayValue().slice(0, index);
-    return measureText(sub, fontName());
+    return measureText(sub, fontName(), {}, fontSize());
   }
 
   function pixelsToCharIndex(px: number): number {
     const text = displayValue();
     let accumulated = 0;
     for (let i = 0; i < text.length; i++) {
-      const cw = measureText(text[i], fontName());
+      const cw = measureText(text[i], fontName(), {}, fontSize());
       if (px < accumulated + cw / 2) return i;
       accumulated += cw;
     }
@@ -386,11 +394,11 @@ export function TextInput(props: TextInputProps): JSX.Element {
   // --- Computed pixel positions ---
   // Nudge 1px left so the bar sits in the gap between glyphs (metrics skew it right).
   const cursorPixelX = () =>
-    Math.max(pad(), charOffsetToPixels(cursorPos()) + pad() - 1) - scrollX();
+    Math.max(padX(), charOffsetToPixels(cursorPos()) + padX() - 1) - scrollX();
   const selPixelStart = () => {
     const ss = selStart(), se = selEnd();
     if (ss === null || se === null) return 0;
-    return charOffsetToPixels(Math.min(ss, se)) + pad() - scrollX();
+    return charOffsetToPixels(Math.min(ss, se)) + padX() - scrollX();
   };
   const selPixelWidth = () => {
     const ss = selStart(), se = selEnd();
@@ -419,7 +427,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
   });
   const selectedSliceLeft = createMemo(() => {
     const r = selectionRange();
-    return r ? pad() + charOffsetToPixels(r.lo) - scrollX() : 0;
+    return r ? padX() + charOffsetToPixels(r.lo) - scrollX() : 0;
   });
 
   return (
@@ -432,10 +440,15 @@ export function TextInput(props: TextInputProps): JSX.Element {
       borderColor={bordered() ? 1 : undefined}
       borderStyle={bordered() ? "solid" : undefined}
       borderWidth={bordered() ? 1 : 0}
-      padding={pad()}
+      borderRadius={bordered() ? radius() : undefined}
+      paddingTop={padY()}
+      paddingBottom={padY()}
+      paddingLeft={padX()}
+      paddingRight={padX()}
       justifyContent="center"
       overflow="hidden"
       tabIndex={props.disabled ? undefined : 0}
+      cursor={props.disabled ? "default" : "text"}
       onFocus={handleFocus}
       onBlur={handleBlur}
       onMouseDown={(x: number, y: number) => handleMouseDown(x, y)}
@@ -449,7 +462,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
         <box
           position="absolute"
           left={selPixelStart()}
-          top={pad()}
+          top={padY()}
           width={selPixelWidth()}
           height={innerTextH()}
           background={1}
@@ -459,12 +472,14 @@ export function TextInput(props: TextInputProps): JSX.Element {
       <Show when={!!displayValue()}>
         <text
           position="absolute"
-          left={pad() - scrollX()}
-          top={pad()}
+          left={padX() - scrollX()}
+          top={padY()}
           height={innerTextH()}
           font={fontName()}
+          size={fontSize()}
           color={1}
           verticalAlign="middle"
+          nowrap
         >
           {displayValue()}
         </text>
@@ -475,11 +490,13 @@ export function TextInput(props: TextInputProps): JSX.Element {
         <text
           position="absolute"
           left={selectedSliceLeft()}
-          top={pad()}
+          top={padY()}
           height={innerTextH()}
           font={fontName()}
+          size={fontSize()}
           color={0}
           verticalAlign="middle"
+          nowrap
         >
           {selectedSlice()}
         </text>
@@ -489,7 +506,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
         <box
           position="absolute"
           left={cursorPixelX()}
-          top={pad()}
+          top={padY()}
           width={1}
           height={innerTextH()}
           background={1}
@@ -499,12 +516,14 @@ export function TextInput(props: TextInputProps): JSX.Element {
       <Show when={showPlaceholder()}>
         <text
           position="absolute"
-          left={pad()}
-          top={pad()}
+          left={padX()}
+          top={padY()}
           height={innerTextH()}
           font={fontName()}
+          size={fontSize()}
           color={1}
           verticalAlign="middle"
+          nowrap
         >
           {props.placeholder}
         </text>

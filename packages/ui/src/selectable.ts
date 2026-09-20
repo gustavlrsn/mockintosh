@@ -7,9 +7,9 @@
 
 import { getFocusManager } from "./focusContext";
 import { useUIServices } from "./services";
-import { requireFont } from "./fonts/registry";
-import { indexAtPoint, layoutText } from "./fonts/textLayout";
-import { collectNodeText, setNodeProperty, type CanvasNode } from "./nodes";
+import { fontFromProps } from "./fonts/style";
+import { indexAtPoint, layoutNodeText } from "./fonts/textLayout";
+import { collectNodeText, setNodeProperty, textWraps, type CanvasNode } from "./nodes";
 
 export interface TextSelection {
   lo: number;
@@ -36,22 +36,20 @@ function localPoint(node: CanvasNode, gx: number, gy: number): { lx: number; ly:
 }
 
 function blockOf(node: CanvasNode) {
-  const fontName = (node.props["font"] as string | undefined) ?? "body";
-  const wrap = (node.props["wrap"] as boolean | undefined) ?? false;
+  const wrap = textWraps(node.props);
   const padL = node.style.paddingLeft ?? node.style.padding ?? 0;
   const padR = node.style.paddingRight ?? node.style.padding ?? 0;
   const innerW = Math.max(0, node.layout.width - padL - padR);
-  return layoutText(requireFont(fontName), collectNodeText(node), wrap ? innerW : undefined);
+  return layoutNodeText(node, fontFromProps(node.props), collectNodeText(node), wrap ? innerW : undefined);
 }
 
 function indexAtLocal(node: CanvasNode, lx: number, ly: number): number {
   const text = collectNodeText(node);
   const padL = node.style.paddingLeft ?? node.style.padding ?? 0;
   const padT = node.style.paddingTop ?? node.style.padding ?? 0;
-  const fontName = (node.props["font"] as string | undefined) ?? "body";
   return Math.max(0, Math.min(
     text.length,
-    indexAtPoint(blockOf(node), requireFont(fontName), lx - padL, ly - padT),
+    indexAtPoint(blockOf(node), fontFromProps(node.props), lx - padL, ly - padT),
   ));
 }
 
@@ -222,6 +220,7 @@ export function applySelectable(node: CanvasNode, value: unknown): void {
   setNodeProperty(node, "onDrag", onDrag);
   setNodeProperty(node, "onDoubleClick", onDoubleClick);
   setNodeProperty(node, "onKeyDown", onKeyDown);
+  if (!node._eventHandlers.cursor) setNodeProperty(node, "cursor", "text");
 
   sessions.set(node, () => {
     registered.delete(node);
@@ -231,5 +230,6 @@ export function applySelectable(node: CanvasNode, value: unknown): void {
     setNodeProperty(node, "onDrag", undefined);
     setNodeProperty(node, "onDoubleClick", undefined);
     setNodeProperty(node, "onKeyDown", undefined);
+    if (node._eventHandlers.cursor === "text") setNodeProperty(node, "cursor", undefined);
   });
 }

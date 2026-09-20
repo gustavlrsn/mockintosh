@@ -3,12 +3,15 @@
  *
  * This is the single source of truth for line breaking. `measure.ts` uses it
  * to size `<text>` nodes and `draw.ts` uses it to paint them, so measured and
- * drawn geometry can never disagree. Height here is the Decker cell block;
- * single-line `verticalAlign="middle"` then substitutes the FontInfo line
- * box (`alignmentHeight` in `metrics.ts`) in both passes.
+ * drawn geometry can never disagree. Line advance is the FontInfo line box
+ * (`ascent + descent + leading`). The last line trims the empty extra below
+ * the strike (`text-box-trim: trim-end`): Geneva 9's cell is 10px, GetFontInfo
+ * is 12, so one line is 10 and two lines are 22.
  */
 
+import type { CanvasNode } from "../nodes";
 import { textAdvance, type DeckerFont } from "./font";
+import { faceMetrics } from "./metrics";
 
 export interface TextLine {
   text: string;
@@ -22,10 +25,15 @@ export interface TextBlock {
   lines: TextLine[];
   /** Widest line. */
   width: number;
-  /** `lines.length * lineHeight`. */
+  /**
+   * `(lines - 1) * lineHeight + lastLineHeight`.
+   * The last line does not keep the empty FontInfo extra below the cell.
+   */
   height: number;
-  /** Vertical advance per line (the font's glyph height). */
+  /** Vertical advance from one line to the next (FontInfo ascent + descent + leading). */
   lineHeight: number;
+  /** Strike height of the last line (the Decker cell). */
+  lastLineHeight: number;
 }
 
 /**
@@ -42,7 +50,8 @@ export function layoutText(
   text: string,
   maxWidth?: number
 ): TextBlock {
-  const lineHeight = font.glyphHeight;
+  const lineHeight = faceMetrics(font).lineHeight;
+  const lastLineHeight = font.glyphHeight;
   const lines: TextLine[] = [];
   const wrap = maxWidth !== undefined && maxWidth > 0;
   let offset = 0;
@@ -60,7 +69,47 @@ export function layoutText(
 
   let width = 0;
   for (const l of lines) width = Math.max(width, l.width);
-  return { lines, width, height: lines.length * lineHeight, lineHeight };
+  const height =
+    lines.length === 0 ? 0 : (lines.length - 1) * lineHeight + lastLineHeight;
+  return { lines, width, height, lineHeight, lastLineHeight };
+}
+
+interface TextLayoutCache {
+  font: DeckerFont;
+  text: string;
+  maxWidth: number | undefined;
+  block: TextBlock;
+}
+
+const textLayoutCache = new WeakMap<CanvasNode, TextLayoutCache>();
+
+/**
+ * Same as `layoutText`, but reused across measure, paint, and selection when
+ * the font, string, and wrap width have not changed.
+ */
+export function layoutNodeText(
+  node: CanvasNode,
+  font: DeckerFont,
+  text: string,
+  maxWidth?: number,
+): TextBlock {
+  const hit = textLayoutCache.get(node);
+  if (hit && hit.font === font && hit.text === text && hit.maxWidth === maxWidth) {
+    return hit.block;
+  }
+  const block = layoutText(font, text, maxWidth);
+  textLayoutCache.set(node, { font, text, maxWidth, block });
+  return block;
+}
+
+/** Top of line `index` in a block (0 is the first line). */
+export function lineTop(block: TextBlock, index: number): number {
+  return Math.max(0, index) * block.lineHeight;
+}
+
+/** Height of line `index` — FontInfo stride, except the last line is the cell. */
+export function lineBoxHeight(block: TextBlock, index: number): number {
+  return index >= block.lines.length - 1 ? block.lastLineHeight : block.lineHeight;
 }
 
 function makeLine(font: DeckerFont, text: string, start: number): TextLine {
@@ -139,7 +188,12 @@ export function charIndexAtX(font: DeckerFont, text: string, x: number): number 
 /** Source index in the original string for a point in a laid-out block. */
 export function indexAtPoint(block: TextBlock, font: DeckerFont, x: number, y: number): number {
   if (!block.lines.length) return 0;
-  const row = Math.max(0, Math.min(block.lines.length - 1, Math.floor(y / block.lineHeight)));
+  const last = block.lines.length - 1;
+  const lastTop = lineTop(block, last);
+  const row =
+    y >= lastTop
+      ? last
+      : Math.max(0, Math.min(last, Math.floor(y / block.lineHeight)));
   const line = block.lines[row]!;
   return line.start + charIndexAtX(font, line.text, x);
 }

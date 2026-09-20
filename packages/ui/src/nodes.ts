@@ -119,6 +119,10 @@ export interface MouseEventHandlers {
   onDrag?: (localX: number, localY: number, globalX: number, globalY: number) => void;
   onDragEnd?: (localX: number, localY: number, globalX: number, globalY: number) => void;
   onScroll?: (deltaY: number) => void;
+  /**
+   * Semantic cursor name (`pointer`, `text`, `watch`, …). Hosts map it to
+   * CSS or a 1-bit face — see `cursor.ts`.
+   */
   cursor?: string;
 }
 
@@ -189,10 +193,122 @@ export type Ink = 0 | 1;
 /** An 8-byte QuickDraw `Pattern` (8×8, 1-bit). */
 export type PatternBits = Uint8Array;
 
-/** Solid ink, a named dither, or a raw 8-byte pattern. */
-export type Fill = Ink | PatternName | PatternBits;
+/** Compass aliases (`se`) and CSS `to …` keywords (`to bottom right`). */
+export type GradientKeyword =
+  | "n"
+  | "ne"
+  | "e"
+  | "se"
+  | "s"
+  | "sw"
+  | "w"
+  | "nw"
+  | "to top"
+  | "to right"
+  | "to bottom"
+  | "to left"
+  | "to top right"
+  | "to bottom right"
+  | "to bottom left"
+  | "to top left";
+
+/**
+ * Linear heading: a keyword, or CSS degrees (`0` = up, clockwise).
+ * `se` / `to bottom right` / `135` are the same vector.
+ */
+export type GradientDirection = GradientKeyword | number;
+
+export type GradientKind = "linear" | "radial" | "conic";
+
+/** Origin for radial / conic. Unit coords `0…1`, or a CSS/compass side. */
+export type GradientAt =
+  | { x: number; y: number }
+  | "center"
+  | "n"
+  | "ne"
+  | "e"
+  | "se"
+  | "s"
+  | "sw"
+  | "w"
+  | "nw"
+  | "top"
+  | "right"
+  | "bottom"
+  | "left"
+  | "top left"
+  | "top right"
+  | "bottom left"
+  | "bottom right";
+
+/**
+ * Size-dependent 1-bit ramp. `from` / `to` are blackness in `0…1`
+ * (0 = paper, 1 = ink). Painted at the box's laid-out size, not tiled 8×8.
+ * CSS has linear, radial, and conic (plus repeating forms of each).
+ */
+export interface DitherGradientFill {
+  dither: "gradient";
+  from: number;
+  to: number;
+  /** Linear heading. Default `s` / `to bottom`. Unused by radial. */
+  direction?: GradientDirection;
+  /** Default `linear`. */
+  kind?: GradientKind;
+  /** Radial / conic origin. Default `center`. */
+  at?: GradientAt;
+  /** Radial: `ellipse` fits the box (CSS default); `circle` is isotropic. */
+  shape?: "circle" | "ellipse";
+  /** Conic start, CSS degrees (`0` = up). Falls back to numeric `direction`. */
+  start?: number;
+  /** Period in the 0…1 parameter. `0.25` repeats four times. */
+  repeat?: number;
+  /** Defaults to Bayer — stable chrome, no error-diffusion fringe. */
+  mode?: "atkinson" | "bayer";
+}
+
+export type DitherGradientInit = Omit<DitherGradientFill, "dither">;
+
+export function ditherGradient(
+  from: number,
+  to: number,
+  direction?: GradientDirection,
+  mode?: DitherGradientFill["mode"],
+): DitherGradientFill;
+export function ditherGradient(fill: DitherGradientInit): DitherGradientFill;
+export function ditherGradient(
+  fromOrFill: number | DitherGradientInit,
+  to?: number,
+  direction?: GradientDirection,
+  mode?: DitherGradientFill["mode"],
+): DitherGradientFill {
+  if (typeof fromOrFill === "object") {
+    return { dither: "gradient", direction: "s", ...fromOrFill };
+  }
+  return {
+    dither: "gradient",
+    from: fromOrFill,
+    to: to ?? 1,
+    direction: direction ?? "s",
+    mode,
+  };
+}
+
+export function isDitherGradientFill(value: unknown): value is DitherGradientFill {
+  if (!value || typeof value !== "object" || !("dither" in value)) return false;
+  return (value as DitherGradientFill).dither === "gradient";
+}
+
+/** Solid ink, a named dither, a raw 8-byte pattern, or a sized gradient. */
+export type Fill = Ink | PatternName | PatternBits | DitherGradientFill;
 
 export interface SemanticProps { semantic?: import("./inspection").SemanticMetadata; }
+
+/** Word-wrap unless `nowrap` or `wrap={false}`. Default is on. */
+export function textWraps(props: { wrap?: unknown; nowrap?: unknown }): boolean {
+  if (props.nowrap === true) return false;
+  if (props.wrap === false) return false;
+  return true;
+}
 
 export interface BoxProps extends LayoutStyle, EventHandlers, SemanticProps {
   /** Solid ink, named dither, or raw 8-byte QuickDraw pattern */
@@ -201,6 +317,12 @@ export interface BoxProps extends LayoutStyle, EventHandlers, SemanticProps {
   /** default: "solid" */
   borderStyle?: "solid" | "dotted" | "dashed";
   borderRadius?: number;
+  /**
+   * 1px drop shadow to the right and below (window chrome).
+   * The face paints 1px up-left so it sits on the shadow. The shadow
+   * uses the same `borderRadius` as the face.
+   */
+  shadow?: boolean;
   /** Transfer mode for fills and borders. */
   penMode?: "copy" | "xor";
   /** Skip this subtree in hit-testing (e.g. windows behind a modal). */
@@ -209,6 +331,12 @@ export interface BoxProps extends LayoutStyle, EventHandlers, SemanticProps {
   focusScope?: boolean;
   /** Vertical scroll offset in pixels (requires overflow="scroll") */
   scrollOffset?: number;
+  /**
+   * When this value changes, `_scrollOffset` returns to 0.
+   * Use a route path so a reused overflow pane does not stay scrolled
+   * into empty space after navigation.
+   */
+  scrollKey?: string | number;
   /** Per-pixel hit mask — limits clickable area to non-zero mask pixels. */
   hitMask?: HitMask;
   children?: unknown;
@@ -219,6 +347,32 @@ export type TextVerticalAlign = "top" | "middle" | "bottom";
 
 export interface TextProps extends LayoutStyle, EventHandlers, SemanticProps {
   font?: string;
+  /**
+   * Native bitmap point size for a family (`font="geneva" size={12}`).
+   * Omitted uses the family's default (Geneva 9, Chicago 12, …).
+   * A size Apple did not ship snaps to the nearest native strike.
+   */
+  size?: number;
+  /**
+   * Font Manager bold: smear each glyph 1px to the right and grow the
+   * advance. Works on every registered face — there is no `monoBold` name.
+   */
+  bold?: boolean;
+  /**
+   * Font Manager italic: shear at draw time and grow the advance 1px.
+   * Combines with `bold`.
+   */
+  italic?: boolean;
+  /**
+   * 1px ring in this text's color; the stem is inverted. Combines with
+   * `bold` / `italic` / `shadow`. Grows the cell 2px in each axis.
+   */
+  outline?: boolean;
+  /**
+   * Outline plus a 1px south-east drop of the ring. Combines with
+   * `bold` / `italic` / `outline`. Grows the cell 3px in each axis.
+   */
+  shadow?: boolean;
   color?: Ink;
   /** Solid background behind the text */
   background?: Ink;
@@ -234,8 +388,13 @@ export interface TextProps extends LayoutStyle, EventHandlers, SemanticProps {
    * centered, then the baseline (`ascent` from the top of that box).
    */
   verticalAlign?: TextVerticalAlign;
-  /** Word-wrap lines to the node's content width. Explicit `\n` always breaks. */
+  /**
+   * Word-wrap to the content width. Default is on; pass `nowrap` (or
+   * `wrap={false}`) for a single line. Explicit `\n` always breaks.
+   */
   wrap?: boolean;
+  /** Opt out of the default wrap. */
+  nowrap?: boolean;
   /** Drag-select this text and copy with ⌘C / Ctrl+C. */
   selectable?: boolean;
   /**
@@ -426,6 +585,12 @@ export function resolveBorderWidth(node: CanvasNode): number {
   return Math.max(0, node.style.borderWidth ?? 1);
 }
 
+/** Face paints 1px up-left so it sits on the L-shadow. Text `shadow` is a type style. */
+export function shadowRaise(node: CanvasNode): number {
+  if (node.type !== "box") return 0;
+  return node.props.shadow === true ? 1 : 0;
+}
+
 export const EVENT_PROP_NAMES = new Set<string>([
   "onClick", "onDoubleClick", "onMouseDown", "onMouseDownCapture", "onMouseUp",
   "onMouseEnter", "onMouseLeave", "onDragStart", "onDrag", "onDragEnd",
@@ -437,7 +602,15 @@ export const EVENT_PROP_NAMES = new Set<string>([
 export function setNodeProperty(node: CanvasNode, name: string, value: unknown): void {
   if (name === "scrollOffset") {
     node._scrollOffset = (value as number) || 0;
-    markDirty(node);
+    return;
+  }
+  if (name === "scrollKey") {
+    const prev = node.props["scrollKey"];
+    node.props["scrollKey"] = value;
+    if (value !== prev) {
+      node._scrollOffset = 0;
+      markDirty(node);
+    }
     return;
   }
   if (LAYOUT_PROP_NAMES.has(name)) {

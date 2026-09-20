@@ -6,8 +6,8 @@
 
 import {
   hasMouseHandlers,
-  markDirty,
   resolveBorderWidth,
+  shadowRaise,
   type CanvasNode,
   type HitMask,
   type LayoutRect,
@@ -15,6 +15,9 @@ import {
 } from "./nodes";
 import type { FocusManager } from "./focus";
 import { scheduleRepaint } from "./renderer";
+import { scrollOverflow } from "./scroll";
+
+export { scrollOverflow } from "./scroll";
 
 export type PointerType =
   | "mousemove"
@@ -22,6 +25,42 @@ export type PointerType =
   | "mouseup"
   | "dblclick"
   | "scroll";
+
+/** Mac `DoubleTime` / `DoubleSpace` — same window the OS and the kit web host use. */
+export const DOUBLE_CLICK_MS = 500;
+export const DOUBLE_CLICK_DIST = 4;
+
+/**
+ * Classify a pointer-down as the second click of a double.
+ * Hosts must still dispatch `mousedown` first — `dblclick` is extra, like the DOM.
+ */
+export function createDoubleClickTracker(options?: {
+  ms?: number;
+  dist?: number;
+}): { down(x: number, y: number, now: number): boolean; reset(): void } {
+  const ms = options?.ms ?? DOUBLE_CLICK_MS;
+  const dist = options?.dist ?? DOUBLE_CLICK_DIST;
+  let lastTime = -Infinity;
+  let lastX = 0;
+  let lastY = 0;
+  return {
+    down(x: number, y: number, now: number): boolean {
+      const isDouble =
+        now - lastTime < ms && Math.abs(x - lastX) < dist && Math.abs(y - lastY) < dist;
+      if (isDouble) {
+        lastTime = -Infinity;
+        return true;
+      }
+      lastTime = now;
+      lastX = x;
+      lastY = y;
+      return false;
+    },
+    reset() {
+      lastTime = -Infinity;
+    },
+  };
+}
 
 export interface PointerDispatcher {
   dispatch(
@@ -65,11 +104,20 @@ function hitMaskOk(mask: HitMask | undefined, lx: number, ly: number): boolean {
 }
 
 function visualRect(node: CanvasNode, ox: number, oy: number): LayoutRect {
+  const raise = shadowRaise(node);
   return {
-    x: node.layout.x + ox,
-    y: node.layout.y + oy,
+    x: node.layout.x + ox - raise,
+    y: node.layout.y + oy - raise,
     width: node.layout.width,
     height: node.layout.height,
+  };
+}
+
+function childPaintOffset(node: CanvasNode, ox: number, oy: number): { ox: number; oy: number } {
+  const raise = shadowRaise(node);
+  return {
+    ox: ox - raise,
+    oy: (node.style.overflow === "scroll" ? oy - node._scrollOffset : oy) - raise,
   };
 }
 
@@ -103,9 +151,9 @@ export function hitTest(
       height: Math.max(0, rect.height - 2 * bw),
     });
     if (nextClip.width > 0 && nextClip.height > 0) {
-      const childOy = oy - (overflow === "scroll" ? node._scrollOffset : 0);
+      const next = childPaintOffset(node, ox, oy);
       for (let i = node.children.length - 1; i >= 0; i--) {
-        const hit = hitTest(node.children[i], x, y, ox, childOy, nextClip);
+        const hit = hitTest(node.children[i], x, y, next.ox, next.oy, nextClip);
         if (hit) return hit;
       }
     }
@@ -122,8 +170,9 @@ export function hitTest(
     return null;
   }
 
+  const next = childPaintOffset(node, ox, oy);
   for (let i = node.children.length - 1; i >= 0; i--) {
-    const hit = hitTest(node.children[i], x, y, ox, oy, clip);
+    const hit = hitTest(node.children[i], x, y, next.ox, next.oy, clip);
     if (hit) return hit;
   }
 
@@ -137,26 +186,6 @@ export function hitTest(
     return node;
   }
   return null;
-}
-
-function paddingEdge(node: CanvasNode, edge: "top" | "right" | "bottom" | "left"): number {
-  const base = node.style.padding ?? 0;
-  if (edge === "top") return node.style.paddingTop ?? base;
-  if (edge === "right") return node.style.paddingRight ?? base;
-  if (edge === "bottom") return node.style.paddingBottom ?? base;
-  return node.style.paddingLeft ?? base;
-}
-
-/** How far `overflow: scroll` can move, from laid-out children. */
-export function scrollOverflow(node: CanvasNode): number {
-  const bw = resolveBorderWidth(node);
-  let maxBottom = node.layout.y + bw + paddingEdge(node, "top");
-  for (const child of node.children) {
-    if ((child.style.position ?? "relative") === "absolute") continue;
-    maxBottom = Math.max(maxBottom, child.layout.y + child.layout.height);
-  }
-  const contentH = maxBottom - node.layout.y + bw + paddingEdge(node, "bottom");
-  return Math.max(0, contentH - node.layout.height);
 }
 
 /**
@@ -177,7 +206,7 @@ export function nodeAt(
   const rect = visualRect(node, ox, oy);
   const overflow = node.style.overflow;
   const clips = overflow === "hidden" || overflow === "scroll";
-  const childOy = overflow === "scroll" ? oy - node._scrollOffset : oy;
+  const next = childPaintOffset(node, ox, oy);
 
   if (clips) {
     const bw = resolveBorderWidth(node);
@@ -189,13 +218,13 @@ export function nodeAt(
     });
     if (nextClip.width > 0 && nextClip.height > 0) {
       for (let i = node.children.length - 1; i >= 0; i--) {
-        const hit = nodeAt(node.children[i], x, y, ox, childOy, nextClip);
+        const hit = nodeAt(node.children[i], x, y, next.ox, next.oy, nextClip);
         if (hit) return hit;
       }
     }
   } else {
     for (let i = node.children.length - 1; i >= 0; i--) {
-      const hit = nodeAt(node.children[i], x, y, ox, oy, clip);
+      const hit = nodeAt(node.children[i], x, y, next.ox, next.oy, clip);
       if (hit) return hit;
     }
   }
@@ -211,18 +240,20 @@ function applyWheel(node: CanvasNode, dy: number): boolean {
   const next = Math.max(0, Math.min(max, node._scrollOffset + dy));
   if (next === node._scrollOffset) return false;
   node._scrollOffset = next;
-  markDirty(node);
+  // Offset is paint-only. markDirty would recompute flex on every wheel.
   scheduleRepaint();
   return true;
 }
 
 function localOf(node: CanvasNode, gx: number, gy: number): { lx: number; ly: number } {
-  // Walk ancestors to accumulate scroll offsets so local coords match the
-  // visual position used by layout + draw.
-  let ox = 0;
-  let oy = 0;
+  // Walk ancestors to accumulate scroll offsets and shadow raises so local
+  // coords match the visual position used by layout + draw.
+  let ox = -shadowRaise(node);
+  let oy = -shadowRaise(node);
   let n: CanvasNode | null = node.parent;
   while (n) {
+    ox -= shadowRaise(n);
+    oy -= shadowRaise(n);
     if (n.style.overflow === "scroll") oy -= n._scrollOffset;
     n = n.parent;
   }
@@ -285,9 +316,19 @@ export function createPointerDispatcher(
 
   function setHovered(next: CanvasNode | null): void {
     if (next === hovered) return;
-    hovered?._eventHandlers.onMouseLeave?.();
+    const prevChain: CanvasNode[] = [];
+    for (let n = hovered; n; n = n.parent) prevChain.push(n);
+    const nextChain: CanvasNode[] = [];
+    for (let n = next; n; n = n.parent) nextChain.push(n);
+    let i = prevChain.length - 1;
+    let j = nextChain.length - 1;
+    while (i >= 0 && j >= 0 && prevChain[i] === nextChain[j]) {
+      i--;
+      j--;
+    }
+    for (let k = 0; k <= i; k++) prevChain[k]._eventHandlers.onMouseLeave?.();
+    for (let k = j; k >= 0; k--) nextChain[k]._eventHandlers.onMouseEnter?.();
     hovered = next;
-    hovered?._eventHandlers.onMouseEnter?.();
   }
 
   return {
@@ -349,6 +390,7 @@ export function createPointerDispatcher(
         setHovered(hit);
         if (!hit) {
           captured = null;
+          focusManager.blur();
           return;
         }
 
@@ -368,6 +410,7 @@ export function createPointerDispatcher(
         hit._eventHandlers.onMouseDown?.(lx, ly);
         const focusable = nearestFocusable(hit);
         if (focusable) focusManager.focus(focusable);
+        else focusManager.blur();
         return;
       }
 

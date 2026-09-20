@@ -14,7 +14,14 @@ import {
   type RgnHandle,
   type Rect,
   SetPort,
-  ClipRect,
+  GetClip,
+  SetClip,
+  NewRgn,
+  RectRgn,
+  SectRgn,
+  OpenRgn,
+  CloseRgn,
+  PtInRgn,
   CopyBits,
   ForeColor,
   MoveTo,
@@ -57,10 +64,14 @@ import {
   hasMouseHandlers,
   collectNodeText,
   resolveBorderWidth,
+  shadowRaise,
   type CanvasNode,
   type HitRect,
   type HitMask,
   type Fill,
+  type DitherGradientFill,
+  isDitherGradientFill,
+  textWraps,
   type Ink,
   type PatternBits,
   type PatternName,
@@ -72,12 +83,15 @@ import {
 } from "./nodes";
 import type { FocusManager } from "./focus";
 import type { Sprite } from "./sprite";
-import { requireFont } from "./fonts/registry";
-import { layoutText } from "./fonts/textLayout";
+import { layoutNodeText, lineBoxHeight } from "./fonts/textLayout";
 import { textAdvance } from "./fonts/font";
 import { faceMetrics, middleCellTop } from "./fonts/metrics";
-import { encodeUiText, fontAscent, fontFamilyId } from "./fonts/strike";
+import { fontFromProps, fontNameFromProps, fontStyleFromProps, textFace } from "./fonts/style";
+import { encodeUiText, fontFamilyId } from "./fonts/strike";
+import { drawStyledLine } from "./fonts/bridge";
 import { textSelectionOf } from "./selectable";
+import { scrollTrack } from "./scroll";
+import { rasterizeDitherGradient } from "./ditherGradient";
 
 // -------------------------------------------------------------------------
 // Pattern data — 8x8 bitmaps for dither fills
@@ -115,22 +129,42 @@ export interface DrawContext {
   height: number;
 }
 
+function snapshotClip(port: GrafPort): RgnHandle {
+  SetPort(port);
+  const rgn = NewRgn();
+  GetClip(rgn);
+  return rgn;
+}
+
+function restoreClip(port: GrafPort, rgn: RgnHandle): void {
+  SetPort(port);
+  SetClip(rgn);
+}
+
 /**
- * `ClipRect` replaces the port clip. Nested overflow / raster / bitmap clips
- * must intersect so a child cannot reopen a parent's padding box.
+ * Intersect the port clip with `next` so a child cannot reopen a parent.
+ * Uses `SectRgn` so a rounded overflow clip survives nested rect clips.
  */
 function intersectClip(port: GrafPort, next: Rect): void {
-  const prev = port.clipRgn?.rgn.rgnBBox;
-  ClipRect(
-    prev
-      ? makeRect(
-          Math.max(prev.top, next.top),
-          Math.max(prev.left, next.left),
-          Math.min(prev.bottom, next.bottom),
-          Math.min(prev.right, next.right)
-        )
-      : next
-  );
+  SetPort(port);
+  const extra = NewRgn();
+  RectRgn(extra, next);
+  SectRgn(port.clipRgn, extra, port.clipRgn);
+}
+
+function boxOvalSize(node: CanvasNode): number {
+  const radius = (node.props["borderRadius"] as number | undefined) ?? 0;
+  return radius > 0 ? radius * 2 : 0;
+}
+
+/** Restrict the clip to the filled round-rect of `r` (same oval as `drawBox`). */
+function intersectClipRoundRect(port: GrafPort, r: Rect, ovSize: number): void {
+  SetPort(port);
+  const shaped = NewRgn();
+  OpenRgn();
+  FrameRoundRect(r, ovSize, ovSize);
+  CloseRgn(shaped);
+  SectRgn(port.clipRgn, shaped, port.clipRgn);
 }
 
 /** Inline equivalent of the private `makeRegion` in grafport.ts */
@@ -173,6 +207,19 @@ export function createDrawContext(screen: BitMap): DrawContext {
   return { port, focusManager: null, width, height };
 }
 
+/** Point an existing draw context at a new framebuffer. Keeps focusManager. */
+export function resizeDrawContext(ctx: DrawContext, screen: BitMap): void {
+  const width = bitMapWidth(screen);
+  const height = bitMapHeight(screen);
+  const bounds = cloneRect(screen.bounds);
+  ctx.width = width;
+  ctx.height = height;
+  ctx.port.portBits = screen;
+  ctx.port.portRect = cloneRect(bounds);
+  ctx.port.visRgn = _makeRgn(cloneRect(bounds));
+  SetPort(ctx.port);
+}
+
 function applyPenMode(_port: GrafPort, penMode: "copy" | "xor" | undefined): void {
   if (penMode === "xor") PenMode(patXor);
   else PenNormal();
@@ -194,6 +241,11 @@ function fillBackground(
 ): void {
   applyPenMode(port, penMode);
   const rounded = ovSize > 0;
+  if (isDitherGradientFill(background)) {
+    fillDitherGradient(port, r, background, ovSize);
+    PenNormal();
+    return;
+  }
   if (typeof background === "number") {
     if (background === 0 && penMode !== "xor") {
       if (rounded) EraseRoundRect(r, ovSize, ovSize);
@@ -214,6 +266,23 @@ function fillBackground(
   PenNormal();
 }
 
+function fillDitherGradient(
+  port: GrafPort,
+  r: ReturnType<typeof makeRect>,
+  fill: DitherGradientFill,
+  ovSize: number,
+): void {
+  const width = r.right - r.left;
+  const height = r.bottom - r.top;
+  if (width < 1 || height < 1) return;
+  const bits = rasterizeDitherGradient(width, height, fill);
+  const saved = snapshotClip(port);
+  intersectClip(port, r);
+  if (ovSize > 0) intersectClipRoundRect(port, r, ovSize);
+  createRasterSurface(port, { x: r.left, y: r.top, width, height }).blitPixels(bits, width, height);
+  restoreClip(port, saved);
+}
+
 // -------------------------------------------------------------------------
 // Draw
 // -------------------------------------------------------------------------
@@ -224,6 +293,29 @@ export function drawTree(root: CanvasNode, ctx: DrawContext): void {
   PenNormal();
   ForeColor(blackColor);
   drawNode(root, ctx, 0, 0, 0);
+}
+
+function viewBox(port: GrafPort): Rect {
+  const clip = port.clipRgn.rgn.rgnBBox;
+  const vis = port.visRgn.rgn.rgnBBox;
+  const pr = port.portRect;
+  return makeRect(
+    Math.max(clip.top, vis.top, pr.top),
+    Math.max(clip.left, vis.left, pr.left),
+    Math.min(clip.bottom, vis.bottom, pr.bottom),
+    Math.min(clip.right, vis.right, pr.right),
+  );
+}
+
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+function hasAbsoluteChild(node: CanvasNode): boolean {
+  for (const child of node.children) {
+    if (child.style.position === "absolute") return true;
+  }
+  return false;
 }
 
 function drawNode(
@@ -240,14 +332,30 @@ function drawNode(
     return;
   }
 
-  const x = node.layout.x + ox;
-  const y = node.layout.y + oy;
+  const raise = shadowRaise(node);
+  const x = node.layout.x + ox - raise;
+  const y = node.layout.y + oy - raise;
   const { width, height } = node.layout;
   const port = ctx.port;
   const r = makeRect(y, x, y + height, x + width);
   const overflow = node.style.overflow;
   const clips = overflow === "hidden" || overflow === "scroll";
-  const childOy = overflow === "scroll" ? oy - node._scrollOffset : oy;
+  const childOx = ox - raise;
+  const childOy = (overflow === "scroll" ? oy - node._scrollOffset : oy) - raise;
+  const inView = rectsOverlap(
+    makeRect(y, x, y + height + raise, x + width + raise),
+    viewBox(port),
+  );
+
+  if (!inView) {
+    if (clips || !hasAbsoluteChild(node)) return;
+    for (const child of node.children) {
+      if (child.style.position === "absolute") {
+        drawNode(child, ctx, zIndex + 1, childOx, childOy);
+      }
+    }
+    return;
+  }
 
   if (node.type === "box") drawBox(node, ctx, r, x, y, width, height);
   else if (node.type === "text") drawText(node, ctx, x, y, width, height);
@@ -256,19 +364,19 @@ function drawNode(
   else if (node.type === "bitmap") drawBitmap(node, ctx, x, y, width, height);
 
   if (clips) {
-    const savedClip = port.clipRgn
-      ? { ...port.clipRgn, rgn: { ...port.clipRgn.rgn, rgnBBox: { ...port.clipRgn.rgn.rgnBBox } } }
-      : null;
+    const savedClip = snapshotClip(port);
     // Clip to the padding box so children can never paint over the border.
     const bw = resolveBorderWidth(node);
     intersectClip(port, makeRect(y + bw, x + bw, y + height - bw, x + width - bw));
-    for (const child of node.children) drawNode(child, ctx, zIndex + 1, ox, childOy);
-    if (savedClip) ClipRect(savedClip.rgn.rgnBBox);
-    else ClipRect(makeRect(-32767, -32767, 32767, 32767));
+    const ovSize = boxOvalSize(node);
+    if (ovSize > 0) intersectClipRoundRect(port, r, ovSize);
+    for (const child of node.children) drawNode(child, ctx, zIndex + 1, childOx, childOy);
+    if (overflow === "scroll") paintOverflowScrollTrack(node, x, y, width, height);
+    restoreClip(port, savedClip);
     return;
   }
 
-  for (const child of node.children) drawNode(child, ctx, zIndex + 1, ox, oy);
+  for (const child of node.children) drawNode(child, ctx, zIndex + 1, childOx, childOy);
 }
 
 function drawBox(
@@ -278,24 +386,29 @@ function drawBox(
   x: number,
   y: number,
   width: number,
-  height: number
+  height: number,
 ): void {
-  const { background, borderColor, borderStyle, borderRadius, penMode } =
+  const { background, borderColor, borderStyle, shadow, penMode } =
     node.props as {
       background?: Fill;
       borderColor?: Ink;
       borderStyle?: "solid" | "dotted" | "dashed";
-      borderRadius?: number;
+      shadow?: boolean;
       penMode?: "copy" | "xor";
     };
 
   // QuickDraw `ovWd`/`ovHt` are corner-oval *diameters* (`RRects.a`).
   // `borderRadius` is a CSS-style radius, so the oval size is 2×.
-  const radius = borderRadius ?? 0;
-  const ovSize = radius > 0 ? radius * 2 : 0;
+  const ovSize = boxOvalSize(node);
+
+  // Offset copy first so a rounded face punches the overlap and leaves a
+  // curved L. Square faces still get the two 1px bars (no fill-through).
+  if (shadow) paintBoxShadow(x, y, width, height, ovSize);
 
   if (background !== undefined) {
     fillBackground(ctx.port, r, background, penMode, ovSize);
+  } else if (shadow && ovSize > 0) {
+    EraseRoundRect(r, ovSize, ovSize);
   }
 
   const bw = resolveBorderWidth(node);
@@ -321,6 +434,44 @@ function drawBox(
     }
     PenNormal();
   }
+}
+
+function paintOverflowScrollTrack(
+  node: CanvasNode,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const track = scrollTrack(node, x, y, width, height);
+  if (!track) return;
+  PenNormal();
+  FillRect(
+    makeRect(track.thumbY, track.x, track.thumbY + track.thumbHeight, track.x + track.width),
+    PATTERNS.checker,
+  );
+  PenNormal();
+}
+
+function paintBoxShadow(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  ovSize: number,
+): void {
+  PenNormal();
+  ForeColor(blackColor);
+  if (ovSize > 0) {
+    PaintRoundRect(
+      makeRect(y + 1, x + 1, y + height + 1, x + width + 1),
+      ovSize,
+      ovSize,
+    );
+    return;
+  }
+  PaintRect(makeRect(y + height, x + 1, y + height + 1, x + width + 1));
+  PaintRect(makeRect(y + 1, x + width, y + height + 1, x + width + 1));
 }
 
 function drawDashedBorder(
@@ -360,12 +511,13 @@ function drawText(
   width: number,
   height: number
 ): void {
-  const fontName = (node.props["font"] as string | undefined) ?? "body";
+  const fontName = fontNameFromProps(node.props);
+  const style = fontStyleFromProps(node.props);
   const color = (node.props["color"] as Ink | undefined) ?? 1;
   const align = (node.props["align"] as TextAlign | undefined) ?? "left";
   const verticalAlign =
     (node.props["verticalAlign"] as TextVerticalAlign | undefined) ?? "top";
-  const wrap = (node.props["wrap"] as boolean | undefined) ?? false;
+  const wrap = textWraps(node.props);
   const background = node.props["background"] as Ink | undefined;
   const stipple = (node.props["stipple"] as boolean | undefined) ?? false;
 
@@ -378,9 +530,10 @@ function drawText(
     }
   }
 
+  const font = fontFromProps(node.props);
   TextFont(fontFamilyId(fontName));
-  TextSize(0);
-  TextFace(0);
+  TextSize(font.size ?? 0);
+  TextFace(textFace(style));
   if (color) {
     ForeColor(blackColor);
     TextMode(srcOr);
@@ -403,10 +556,10 @@ function drawText(
   const innerH = Math.max(0, height - padTop - padBottom);
 
   // Same line breaking as the measure pass, so drawn geometry matches layout.
-  const font = requireFont(fontName);
-  const block = layoutText(font, text, wrap ? innerW : undefined);
+  const block = layoutNodeText(node, font, text, wrap ? innerW : undefined);
   // Strike ascent = cell height (baseline at the Decker cell bottom).
-  const strikeAscent = fontAscent(fontName);
+  // Outlined strikes are 2px taller; baseline is the padded cell bottom.
+  const strikeAscent = font.glyphHeight;
   const face = faceMetrics(font);
   const singleMiddle = verticalAlign === "middle" && block.lines.length === 1;
 
@@ -417,14 +570,19 @@ function drawText(
 
   const selection = textSelectionOf(node);
 
-  for (const line of block.lines) {
+  for (let i = 0; i < block.lines.length; i++) {
+    const line = block.lines[i]!;
     let lineX = innerX;
     if (align === "center") lineX = innerX + Math.floor((innerW - line.width) / 2);
     else if (align === "right") lineX = innerX + innerW - line.width;
     if (line.text) {
-      const bytes = encodeUiText(font, line.text);
-      MoveTo(lineX, lineY + strikeAscent);
-      DrawText(bytes, 0, bytes.length);
+      if (style.outline || style.shadow) {
+        drawStyledLine(line.text, lineX, lineY, fontName, style, color, font.size);
+      } else {
+        const bytes = encodeUiText(font, line.text);
+        MoveTo(lineX, lineY + strikeAscent);
+        DrawText(bytes, 0, bytes.length);
+      }
     }
     if (selection && line.text) {
       const a = Math.max(selection.lo, line.start);
@@ -435,12 +593,16 @@ function drawText(
         const slice = line.text.slice(localA, localB);
         const left = lineX + textAdvance(font, line.text.slice(0, localA));
         const sliceW = textAdvance(font, slice);
-        PaintRect(makeRect(lineY, left, lineY + block.lineHeight, left + sliceW));
+        PaintRect(makeRect(lineY, left, lineY + lineBoxHeight(block, i), left + sliceW));
         ForeColor(whiteColor);
         TextMode(srcBic);
-        const selected = encodeUiText(font, slice);
-        MoveTo(left, lineY + strikeAscent);
-        DrawText(selected, 0, selected.length);
+        if (style.outline || style.shadow) {
+          drawStyledLine(slice, left, lineY, fontName, style, 0, font.size);
+        } else {
+          const selected = encodeUiText(font, slice);
+          MoveTo(left, lineY + strikeAscent);
+          DrawText(selected, 0, selected.length);
+        }
         if (color) {
           ForeColor(blackColor);
           TextMode(srcOr);
@@ -561,11 +723,15 @@ function drawImage(
 function createRasterSurface(port: GrafPort, rect: RasterPaintRect): RasterSurface {
   const bits = port.portBits;
   const vis = port.visRgn.rgn.rgnBBox;
-  const clip = port.clipRgn.rgn.rgnBBox;
+  const clipRgn = port.clipRgn;
+  const clip = clipRgn.rgn.rgnBBox;
+  const shaped = clipRgn.rgn.rgnSize !== 10;
   const left = Math.max(rect.x, bits.bounds.left, port.portRect.left, vis.left, clip.left);
   const top = Math.max(rect.y, bits.bounds.top, port.portRect.top, vis.top, clip.top);
   const right = Math.min(rect.x + rect.width, bits.bounds.right, port.portRect.right, vis.right, clip.right);
   const bottom = Math.min(rect.y + rect.height, bits.bounds.bottom, port.portRect.bottom, vis.bottom, clip.bottom);
+  const inside = (gx: number, gy: number): boolean =>
+    !shaped || PtInRgn({ h: gx, v: gy }, clipRgn);
 
   return {
     port,
@@ -573,7 +739,7 @@ function createRasterSurface(port: GrafPort, rect: RasterPaintRect): RasterSurfa
     setPixel(x, y, ink) {
       const gx = rect.x + x;
       const gy = rect.y + y;
-      if (gx < left || gx >= right || gy < top || gy >= bottom) return;
+      if (gx < left || gx >= right || gy < top || gy >= bottom || !inside(gx, gy)) return;
       setBit(bits, gx, gy, ink);
     },
     blitPixels(pixels, width, height, x = 0, y = 0) {
@@ -583,12 +749,16 @@ function createRasterSurface(port: GrafPort, rect: RasterPaintRect): RasterSurfa
       const y1 = Math.min(bottom, rect.y + y + height);
       for (let gy = y0; gy < y1; gy++) {
         const srcRow = (gy - rect.y - y) * width - (rect.x + x);
-        for (let gx = x0; gx < x1; gx++) setBit(bits, gx, gy, pixels[srcRow + gx]);
+        for (let gx = x0; gx < x1; gx++) {
+          if (inside(gx, gy)) setBit(bits, gx, gy, pixels[srcRow + gx]);
+        }
       }
     },
     fill(ink) {
       for (let gy = top; gy < bottom; gy++)
-        for (let gx = left; gx < right; gx++) setBit(bits, gx, gy, ink);
+        for (let gx = left; gx < right; gx++) {
+          if (inside(gx, gy)) setBit(bits, gx, gy, ink);
+        }
     },
   };
 }
@@ -604,13 +774,10 @@ function drawRaster(
   const onPaint = node.props["onPaint"] as RasterPaintFn | undefined;
   if (!onPaint) return;
   SetPort(ctx.port);
-  const savedClip = ctx.port.clipRgn
-    ? { ...ctx.port.clipRgn, rgn: { ...ctx.port.clipRgn.rgn, rgnBBox: { ...ctx.port.clipRgn.rgn.rgnBBox } } }
-    : null;
+  const savedClip = snapshotClip(ctx.port);
   intersectClip(ctx.port, makeRect(y, x, y + height, x + width));
   onPaint(createRasterSurface(ctx.port, { x, y, width, height }));
-  if (savedClip) ClipRect(savedClip.rgn.rgnBBox);
-  else ClipRect(makeRect(-32767, -32767, 32767, 32767));
+  restoreClip(ctx.port, savedClip);
 }
 
 function numericSize(value: number | `${number}%` | undefined, fallback: number): number {
@@ -638,13 +805,10 @@ function drawBitmap(
   const rows = Math.min(bufH, Math.floor(pixels.length / bufW));
   if (rows <= 0) return;
   SetPort(ctx.port);
-  const savedClip = ctx.port.clipRgn
-    ? { ...ctx.port.clipRgn, rgn: { ...ctx.port.clipRgn.rgn, rgnBBox: { ...ctx.port.clipRgn.rgn.rgnBBox } } }
-    : null;
+  const savedClip = snapshotClip(ctx.port);
   intersectClip(ctx.port, makeRect(y, x, y + height, x + width));
   createRasterSurface(ctx.port, { x, y, width, height }).blitPixels(pixels, bufW, rows);
-  if (savedClip) ClipRect(savedClip.rgn.rgnBBox);
-  else ClipRect(makeRect(-32767, -32767, 32767, 32767));
+  restoreClip(ctx.port, savedClip);
 }
 
 // -------------------------------------------------------------------------
@@ -670,10 +834,11 @@ function collectHitRectsNode(
   const handlers = node._eventHandlers;
   if (hasMouseHandlers(handlers) && node.type !== "_root") {
     const hitMask = node.props["hitMask"] as HitMask | undefined;
+    const raise = shadowRaise(node);
     out.push({
       rect: {
-        x: node.layout.x + extraX,
-        y: node.layout.y + extraY,
+        x: node.layout.x + extraX - raise,
+        y: node.layout.y + extraY - raise,
         width: node.layout.width,
         height: node.layout.height,
       },
@@ -684,10 +849,12 @@ function collectHitRectsNode(
     });
   }
 
+  const raise = shadowRaise(node);
+  const childExtraX = extraX - raise;
   const childExtraY =
-    extraY - (node.style.overflow === "scroll" ? node._scrollOffset ?? 0 : 0);
+    extraY - (node.style.overflow === "scroll" ? node._scrollOffset ?? 0 : 0) - raise;
 
   for (const child of node.children) {
-    collectHitRectsNode(child, out, zIndex + 1, extraX, childExtraY);
+    collectHitRectsNode(child, out, zIndex + 1, childExtraX, childExtraY);
   }
 }

@@ -22,5 +22,11 @@
     "packages/protocol/src/**/*.ts",
     "packages/agent/src/**/*.ts"
   ],
-  "exclude": ["**/*.test.ts", "node_modules", "dist"]
+  "exclude": [
+    "**/*.test.ts",
+    "node_modules",
+    "dist",
+    "packages/ui/src/web/**",
+    "packages/ui/src/vite/**"
+  ]
 }

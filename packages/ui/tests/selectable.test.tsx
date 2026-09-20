@@ -13,6 +13,29 @@ function copyKeys(ui: ReturnType<typeof createUI>) {
 }
 
 describe("text selectable", () => {
+  it("schedules a host render when a drag changes the selection", () => {
+    let scheduled = 0;
+    const ui = createUI({
+      screen: newBitMap(240, 80),
+      scheduleRender: () => {
+        scheduled += 1;
+      },
+    });
+    const dispose = ui.render(() => (
+      <box width={220}>
+        <text wrap selectable>
+          You: hello there
+        </text>
+      </box>
+    ));
+    ui.frame();
+    scheduled = 0;
+    ui.dispatchPointer("mousedown", 12, 6);
+    ui.dispatchPointer("mousemove", 80, 6);
+    expect(scheduled).toBeGreaterThan(0);
+    dispose();
+  });
+
   it("copies a drag selection and ⌘A from a wrapped host text node", () => {
     const copied: string[] = [];
     const ui = createUI({

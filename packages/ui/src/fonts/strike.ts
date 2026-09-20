@@ -26,6 +26,7 @@ import {
   type DeckerFont,
 } from "./font";
 import { getFont, requireFont } from "./registry";
+import { resolveFont } from "./style";
 
 /** `txFont` ids. 0 is the system font (`body`), matching InitPort. */
 export const UI_FONT_FAMILY = {
@@ -40,6 +41,22 @@ let nextFamilyId = 3;
 
 /** Extra scanlines below the baseline so `DrText` underline (descent ≥ 2) can paint. */
 export const STRIKE_DESCENT = 2;
+
+/**
+ * `DrawText.a` shears `italic/16` px per row from the bottom. `ascent >> 3`
+ * is 1 on Geneva 9 / Chicago 12, so a 12–15px strike never accumulates a
+ * whole pixel. Bump the slope so the top of the strike moves at least
+ * `minSlantPx` (Pixel still uses `ascent >> 3` when that is steeper).
+ */
+export function italicShearUnits(
+  ascent: number,
+  descent: number,
+  minSlantPx: number = 2
+): number {
+  const rows = Math.max(1, ascent + descent - 2);
+  const visible = Math.ceil((minSlantPx << 4) / rows);
+  return Math.max(1, ascent >> 3, visible);
+}
 
 export interface UiFontMetrics {
   ascent: number;
@@ -74,12 +91,12 @@ export function uiFontMetrics(font: DeckerFont): UiFontMetrics {
     descent: STRIKE_DESCENT,
     leading: 0,
     widMax: font.maxWidth + font.spacing,
-    nativeSize: font.glyphHeight,
+    nativeSize: font.size ?? font.glyphHeight,
   };
 }
 
-export function fontAscent(fontName: string): number {
-  return uiFontMetrics(requireFont(fontName)).ascent;
+export function fontAscent(fontName: string, size?: number): number {
+  return uiFontMetrics(requireFont(fontName, size)).ascent;
 }
 
 /** Map a JS string to Decker/MacRoman ordinals for `DrawText`. */
@@ -193,23 +210,29 @@ function synthesis(face: number, ascent: number): {
   let ulShadow = 0;
   let ulThick = 0;
   let shadowPx = 0;
-  if (face & bold) {
-    boldPx += 1;
-    extra += 1;
-  }
-  if (face & italic) {
-    italicPx = Math.max(1, ascent >> 3);
-    extra += 1;
+  if (face & outline) {
+    // Strike is already a hollow ring (`outlineDeckerFont`), including any
+    // bold smear. Do not also run DrawText's outline/bold extras.
+    italicPx = face & italic ? italicShearUnits(ascent, STRIKE_DESCENT) : 0;
+  } else {
+    if (face & bold) {
+      boldPx += 1;
+      extra += 1;
+    }
+    if (face & italic) {
+      italicPx = italicShearUnits(ascent, STRIKE_DESCENT);
+      extra += 1;
+    }
+    if (face & shadow) {
+      boldPx += 1;
+      extra += 1;
+      shadowPx = 1;
+    }
   }
   if (face & underline) {
     ulOffset = 1;
     ulShadow = 1;
     ulThick = 1;
-  }
-  if (face & (outline | shadow)) {
-    boldPx += 1;
-    extra += 1;
-    shadowPx = 1;
   }
   return {
     bold: boldPx,
@@ -228,17 +251,25 @@ function synthesis(face: number, ascent: number): {
  */
 export function hostSwapFont(inRec: FMInput): FMOutput {
   const name = fontFamilyName(inRec.family);
-  const font = getFont(name) ?? requireFont("body");
+  const requested = inRec.size | 0;
+  const size = requested > 0 ? requested : undefined;
+  const font =
+    inRec.face & outline
+      ? resolveFont(name, {
+          bold: Boolean(inRec.face & bold),
+          italic: Boolean(inRec.face & italic),
+          outline: true,
+        }, size)
+      : getFont(name, size) ?? requireFont("body");
   const metrics = uiFontMetrics(font);
   const strike = deckerToStrike(font);
   const syn = synthesis(inRec.face, metrics.ascent);
 
   let numer = { h: inRec.numer.h, v: inRec.numer.v };
   let denom = { h: inRec.denom.h, v: inRec.denom.v };
-  const native = metrics.nativeSize;
-  const size = inRec.size | 0;
-  if (size > 0 && size !== native) {
-    numer = { h: (inRec.numer.h * size) | 0, v: (inRec.numer.v * size) | 0 };
+  const native = font.size ?? metrics.nativeSize;
+  if (requested > 0 && requested !== native) {
+    numer = { h: (inRec.numer.h * requested) | 0, v: (inRec.numer.v * requested) | 0 };
     denom = { h: (inRec.denom.h * native) | 0, v: (inRec.denom.v * native) | 0 };
   }
 

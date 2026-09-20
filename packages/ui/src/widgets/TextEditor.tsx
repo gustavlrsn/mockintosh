@@ -2,6 +2,7 @@ import { createSignal, createMemo, createEffect, untrack, For, Show } from "soli
 import type { JSX } from "@mockintosh/ui";
 import {getFocusManager} from "../focusContext";
 import {useUIServices} from "../services";
+import {useRadius} from "../theme";
 import {measureText} from "../fonts/bridge";
 import type {CanvasNode, Modifiers} from "../nodes";
 
@@ -13,6 +14,7 @@ export interface TextEditorProps {
  * saving/revisions; this widget owns only selection, caret, and viewport. */
 export function TextEditor(props: TextEditorProps): JSX.Element {
   const focus = getFocusManager(), {clipboard} = useUIServices();
+  const radius = useRadius("md");
   let node: CanvasNode;
   // Locals stay current across staged Solid 2 writes so keydown+keypress in
   // one turn (and the next key before paint) see the caret we just moved.
@@ -95,7 +97,8 @@ export function TextEditor(props: TextEditorProps): JSX.Element {
     move(indexAt(top() + Math.floor((y - 4) / lineHeight), left() + Math.round((x - 4) / charWidth)), extend);
   }
   return <box ref={n => node = n} semantic={{name: props.name, role: "textbox", value: props.value, enabled: !props.disabled}}
-    width={props.width} height={props.height} borderWidth={1} borderColor={1} background={0} overflow="hidden" tabIndex={0}
+    width={props.width} height={props.height} borderWidth={1} borderColor={1} borderRadius={radius()} background={0} overflow="hidden" tabIndex={0}
+    cursor={props.disabled ? "default" : "text"}
     onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
     onMouseDown={(x, y) => pointer(x, y)} onDrag={(x, y) => pointer(x, y, true)}
     onScroll={delta => setTop(t => Math.max(0, Math.min(lines().length - rows(), t + Math.sign(delta) * 3)))}
@@ -105,10 +108,10 @@ export function TextEditor(props: TextEditorProps): JSX.Element {
       const selectedStart = () => Math.max(left(), range().lo - start());
       const selectedEnd = () => Math.min(left() + columns(), line.length, range().hi - start());
       return <box position="absolute" left={4} top={4 + row() * lineHeight} width={props.width - 8} height={lineHeight}>
-        <text font="mono">{line.slice(left(), left() + columns())}</text>
+        <text font="mono" nowrap>{line.slice(left(), left() + columns())}</text>
         <Show when={selectedEnd() > selectedStart()}>
           <box position="absolute" left={(selectedStart() - left()) * charWidth} top={0} width={(selectedEnd() - selectedStart()) * charWidth} height={lineHeight} background={1} />
-          <text position="absolute" left={(selectedStart() - left()) * charWidth} top={0} font="mono" color={0}>{line.slice(selectedStart(), selectedEnd())}</text>
+          <text position="absolute" left={(selectedStart() - left()) * charWidth} top={0} font="mono" color={0} nowrap>{line.slice(selectedStart(), selectedEnd())}</text>
         </Show>
       </box>;
     }}</For>

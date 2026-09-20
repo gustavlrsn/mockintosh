@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { createNode } from "../src/nodes";
+import { describe, it, expect, vi } from "vitest";
+import { createNode, setNodeProperty } from "../src/nodes";
 import { computeLayout } from "../src/layout";
-import { createPointerDispatcher, hitTest } from "../src/pointer";
+import { createDoubleClickTracker, createPointerDispatcher, hitTest } from "../src/pointer";
 import { createFocusManager } from "../src/focus";
 import type { MeasureFunc } from "../src/layout";
 
@@ -67,6 +67,31 @@ describe("pointer capture", () => {
     expect(events).toEqual(["down", "start", "drag", "end", "up"]);
   });
 
+  it("fires enter and leave on ancestors when the hit moves", () => {
+    const root = createNode("_root");
+    root.style = { width: 100, height: 100 };
+    const wrap = createNode("box");
+    wrap.style = { position: "absolute", left: 0, top: 0, width: 50, height: 50 };
+    wrap._eventHandlers = {};
+    const inner = createNode("box");
+    inner.style = { position: "absolute", left: 0, top: 0, width: 50, height: 50 };
+    inner._eventHandlers = {};
+    wrap.parent = root;
+    inner.parent = wrap;
+    root.children = [wrap];
+    wrap.children = [inner];
+    computeLayout(root, 100, 100, noMeasure);
+    const events: string[] = [];
+    wrap._eventHandlers.onMouseEnter = () => events.push("wrap:enter");
+    wrap._eventHandlers.onMouseLeave = () => events.push("wrap:leave");
+    inner._eventHandlers.onClick = () => {};
+    const focus = createFocusManager(root);
+    const ptr = createPointerDispatcher(root, focus);
+    ptr.dispatch("mousemove", 10, 10);
+    ptr.dispatch("mousemove", 80, 80);
+    expect(events).toEqual(["wrap:enter", "wrap:leave"]);
+  });
+
   it("keeps delivering hover to nodes under the pointer during a capture", () => {
     const { root, a, b } = tree();
     const events: string[] = [];
@@ -105,6 +130,33 @@ describe("pointer capture", () => {
     const ptr = createPointerDispatcher(root, focus);
     ptr.dispatch("mousedown", 10, 10);
     expect(focus.focused).toBe(a);
+  });
+
+  it("blurs when mousedown misses every hit target", () => {
+    const { root, a } = tree();
+    a._eventHandlers.tabIndex = 0;
+    a._eventHandlers.onMouseDown = () => {};
+    const onBlur = vi.fn();
+    a._eventHandlers.onBlur = onBlur;
+    const focus = createFocusManager(root);
+    const ptr = createPointerDispatcher(root, focus);
+    ptr.dispatch("mousedown", 10, 10);
+    ptr.dispatch("mousedown", 90, 90);
+    expect(focus.focused).toBeNull();
+    expect(onBlur).toHaveBeenCalledOnce();
+  });
+
+  it("blurs when mousedown lands on a node that is not focusable", () => {
+    const { root, a, b } = tree();
+    a._eventHandlers.tabIndex = 0;
+    a._eventHandlers.onMouseDown = () => {};
+    b._eventHandlers.onMouseDown = () => {};
+    const focus = createFocusManager(root);
+    const ptr = createPointerDispatcher(root, focus);
+    ptr.dispatch("mousedown", 10, 10);
+    expect(focus.focused).toBe(a);
+    ptr.dispatch("mousedown", 60, 60);
+    expect(focus.focused).toBeNull();
   });
 });
 
@@ -213,5 +265,56 @@ describe("scroll bubbling", () => {
     expect(pane._scrollOffset).toBe(16);
     ptr.dispatch("scroll", 20, 20, { deltaY: 200 });
     expect(pane._scrollOffset).toBe(60);
+  });
+
+  it("does not dirty layout when an overflow pane scrolls", () => {
+    const root = createNode("_root");
+    root.style = { width: 80, height: 80 };
+    const pane = createNode("box");
+    pane.style = { overflow: "scroll", width: 80, height: 40 };
+    const content = createNode("box");
+    content.style = { width: 80, height: 100 };
+    pane.children = [content];
+    content.parent = pane;
+    root.children = [pane];
+    pane.parent = root;
+    computeLayout(root, 80, 80, noMeasure);
+    expect(root._dirty).toBe(false);
+
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    ptr.dispatch("scroll", 20, 20, { deltaY: 16 });
+    expect(pane._scrollOffset).toBe(16);
+    expect(root._dirty).toBe(false);
+    expect(content.layout.y).toBe(0);
+  });
+
+  it("resets overflow scroll when scrollKey changes", () => {
+    const pane = createNode("box");
+    pane.style = { overflow: "scroll" };
+    pane._scrollOffset = 40;
+    setNodeProperty(pane, "scrollKey", "/docs/fonts");
+    expect(pane._scrollOffset).toBe(0);
+    pane._scrollOffset = 40;
+    setNodeProperty(pane, "scrollKey", "/docs/fonts");
+    expect(pane._scrollOffset).toBe(40);
+    setNodeProperty(pane, "scrollKey", "/docs");
+    expect(pane._scrollOffset).toBe(0);
+  });
+});
+
+describe("createDoubleClickTracker", () => {
+  it("marks the second close down as a double, then starts a new pair", () => {
+    const clicks = createDoubleClickTracker({ ms: 500, dist: 4 });
+    expect(clicks.down(10, 10, 0)).toBe(false);
+    expect(clicks.down(11, 10, 100)).toBe(true);
+    expect(clicks.down(10, 10, 150)).toBe(false);
+    expect(clicks.down(10, 10, 200)).toBe(true);
+  });
+
+  it("does not count a far or slow second down as a double", () => {
+    const clicks = createDoubleClickTracker({ ms: 500, dist: 4 });
+    expect(clicks.down(10, 10, 0)).toBe(false);
+    expect(clicks.down(20, 10, 100)).toBe(false);
+    expect(clicks.down(20, 10, 700)).toBe(false);
   });
 });

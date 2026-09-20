@@ -80,6 +80,49 @@ export const EXTRA_GLYPHS: readonly ExtraGlyphDefinition[] = [
           ".#....#.",
         ],
       },
+      // Font Manager smear of the Geneva 9 drawing.
+      bodyBold: {
+        top: 0,
+        rows: [
+          ".##...##.",
+          "####.####",
+          ".#######.",
+          "..##.##..",
+          "..##.##..",
+          ".#######.",
+          "####.####",
+          ".##...##.",
+        ],
+      },
+      // Geneva 12: 1px strokes, caps on rows 1–9.
+      geneva12: {
+        top: 1,
+        rows: [
+          ".#.....#.",
+          "#.#...#.#",
+          "#.#...#.#",
+          ".#######.",
+          "..#...#..",
+          "..#...#..",
+          ".#######.",
+          "#.#...#.#",
+          ".#.....#.",
+        ],
+      },
+      geneva12Bold: {
+        top: 1,
+        rows: [
+          ".##....##.",
+          "####..####",
+          "####..####",
+          ".########.",
+          "..##..##..",
+          "..##..##..",
+          ".########.",
+          "####..####",
+          ".##....##.",
+        ],
+      },
       // 5px monospace: caps on rows 2–8; a compact square centred on the cap band.
       mono: {
         top: 3,
@@ -122,6 +165,41 @@ export const EXTRA_GLYPHS: readonly ExtraGlyphDefinition[] = [
           "..#....",
         ],
       },
+      bodyBold: {
+        top: 2,
+        rows: [
+          "......##",
+          ".....##.",
+          "....##..",
+          "##.##...",
+          ".####...",
+          "..##....",
+        ],
+      },
+      geneva12: {
+        top: 2,
+        rows: [
+          ".......#",
+          "......#.",
+          ".....#..",
+          "....#...",
+          "#..#....",
+          ".#.#....",
+          "..#.....",
+        ],
+      },
+      geneva12Bold: {
+        top: 2,
+        rows: [
+          ".......##",
+          "......##.",
+          ".....##..",
+          "....##...",
+          "##.##....",
+          ".####....",
+          "..##.....",
+        ],
+      },
       mono: {
         top: 3,
         rows: [
@@ -157,6 +235,33 @@ export const EXTRA_GLYPHS: readonly ExtraGlyphDefinition[] = [
           "####",
           "####",
           ".##.",
+        ],
+      },
+      bodyBold: {
+        top: 3,
+        rows: [
+          ".###.",
+          "#####",
+          "#####",
+          ".###.",
+        ],
+      },
+      geneva12: {
+        top: 5,
+        rows: [
+          ".##.",
+          "####",
+          "####",
+          ".##.",
+        ],
+      },
+      geneva12Bold: {
+        top: 5,
+        rows: [
+          ".###.",
+          "#####",
+          "#####",
+          ".###.",
         ],
       },
       mono: {
@@ -236,9 +341,28 @@ export function writePixelGlyph(font: DeckerFont, ordinal: number, glyph: PixelG
  * left empty, so `font.ts` falls back to `?`. `extraGlyphs.test.ts` asserts every built-in
  * font actually receives every symbol.
  */
+const EXTRA_FACE_ALIASES: Readonly<Record<string, string>> = {
+  "geneva/9": "body",
+  "chicago/12": "menu",
+  "monaco/9": "mono",
+  "geneva/12": "geneva12",
+};
+
+function extraGlyphLookupKeys(font: DeckerFont): string[] {
+  const keys = [font.name];
+  if (font.size != null) {
+    const sized = `${font.name}/${font.size}`;
+    keys.push(sized);
+    const alias = EXTRA_FACE_ALIASES[sized];
+    if (alias) keys.push(alias);
+  }
+  return keys;
+}
+
 export function applyExtraGlyphs(font: DeckerFont): DeckerFont {
+  const keys = extraGlyphLookupKeys(font);
   EXTRA_GLYPHS.forEach((def, index) => {
-    const glyph = def.perFont[font.name];
+    const glyph = keys.map((key) => def.perFont[key]).find((drawing) => drawing != null);
     if (glyph && pixelGlyphFitsFont(font, glyph)) {
       writePixelGlyph(font, EXTRA_ORDINAL_BASE + index, glyph);
     }

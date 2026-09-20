@@ -8,13 +8,15 @@
     ".": "./src/index.ts",
     "./renderer": "./src/renderer.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts",
-    "./jsx-dev-runtime": "./src/jsx-runtime.ts"
+    "./jsx-dev-runtime": "./src/jsx-runtime.ts",
+    "./web": "./src/web/index.ts",
+    "./vite": "./src/vite/ditherPlugin.ts"
   },
   "files": [
     "src"
   ],
   "license": "MIT",
-  "description": "Solid.js-based canvas UI framework for Mockintosh — renders to a 1-bit pixel buffer via QuickDraw",
+  "description": "1-bit Solid canvas kit — host elements, widgets, and dither, painted through QuickDraw",
   "dependencies": {
     "solid-js": "2.0.0-rc.8",
     "@solidjs/universal": "2.0.0-rc.8",

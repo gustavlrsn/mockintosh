@@ -1,5 +1,5 @@
 import type { DeckerFont } from "./font";
-import { decodeBase64 } from "../base64";
+import { decodeBase64, encodeBase64 } from "../base64";
 
 export function decodeDeckerFont(dataBlock: string, name: string = "unnamed"): DeckerFont {
   if (!dataBlock.startsWith("%%FNT0") && !dataBlock.startsWith("%%FNT1")) {
@@ -42,4 +42,25 @@ export function decodeDeckerFont(dataBlock: string, name: string = "unnamed"): D
   }
 
   return { name, maxWidth, glyphHeight, spacing, glyphStride, glyphWidths, glyphData, sourceFormat };
+}
+
+/** Pack a decoded font back into a %%FNT0 / %%FNT1 data block. */
+export function encodeDeckerFont(font: DeckerFont): string {
+  const chunks: number[] = [font.maxWidth, font.glyphHeight, font.spacing];
+  if (font.sourceFormat === "FNT0") {
+    for (let glyphIndex = 32; glyphIndex < 128; glyphIndex++) {
+      chunks.push(font.glyphWidths[glyphIndex] ?? 0);
+      const start = glyphIndex * font.glyphStride;
+      for (let i = 0; i < font.glyphStride; i++) chunks.push(font.glyphData[start + i] ?? 0);
+    }
+  } else {
+    for (let glyphIndex = 0; glyphIndex < 256; glyphIndex++) {
+      const width = font.glyphWidths[glyphIndex] ?? 0;
+      if (width < 1) continue;
+      chunks.push(glyphIndex, width);
+      const start = glyphIndex * font.glyphStride;
+      for (let i = 0; i < font.glyphStride; i++) chunks.push(font.glyphData[start + i] ?? 0);
+    }
+  }
+  return `%%${font.sourceFormat}${encodeBase64(Uint8Array.from(chunks))}`;
 }

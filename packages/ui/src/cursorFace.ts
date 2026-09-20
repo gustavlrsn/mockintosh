@@ -1,0 +1,156 @@
+/**
+ * 1-bit cursor faces — sprite + hot spot.
+ *
+ * Widgets still declare a name. Hosts look up a face and either blit it
+ * (OS / `cursors: "mac"`) or turn it into a CSS `url()` (`cssCursorFromFace`).
+ */
+
+import {
+  CopyBits,
+  SetPort,
+  srcBic,
+  srcOr,
+  type Cursor,
+  type GrafPort,
+  type Point,
+} from "@mockintosh/quickdraw";
+import { makeRect } from "@mockintosh/quickdraw/bits";
+import { encodeBase64 } from "./base64";
+import { isNamedCursor, type CursorName, type NamedCursor } from "./cursor";
+import { encodePngRgba } from "./png";
+import type { Sprite } from "./sprite";
+
+export interface CursorFace {
+  sprite: Sprite;
+  hotSpot: Point;
+}
+
+export type CursorFaceTable = Partial<Record<NamedCursor, CursorFace>>;
+
+const CURSOR_SIZE = 16;
+const CURSOR_RECT = makeRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
+
+/** Pack a sprite of at most 16×16 into a QuickDraw `Cursor`. */
+export function cursorFromFace(face: CursorFace): Cursor {
+  const { sprite, hotSpot } = face;
+  if (sprite.width > CURSOR_SIZE || sprite.height > CURSOR_SIZE) {
+    throw new Error(`Cursors are at most 16×16; got ${sprite.width}×${sprite.height}`);
+  }
+  const data = new Uint16Array(CURSOR_SIZE);
+  const mask = new Uint16Array(CURSOR_SIZE);
+  for (let v = 0; v < sprite.height; v++) {
+    let d = 0;
+    let m = 0;
+    for (let h = 0; h < sprite.width; h++) {
+      const i = v * sprite.width + h;
+      const bit = 0x8000 >> h;
+      const opaque = sprite.mask ? sprite.mask[i] !== 0 : true;
+      if (opaque) {
+        m |= bit;
+        if (sprite.data[i]) d |= bit;
+      }
+    }
+    data[v] = d;
+    mask[v] = m;
+  }
+  return { data, mask, hotSpot: { h: hotSpot.h, v: hotSpot.v } };
+}
+
+/** Inverse of {@link cursorFromFace} — used to lift QuickDraw's ROM arrow. */
+export function faceFromCursor(cursor: Cursor): CursorFace {
+  const data = new Uint8Array(CURSOR_SIZE * CURSOR_SIZE);
+  const mask = new Uint8Array(CURSOR_SIZE * CURSOR_SIZE);
+  for (let v = 0; v < CURSOR_SIZE; v++) {
+    for (let h = 0; h < CURSOR_SIZE; h++) {
+      const bit = 0x8000 >> h;
+      const i = v * CURSOR_SIZE + h;
+      mask[i] = cursor.mask[v] & bit ? 1 : 0;
+      data[i] = cursor.data[v] & bit ? 1 : 0;
+    }
+  }
+  return {
+    sprite: { width: CURSOR_SIZE, height: CURSOR_SIZE, data, mask },
+    hotSpot: { h: cursor.hotSpot.h, v: cursor.hotSpot.v },
+  };
+}
+
+function packBits16(words: Uint16Array): { baseAddr: Uint8Array; rowBytes: number; bounds: ReturnType<typeof makeRect> } {
+  const bytes = new Uint8Array(CURSOR_SIZE * 2);
+  for (let v = 0; v < CURSOR_SIZE; v++) {
+    bytes[v * 2] = words[v] >> 8;
+    bytes[v * 2 + 1] = words[v] & 0xff;
+  }
+  return { baseAddr: bytes, rowBytes: 2, bounds: CURSOR_RECT };
+}
+
+const packed = new WeakMap<Cursor, { data: ReturnType<typeof packBits16>; mask: ReturnType<typeof packBits16> }>();
+
+function packedCursor(cursor: Cursor) {
+  let entry = packed.get(cursor);
+  if (!entry) {
+    entry = { data: packBits16(cursor.data), mask: packBits16(cursor.mask) };
+    packed.set(cursor, entry);
+  }
+  return entry;
+}
+
+/**
+ * Paint a QuickDraw cursor into `port` with its hot spot at (`x`, `y`).
+ * Mask `srcBic`, then data `srcOr` — the ROM VBL order.
+ */
+export function blitQuickdrawCursor(port: GrafPort, cursor: Cursor, x: number, y: number): void {
+  const { data, mask } = packedCursor(cursor);
+  const top = y - cursor.hotSpot.v;
+  const left = x - cursor.hotSpot.h;
+  const dst = makeRect(top, left, top + CURSOR_SIZE, left + CURSOR_SIZE);
+  SetPort(port);
+  CopyBits(mask, port.portBits, CURSOR_RECT, dst, srcBic, null);
+  CopyBits(data, port.portBits, CURSOR_RECT, dst, srcOr, null);
+}
+
+export function blitCursorFace(port: GrafPort, face: CursorFace, x: number, y: number): void {
+  blitQuickdrawCursor(port, cursorFromFace(face), x, y);
+}
+
+function spriteToRgba(sprite: Sprite): Uint8Array {
+  const rgba = new Uint8Array(sprite.width * sprite.height * 4);
+  for (let i = 0; i < sprite.width * sprite.height; i++) {
+    const opaque = sprite.mask ? sprite.mask[i] !== 0 : true;
+    if (!opaque) continue;
+    const ink = sprite.data[i] ? 0 : 255;
+    const o = i * 4;
+    rgba[o] = ink;
+    rgba[o + 1] = ink;
+    rgba[o + 2] = ink;
+    rgba[o + 3] = 255;
+  }
+  return rgba;
+}
+
+/** CSS `cursor` value for a 1-bit face (`url(png) hx hy, fallback`). */
+export function cssCursorFromFace(face: CursorFace, fallback = "default"): string {
+  const { sprite, hotSpot } = face;
+  const png = encodePngRgba(spriteToRgba(sprite), sprite.width, sprite.height);
+  return `url("data:image/png;base64,${encodeBase64(png)}") ${hotSpot.h} ${hotSpot.v}, ${fallback}`;
+}
+
+export function cssTableFromFaces(
+  faces: CursorFaceTable,
+  fallbacks?: Partial<Record<NamedCursor, string>>,
+): Partial<Record<NamedCursor, string>> {
+  const out: Partial<Record<NamedCursor, string>> = {};
+  for (const [name, face] of Object.entries(faces) as [NamedCursor, CursorFace | undefined][]) {
+    if (!face) continue;
+    out[name] = cssCursorFromFace(face, fallbacks?.[name] ?? "default");
+  }
+  return out;
+}
+
+export function resolveCursorFace(
+  name: CursorName,
+  faces: CursorFaceTable,
+): CursorFace | undefined {
+  if (name === "none") return undefined;
+  if (isNamedCursor(name) && faces[name]) return faces[name];
+  return faces.default ?? faces.arrow;
+}

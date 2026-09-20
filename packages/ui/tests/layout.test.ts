@@ -156,6 +156,28 @@ describe("computeLayout — row layout", () => {
     expect(content.layout.height).toBe(200);
   });
 
+  it("a height 100% pane under a header fills the leftover, not the whole column", () => {
+    // Catalog shell: header + flexGrow morph + height 100% overflow pane.
+    // Measuring the 100% against the column (not the leftover) leaves the
+    // last header-height of the page below the canvas.
+    const content = box({ height: 400 });
+    const pane = box({ height: "100%", overflow: "scroll" }, [content]);
+    const morph = box({ flexGrow: 1, flexShrink: 1, minHeight: 0 }, [pane]);
+    const header = box({ height: 20 });
+    const root = createNode("_root");
+    root.style = { width: 100, height: 100, flexDirection: "column" };
+    root.children = [header, morph];
+    header.parent = root;
+    morph.parent = root;
+    computeLayout(root, 100, 100, noMeasure);
+    expect(header.layout.height).toBe(20);
+    expect(morph.layout.y).toBe(20);
+    expect(morph.layout.height).toBe(80);
+    expect(pane.layout.height).toBe(80);
+    expect(pane.layout.y + pane.layout.height).toBe(100);
+    expect(content.layout.height).toBe(400);
+  });
+
   it("flexGrow adds free space on top of the child's own size", () => {
     // ChatGippity: a padded flexGrow pane + a fixed compose row. Free space
     // is available minus every sibling's base size, including the grow pane's
@@ -384,6 +406,79 @@ describe("computeLayout — min/max constraints", () => {
     child.parent = root;
     computeLayout(root, 100, 100, noMeasure);
     expect(child.layout.width).toBeLessThanOrEqual(30);
+  });
+
+  it("padded auto-width box measures wrap children inside the padding", () => {
+    const measure: MeasureFunc = (_node, availableWidth) => ({
+      width: Math.min(100, availableWidth),
+      height: availableWidth < 90 ? 24 : 8,
+    });
+    const child = text();
+    const pane = box({ padding: 8 }, [child]);
+    const after = box({ height: 10 });
+    const column = box({ width: 100 }, [pane, after]);
+    const root = createNode("_root");
+    root.children = [column];
+    column.parent = root;
+    computeLayout(root, 100, 80, measure);
+    expect(child.layout.height).toBe(24);
+    expect(after.layout.y).toBe(pane.layout.y + pane.layout.height);
+  });
+
+  it("flex row remasures wrap children against each item's share so siblings do not overlap", () => {
+    const measure: MeasureFunc = (_node, availableWidth) => ({
+      width: Math.min(200, availableWidth),
+      height: availableWidth < 80 ? 24 : 8,
+    });
+    const child = text();
+    const cell = box({ flexGrow: 1, flexBasis: 0, flexShrink: 1, minWidth: 0 }, [child]);
+    const other = box({ flexGrow: 1, flexBasis: 0, flexShrink: 1, minWidth: 0, height: 10 });
+    const after = box({ height: 10 });
+    const row = box({ flexDirection: "row", width: 100 }, [cell, other]);
+    const column = box({ width: 100 }, [row, after]);
+    const root = createNode("_root");
+    root.children = [column];
+    column.parent = root;
+    computeLayout(root, 100, 80, measure);
+    expect(cell.layout.width).toBe(50);
+    expect(child.layout.height).toBe(24);
+    expect(row.layout.height).toBe(24);
+    expect(after.layout.y).toBe(row.layout.y + row.layout.height);
+  });
+
+  it("maxWidth on an auto-width box remasures wrap children so the next sibling does not overlap", () => {
+    const measure: MeasureFunc = (_node, availableWidth) => ({
+      width: Math.min(100, availableWidth),
+      height: availableWidth < 60 ? 24 : 8,
+    });
+    const child = text();
+    const bubble = box({ maxWidth: 50, alignSelf: "flex-end" }, [child]);
+    const after = box({ height: 10 });
+    const column = box({ width: 100 }, [bubble, after]);
+    const root = createNode("_root");
+    root.children = [column];
+    column.parent = root;
+    computeLayout(root, 100, 80, measure);
+    expect(bubble.layout.width).toBe(50);
+    expect(bubble.layout.height).toBe(24);
+    expect(child.layout.height).toBe(24);
+    expect(after.layout.y).toBe(bubble.layout.y + bubble.layout.height);
+  });
+
+  it("width 100% + maxWidth measures children against the clamped width", () => {
+    let seen = -1;
+    const measure: MeasureFunc = (_node, availableWidth) => {
+      seen = availableWidth;
+      return { width: availableWidth, height: 10 };
+    };
+    const child = text();
+    const column = box({ width: "100%", maxWidth: 40 }, [child]);
+    const root = createNode("_root");
+    root.children = [column];
+    column.parent = root;
+    computeLayout(root, 200, 100, measure);
+    expect(column.layout.width).toBe(40);
+    expect(seen).toBe(40);
   });
 
   it("flexShrink reduces a child when the row overflows", () => {
