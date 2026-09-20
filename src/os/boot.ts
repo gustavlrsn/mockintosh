@@ -15,14 +15,16 @@ import { registerFileOperations } from "./kernel/files";
  * web build); the boot sequence only knows about the Finder and dialogs.
  */
 
-import { InitGraf, InitCursor, cursorState, globals as qd } from "@mockintosh/quickdraw";
+import { InitGraf, InitCursor, SetCursor, cursorState, globals as qd } from "@mockintosh/quickdraw";
 import { newBitMap } from "@mockintosh/quickdraw/bits";
-import { createUI, type Modifiers } from "@mockintosh/ui";
+import { createDoubleClickTracker, createUI, type Modifiers } from "@mockintosh/ui";
 import { FileSystem } from "@mockintosh/fs";
 import type { AppContext, MenubarActionItem } from "@mockintosh/sdk";
-import type { Platform, PlatformKeyEvent, PlatformPointerEvent } from "../platform/types";
+import type { Platform, PlatformDropEvent, PlatformKeyEvent, PlatformPointerEvent } from "../platform/types";
+import { importHostFile, isImportableImage, resolveImportTarget } from "./hostImport";
 import { SpriteRegistry, registerBuiltinSprites } from "./sprites";
 import { drawCursor } from "./cursor";
+import { cursorForName } from "./cursors";
 import { animateZoomRect, type AnimRect } from "./zoomAnimation";
 import { buildFolderWindow, windowOuterRect } from "../../apps/Finder.solid";
 import { bootstrapFileSystem } from "./fsBootstrap";
@@ -65,9 +67,6 @@ import { Kernel } from "./kernel";
 const MENUBAR_HEIGHT = 20;
 const SPLASH_MS = 800;
 
-/** Two clicks this close in time and space are a double-click (Mac `DoubleTime`). */
-const DOUBLE_CLICK_MS = 500;
-const DOUBLE_CLICK_DIST = 4;
 
 /** What opening an app does unless it says otherwise (`SolidApp.onOpen`): open its main window. */
 function defaultOnOpen(app: AppContext, props: Record<string, unknown>): void {
@@ -76,7 +75,11 @@ function defaultOnOpen(app: AppContext, props: Record<string, unknown>): void {
 
 export interface BootedOS {
   kernel: Kernel;
-  input: { pointer(event: PlatformPointerEvent): void; key(event: PlatformKeyEvent): void };
+  input: {
+    pointer(event: PlatformPointerEvent): void;
+    key(event: PlatformKeyEvent): void;
+    drop(event: PlatformDropEvent): void;
+  };
   render(cancellation?: Cancellation): Promise<void>;
   /** The running OS, for hosts that open apps or dialogs themselves (kiosk mode, tests). */
   services: OSServices;
@@ -119,6 +122,25 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     scheduleRender: scheduleRepaint,
     services: {
       clipboard: platform.clipboard,
+      images: platform.images
+        ? {
+            async decode(source, options) {
+              const images = platform.images!;
+              if (typeof source !== "string") {
+                return images.decode(source, options?.type, options);
+              }
+              if (!platform.fetch) throw new Error("This Macintosh cannot fetch images.");
+              const response = await platform.fetch(source);
+              if (!response.ok) throw new Error(`Could not fetch image (${response.status})`);
+              const bytes = new Uint8Array(await response.arrayBuffer());
+              return images.decode(
+                bytes,
+                options?.type ?? response.headers.get("content-type") ?? undefined,
+                options,
+              );
+            },
+          }
+        : undefined,
       onError(error) {
         const active = getWindows().find((window) => window.id === getActiveWindowId());
         if (active?.instanceId) instances.note(active.instanceId, error, "handler");
@@ -157,6 +179,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     capabilities,
     fetch: platform.fetch,
     printer,
+    download: platform.download,
     images: platform.images,
     video: platform.video,
     camera: platform.camera,
@@ -274,6 +297,15 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
       setWindowOutline(null);
     },
     scheduleRepaint,
+    async eraseDisk() {
+      await fs.erase();
+      if (platform.reload) {
+        platform.reload();
+        return;
+      }
+      await bootstrapFileSystem(fs);
+      closeAllWindows();
+    },
   };
 
   registerApp({
@@ -376,9 +408,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   scheduler.requestFrame(frameLoop);
 
   // --- Input ---
-  let lastClickTime = -Infinity;
-  let lastClickX = 0;
-  let lastClickY = 0;
+  const doubleClick = createDoubleClickTracker();
 
   function onPointer(e: PlatformPointerEvent): void {
     if (stopped) throw new ServiceError("disconnect", "Boot has ended");
@@ -389,27 +419,20 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
         cursorState.obscured = false;
         screenDirty = true;
         ui.dispatchPointer("mousemove", e.x, e.y);
+        SetCursor(cursorForName(ui.cursorAt(e.x, e.y)));
         return;
       case "down": {
-        const now = scheduler.now();
-        const isDouble =
-          now - lastClickTime < DOUBLE_CLICK_MS &&
-          Math.abs(e.x - lastClickX) < DOUBLE_CLICK_DIST &&
-          Math.abs(e.y - lastClickY) < DOUBLE_CLICK_DIST;
-        if (isDouble) {
+        ui.dispatchPointer("mousedown", e.x, e.y);
+        if (doubleClick.down(e.x, e.y, scheduler.now())) {
           ui.dispatchPointer("dblclick", e.x, e.y);
-          lastClickTime = -Infinity;
-        } else {
-          ui.dispatchPointer("mousedown", e.x, e.y);
-          lastClickTime = now;
-          lastClickX = e.x;
-          lastClickY = e.y;
         }
+        SetCursor(cursorForName(ui.cursorAt(e.x, e.y)));
         scheduleRepaint();
         return;
       }
       case "up":
         ui.dispatchPointer("mouseup", e.x, e.y);
+        SetCursor(cursorForName(ui.cursorAt(e.x, e.y)));
         scheduleRepaint();
         return;
       case "scroll":
@@ -470,8 +493,38 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     scheduleRepaint();
   }
 
+  async function onDrop(e: PlatformDropEvent): Promise<void> {
+    if (stopped) return;
+    const images = e.files.filter(isImportableImage);
+    if (images.length === 0) {
+      if (e.files.length > 0) {
+        await osServices.showDialog({ message: "Only image files can be imported.", buttons: ["OK"] });
+      }
+      return;
+    }
+    const target = resolveImportTarget(fs, getWindows(), e.x, e.y, MENUBAR_HEIGHT);
+    if (!target) return;
+    const imported = [];
+    for (let i = 0; i < images.length; i++) {
+      imported.push(
+        await importHostFile(fs, target.parentId, images[i], {
+          x: target.position.x + i * 16,
+          y: target.position.y + i * 16,
+        }),
+      );
+    }
+    if (stopped) return;
+    scheduleRepaint();
+    if (target.openIn) {
+      for (const file of imported) {
+        osServices.openApp(target.openIn, { fileId: file.id, title: file.name });
+      }
+    }
+  }
+
   const offPointer = platform.input.onPointer(onPointer);
   const offKey = platform.input.onKey(onKey);
+  const offDrop = platform.input.onDrop?.(onDrop);
 
   const renderWaits = new Set<Cancellation>();
   async function renderBarrier(token = new Cancellation()) {
@@ -492,7 +545,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
       renderWaits.delete(token);
     }
   }
-  registerUIOperations(kernel, osServices, { ui, beginGesture: () => { lastClickTime = -Infinity; }, pointer: onPointer, key: onKey, render: renderBarrier,
+  registerUIOperations(kernel, osServices, { ui, beginGesture: () => { doubleClick.reset(); }, pointer: onPointer, key: onKey, render: renderBarrier,
     capture: () => ({ width: resolution.width, height: resolution.height, rowBytes: screen.rowBytes, bytes: Array.from(screen.baseAddr) }) });
 
   registerDesktopSettings(kernel, desktopSettings);
@@ -500,7 +553,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   osServices.shell = registerShell(kernel);
 
   return {
-    input: { pointer: onPointer, key: onKey },
+    input: { pointer: onPointer, key: onKey, drop: onDrop },
     render: renderBarrier,
     kernel,
     services: osServices,
@@ -515,6 +568,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
       desktopSettings.shutdown();
       offPointer();
       offKey();
+      offDrop?.();
       instances.close();
       unmount();
       closeAllWindows();

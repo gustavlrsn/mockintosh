@@ -8,14 +8,23 @@ const BY_EXTENSION: Readonly<Record<string, string>> = {
   htm: MIME.html,
   json: MIME.json,
   deck: MIME.deck,
+  canvas: MIME.canvas,
   png: "image/png",
   pbm: "image/x-portable-bitmap",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   gif: "image/gif",
+  webp: "image/webp",
   mp4: "video/mp4",
   mp3: "audio/mpeg",
 };
+
+/** Browser stills the Picture / Dither apps open. */
+export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+
+export function isImageType(type: string): boolean {
+  return (IMAGE_TYPES as readonly string[]).includes(type);
+}
 
 export function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -34,6 +43,7 @@ export function isTextType(type: string): boolean {
     type.startsWith("text/") ||
     type === MIME.json ||
     type === MIME.deck ||
+    type === MIME.canvas ||
     type === MIME.sprite ||
     type === MIME.appShortcut ||
     type === MIME.app ||

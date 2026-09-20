@@ -86,6 +86,8 @@ export default defineConfig({
       { find: "@mockintosh/quickdraw/bits", replacement: resolve(__dirname, "packages/quickdraw/src/bits.ts") },
       { find: "@mockintosh/quickdraw", replacement: resolve(__dirname, "packages/quickdraw/src/index.ts") },
       { find: "@mockintosh/ui/renderer", replacement: resolve(__dirname, "packages/ui/src/renderer.ts") },
+      { find: "@mockintosh/ui/web", replacement: resolve(__dirname, "packages/ui/src/web/index.ts") },
+      { find: "@mockintosh/ui/vite", replacement: resolve(__dirname, "packages/ui/src/vite/ditherPlugin.ts") },
       { find: "@mockintosh/ui", replacement: resolve(__dirname, "packages/ui/src/index.ts") },
       { find: "@mockintosh/protocol", replacement: resolve(__dirname, "packages/protocol/src/index.ts") },
       { find: "@mockintosh/agent", replacement: resolve(__dirname, "packages/agent/src/index.ts") },
@@ -130,6 +132,7 @@ export default defineConfig({
       "scripts/**/*.test.ts",
       "api/**/*.test.ts",
       "apps/**/*.test.ts",
+      "sites/ui/src/**/*.test.ts",
     ],
   },
   build: {

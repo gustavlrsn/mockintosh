@@ -15,6 +15,7 @@ export function platformCapabilities(platform: Platform): CapabilitySet {
   if (platform.fetch) caps.add("network");
   if (platform.clipboard) caps.add("clipboard");
   if (platform.printer) caps.add("printer");
+  if (platform.download) caps.add("download");
   if (platform.images) caps.add("images");
   if (platform.video) caps.add("video");
   if (platform.camera) caps.add("camera");
@@ -34,6 +35,7 @@ const DESCRIPTIONS: Record<Capability, string> = {
   network: "a network connection",
   clipboard: "a clipboard",
   printer: "a printer",
+  download: "a way to save files to this computer",
   camera: "a camera",
   video: "video playback",
   images: "image decoding",

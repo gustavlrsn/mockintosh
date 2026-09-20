@@ -35,11 +35,11 @@ export function AboutBox(_props: Record<string, unknown>): JSX.Element {
           />
         )}
         <box flexDirection="column" gap={2}>
-          <text font="body">Mockintosh Classic</text>
-          <text font="body">{`System Version ${pkg.version}`}</text>
+          <text font="body" nowrap>Mockintosh Classic</text>
+          <text font="body" nowrap>{`System Version ${pkg.version}`}</text>
         </box>
       </box>
-      <text font="body">Contributors</text>
+      <text font="body" nowrap>Contributors</text>
       <box height={1} background={1} />
       <For each={contributors}>
         {(c) => (
@@ -51,9 +51,9 @@ export function AboutBox(_props: Record<string, unknown>): JSX.Element {
                 src={{ width: user.width, height: user.height, data: user.data, mask: user.mask }}
               />
             )}
-            <text font="body">{`@${c.username}`}</text>
+            <text font="body" nowrap>{`@${c.username}`}</text>
             <box flexGrow={1} />
-            <text font="body">{`${c.commits} commits`}</text>
+            <text font="body" nowrap>{`${c.commits} commits`}</text>
           </box>
         )}
       </For>

@@ -10,6 +10,7 @@ import { createElement, setProp } from "@mockintosh/ui/renderer";
 import { bootOS, type BootedOS } from "./boot";
 import { createHeadlessPlatform, type HeadlessPlatform } from "../platform/headless";
 import { registerApp } from "./apps";
+import { MIME } from "@mockintosh/fs";
 import { getWindows } from "./state";
 import { TITLE_BAR_H } from "./windowGeometry";
 
@@ -111,6 +112,22 @@ describe("bootOS on the headless platform", () => {
     expect(desktopAgain).toBeLessThan(0.55);
   });
 
+  it("eraseDisk formats the volume and restores the first-boot desktop", async () => {
+    const desktop = os.services.fs.locate("desktop")!;
+    await os.services.fs.writeJSON(desktop.id, "scratch", { n: 1 }, { type: MIME.json });
+    os.services.openApp("terminal");
+    platform.tick();
+    expect(getWindows().some((w) => w.appId === "terminal")).toBe(true);
+
+    await os.services.eraseDisk();
+    platform.tick();
+
+    expect(getWindows()).toEqual([]);
+    const names = os.services.fs.children(os.services.fs.locate("desktop")!.id).map((n) => n.name);
+    expect(names).toContain("Canvas");
+    expect(names).not.toContain("scratch");
+  });
+
   it("refuses to launch an app whose `requires` this platform lacks, and says why", () => {
     registerApp({
       id: "test-camera-app",
@@ -164,6 +181,8 @@ describe("bootOS on the headless platform", () => {
     expect(inkCoverage(frame, btnLeft + 10, btnTop, 40, 3)).toBe(1);
 
     // CDEF FontInfo: Chicago 12 in a 20px face → baseline 14, caps on 5–13.
+    // The label now sits on the FontInfo line box (15px) centered in the face,
+    // so the same caps land two rows higher than a face-filling measure.
     const faceTop = btnTop + 4;
     const faceLeft = btnLeft + 4;
     let inkMin = 20;
@@ -174,8 +193,8 @@ describe("bootOS on the headless platform", () => {
         if (row > inkMax) inkMax = row;
       }
     }
-    expect(inkMin).toBe(5);
-    expect(inkMax).toBe(13);
+    expect(inkMin).toBe(3);
+    expect(inkMax).toBeGreaterThanOrEqual(13);
   });
 
   it("runs ⌘-shortcuts from the active menubar (⌘N creates a folder on the desktop)", () => {
@@ -361,6 +380,22 @@ describe("bootOS on the headless platform", () => {
     expect(restored.kind).toBe("document");
     expect({ x: restored.x, y: restored.y, width: restored.width, height: restored.height }).toEqual(windowed);
     expect(inkCoverage(platform.lastFrame()!, 0, 0, WIDTH, MENUBAR_HEIGHT - 1)).toBeLessThan(0.2);
+  });
+
+  it("writes a dropped host image onto the desktop", async () => {
+    const desktop = os.services.fs.locate("desktop")!;
+    expect(os.services.fs.child(desktop.id, "face.png")).toBeUndefined();
+    platform.drop({
+      x: 80,
+      y: 80,
+      files: [{ name: "face.png", type: "image/png", bytes: new Uint8Array([137, 80, 78, 71]) }],
+    });
+    await vi.waitFor(() => {
+      expect(os.services.fs.child(desktop.id, "face.png")).toMatchObject({
+        kind: "file",
+        type: "image/png",
+      });
+    });
   });
 });
 

@@ -1,8 +1,6 @@
 import { createMemo, createEffect, Show, Loading } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
-import { useApp, type PrintableImage, defineApp, Button, MIME, readSpriteFile, toBits, type Sprite } from "@mockintosh/sdk";
-
-const BROWSER_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif"];
+import { useApp, type PrintableImage, defineApp, Button, Errored, IMAGE_TYPES, MIME, readSpriteFile, toBits, type Sprite } from "@mockintosh/sdk";
 
 /**
  * Picture — views image files. Mockintosh sprite files draw directly; browser
@@ -63,41 +61,45 @@ function Picture(props: Record<string, unknown>): JSX.Element {
     }
   }
 
+  function shownSprite(): Sprite | undefined {
+    const value = loaded();
+    if (value?.kind === "sprite") return value.sprite;
+    return initialSprite;
+  }
+
   return (
     <box width={win.width()} height={win.height()} padding={4} flexDirection="column" gap={4} background={0}>
       <Loading fallback={<text font="body">Opening…</text>}>
-      {loaded()}
-      <Show when={print}>
-        <Button label="Print" disabled={!printableImage()} onClick={() => void printPicture()} />
-      </Show>
-      <Show when={loaded()?.kind === "sprite" ? loaded() : initialSprite ? { kind: "sprite" as const, sprite: initialSprite } : null} fallback={
-        <raster
-          width={win.width() - 8}
-          height={win.height() - 28}
-          onPaint={({ blitPixels }) => {
-            const value = loaded();
-            if (value?.kind === "pixels") blitPixels(value.pixels, value.width, value.height);
-          }}
-        />
-      }>
-        {(entry) => {
-          const sprite = () => {
-            const v = entry();
-            return v && "sprite" in v ? v.sprite : initialSprite;
-          };
-          return (
-            <Show when={sprite()}>
-              {(s) => (
-                <image
-                  width={s().width}
-                  height={s().height}
-                  src={{ width: s().width, height: s().height, data: s().data, mask: s().mask }}
-                />
-              )}
-            </Show>
-          );
-        }}
-      </Show>
+        <Errored
+          fallback={(err) => (
+            <text font="body">{err instanceof Error ? err.message : String(err)}</text>
+          )}
+        >
+          <Show when={print}>
+            <Button label="Print" disabled={!printableImage()} onClick={() => void printPicture()} />
+          </Show>
+          <Show
+            when={shownSprite()}
+            fallback={
+              <raster
+                width={win.width() - 8}
+                height={win.height() - 28}
+                onPaint={({ blitPixels }) => {
+                  const value = loaded();
+                  if (value?.kind === "pixels") blitPixels(value.pixels, value.width, value.height);
+                }}
+              />
+            }
+          >
+            {(s) => (
+              <image
+                width={s().width}
+                height={s().height}
+                src={s()}
+              />
+            )}
+          </Show>
+        </Errored>
       </Loading>
     </box>
   );
@@ -109,6 +111,6 @@ export default defineApp({
   icon: "icon/MacFlim",
   defaultSize: { width: 256, height: 256 },
   scrollable: true,
-  fileTypes: [MIME.sprite, ...BROWSER_IMAGE_TYPES],
+  fileTypes: [MIME.sprite, ...IMAGE_TYPES],
   Component: Picture,
 });

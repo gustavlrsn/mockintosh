@@ -90,6 +90,8 @@ export const MIME = {
   binary: "application/octet-stream",
   /** JSON `{ width, height, data }` — a 2bpp base64 sprite, see `defineSprite`. */
   sprite: "image/x-mockintosh-sprite",
+  /** JSON Canvas document — retained shapes and text, not a bitmap. */
+  canvas: "application/x-mockintosh-canvas",
   /** JSON `{ appId }` — a Finder icon that launches an app. */
   appShortcut: "application/x-mockintosh-app-shortcut",
   /** JSON app manifest for an installed third-party app. */

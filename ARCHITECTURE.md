@@ -31,7 +31,7 @@ apps/*.tsx bundled apps         @mockintosh/sdk v2 → third-party ESM
 src/platform/<host>  ─ implements Platform ─▶  bootOS(platform)
 ```
 
-`createUI` is a **single-instance** renderer (`_setRepaintHook`, QuickDraw font globals). The OS is the only caller.
+`createUI` is a **single-instance** renderer (`_setRepaintHook`, QuickDraw font globals). The OS calls it through `bootOS`; other canvas hosts use `mountCanvasUI` from `@mockintosh/ui/web`.
 
 ## Kernel (Toolbox traps)
 
@@ -69,12 +69,12 @@ Everything above the dashed line compiles **without DOM types**; `npm run check:
 ```ts
 interface Platform {
   display:   { width, height, framebuffer?, present(screen: BitMap) }
-  input:     { onPointer(handler), onKey(handler) }      // raw events, screen coordinates
+  input:     { onPointer(handler), onKey(handler), onDrop?(handler) }  // raw events, screen coordinates; onDrop is host files
   scheduler: { requestFrame(cb), now() }                  // requestFrame returns a cancel
   storage:   FSBackend                                    // the disk
   env:       { origin, config }                           // host origin + VITE_* / device config
   hostCapabilities: HostCapability[]                      // leftover flags; `browser` is derived from the service
-  clipboard?, printer?, fetch?                            // peripherals; absent = feature hidden
+  clipboard?, printer?, download?, fetch?                 // peripherals; absent = feature hidden
   images?, video?, camera?                                // media; capabilities follow presence
   crypto                                                  // randomBytes + sha256
   browser?                                                // openExternal, authorize, loadScript
@@ -85,14 +85,14 @@ The design follows the Macintosh: required members are what every Mac had (scree
 
 Implementations:
 
-- `src/platform/web/` — `<canvas>` + `CanvasPresenter`, DOM events, `requestAnimationFrame`, `OPFSBackend`, `navigator.clipboard`, `WebUSBPrinterTransport`, `fetch`. The only OS-level code allowed to touch the DOM.
+- `src/platform/web/` — `<canvas>` + `CanvasPresenter`, DOM events (including host file drops), `requestAnimationFrame`, `OPFSBackend`, `navigator.clipboard`, `WebUSBPrinterTransport`, `fetch`. The only OS-level code allowed to touch the DOM.
 - `src/platform/headless/` — in-memory display with frame read-back, synthetic input injection, a hand-advanced clock, `InMemoryBackend`. `src/os/boot.test.ts` boots the whole shell on it and drives menus, ⌘N, and the capability dialog from Node. It is the starting point for any new host: swap `present()` and the input injectors for real drivers.
 
 Which apps ship is the entry point's decision, not the OS's: `src/systemApps.ts` registers the web build's bundled apps; a device build imports a different list. Bundled apps are written against `@mockintosh/sdk` only — `export default defineApp(…)`, `useApp()` — so they are the same shape as a third-party bundle and could be moved out of the tree. Three stay OS-owned and reach into `src/os` on purpose: Finder (desktop, folder windows, About This Macintosh, Control Panel), App Store (installation privileges), and Icon Gallery (the OS icon catalog). Finder is registered by boot; other bundled apps are registered by the host. Kernel clients (Source Editor, Terminal, ChatGippity) stay SDK-clean and receive a granted `AppContext.kernel` session from `permissions`.
 
 ### Capabilities
 
-Apps declare what they cannot work without — `requires: ["camera"]` on `defineApp`/`registerApp`, and on App Store manifests. `platformCapabilities(platform)` (`src/os/capabilities.ts`) derives the set this machine has: `network`/`clipboard`/`printer` from the services present, the rest from `hostCapabilities`. The OS refuses to launch an app with unmet requirements and tells the user why (“*"Photo Booth" needs a camera, which this Macintosh does not have.*”), and skips loading installed bundles it cannot run (their shortcuts explain the same when opened). Apps that work with *or* without a feature check `useApp().capabilities` at the point of use instead — Picture opens sprite files everywhere and gates PNG decoding on `images`.
+Apps declare what they cannot work without — `requires: ["camera"]` on `defineApp`/`registerApp`, and on App Store manifests. `platformCapabilities(platform)` (`src/os/capabilities.ts`) derives the set this machine has: `network`/`clipboard`/`printer`/`download` from the services present, the rest from `hostCapabilities`. The OS refuses to launch an app with unmet requirements and tells the user why (“*"Photo Booth" needs a camera, which this Macintosh does not have.*”), and skips loading installed bundles it cannot run (their shortcuts explain the same when opened). Apps that work with *or* without a feature check `useApp().capabilities` at the point of use instead — Picture opens sprite files everywhere and gates PNG decoding on `images`; Dither hides Export when `download` is absent.
 
 ## App model
 
@@ -158,13 +158,17 @@ src/platform/
   types.ts                  Platform interface (display, input, scheduler, storage, peripherals)
   core-env.d.ts             The host globals the DOM-free core may assume
   web/                      Browser platform
-    index.ts                createWebPlatform: canvas + zoom, DOM input, RAF, OPFS, WebUSB, clipboard
-    CanvasPresenter.ts      Expands QuickDraw's screenBits to RGBA on a 2D canvas
+    index.ts                createWebPlatform: canvas via @mockintosh/ui/web, DOM input, RAF, OPFS, WebUSB
     OPFSBackend.ts          FSBackend on the Origin Private File System
     WebUSBPrinterTransport.ts
   headless/                 In-memory platform for tests and as a template for new hosts
 
-packages/ui/                Solid universal renderer
+packages/ui/                1-bit Solid canvas kit — npm `@mockintosh/ui`, site `ui.mockintosh.com`
+                            engine: host elements + createUI + layout/draw/input/fonts
+                            algorithms: dither, sprites, PNG
+                            widgets/: Solid compositions (Button, TextInput, …)
+                            ./web and ./vite: host adapters
+                            Mockintosh apps import widgets via `@mockintosh/sdk`, not this package name
 packages/fs/                Reactive virtual file system + backends
 packages/sdk/               defineApp, useApp, menubar types, UI + fs + protocol re-exports
 packages/protocol/          Wire schemas: kernel resources, jobs, chat, build contract
@@ -172,6 +176,8 @@ packages/agent/             ChatGippity loop (`runAgent`) over KernelClient + fe
 packages/markdown/          mdast → LayoutNode
 packages/print/             Print pages (QuickDraw ports) → ESC/POS → PrinterTransport
 packages/quickdraw/         GrafPort, CopyBits, BitBlt, packed 1-bit BitMap
+
+sites/ui/                   ui.mockintosh.com — kit catalog; @mockintosh/ui only, not the OS
 
 apps/                       Bundled apps (*.tsx), SDK-only except Finder, App Store, Icon Gallery
   Finder.solid.tsx
@@ -317,7 +323,9 @@ apps/finder/attributes.ts      Finder's typed view of node attributes
 
 **Durability.** A body is written to the backend *before* its catalog entry appears; an entry is removed *before* its body is deleted. The catalog is debounced (500 ms) and versioned: `parseCatalog` migrates older documents (the v1 `FileManager` catalog → v2: MIME types, roles, attributes → v3: persisted revisions) and drops unreachable nodes rather than failing.
 
-**Opening.** A double-click asks `resolveOpenAction`: directories open a Finder window; `MIME.appShortcut` / `MIME.app` launch the referenced app; other files launch the first registered app whose `fileTypes` includes the MIME type, with `FileDocumentProps` (`fileId`, `title`) as props. FileViewer opens `text/*`, Picture sprites and PNG/JPEG/GIF. Unknown types show a dialog, as does a shortcut or manifest whose app is no longer registered (`reason: "unknown-app"`).
+**Opening.** A double-click asks `resolveOpenAction`: directories open a Finder window; `MIME.appShortcut` / `MIME.app` launch the referenced app; other files launch the first registered app whose `fileTypes` includes the MIME type, with `FileDocumentProps` (`fileId`, `title`) as props. FileViewer opens `text/*`, Dither opens PNG/JPEG/GIF/WebP and 1-bit sprite files, Picture the same types if Dither is absent. Unknown types show a dialog, as does a shortcut or manifest whose app is no longer registered (`reason: "unknown-app"`).
+
+**Host import.** The web platform reports files the user drags from the real computer onto the screen (`PlatformInput.onDrop`). `bootOS` writes them into the folder under the pointer (desktop, or an open Finder folder) via `src/os/hostImport.ts`. Dropping onto a Dither window also opens the new file there.
 
 **Apps.** `useApp().fs` exposes the same `FileSystem` (typed `AppFileSystem` in the SDK); `useApp().storage` is a per-app folder under `System Folder/Preferences`. Installed third-party manifests are `MIME.app` files in `Applications` and are loaded at boot by the `AppInstaller`.
 

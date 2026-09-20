@@ -7,10 +7,12 @@
 /** App entry files under `apps/` that must compile through the in-OS builder. */
 export const SDK_CLEAN = [
   "MacPaint.tsx",
+  "Canvas.tsx",
   "Safari.tsx",
   "Testing.tsx",
   "FileViewer.tsx",
   "Picture.tsx",
+  "Dither.tsx",
   "VideoPlayer.tsx",
   "PhotoBooth.tsx",
   "SourceEditor.tsx",
@@ -29,10 +31,12 @@ export const SHELL_APPS = [
 /** Every bundled app entry, including those still being cleaned. */
 export const BUNDLED_APPS = [
   "MacPaint.tsx",
+  "Canvas.tsx",
   "Safari.tsx",
   "Testing.tsx",
   "FileViewer.tsx",
   "Picture.tsx",
+  "Dither.tsx",
   "VideoPlayer.tsx",
   "PhotoBooth.tsx",
   "SpotifyPlayer.tsx",
@@ -49,16 +53,21 @@ export type BundledAppEntry = (typeof BUNDLED_APPS)[number];
 /** Sibling directories copied into the compile project with the entry. */
 export const APP_SIBLING_DIRS: Partial<Record<BundledAppEntry, readonly string[]>> = {
   "MacPaint.tsx": ["macpaint"],
+  "Canvas.tsx": ["canvas"],
   "SpotifyPlayer.tsx": ["spotify", "sprites"],
   "Finder.solid.tsx": ["finder"],
+  "PhotoBooth.tsx": ["photobooth"],
+  "Dither.tsx": ["photobooth", "dither"],
 };
 
 export const APP_TITLES: Record<BundledAppEntry, string> = {
   "MacPaint.tsx": "MacPaint",
+  "Canvas.tsx": "Canvas",
   "Safari.tsx": "Safari",
   "Testing.tsx": "Testing",
   "FileViewer.tsx": "File",
   "Picture.tsx": "Picture",
+  "Dither.tsx": "Dither",
   "VideoPlayer.tsx": "Video Player",
   "PhotoBooth.tsx": "Photo Booth",
   "SpotifyPlayer.tsx": "Spotify",

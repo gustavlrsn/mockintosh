@@ -13,6 +13,7 @@ import type {
   BrowserService,
   CameraService,
   DialogOptions,
+  DownloadService,
   FetchFunction,
   ImageService,
   PrintService,
@@ -52,6 +53,8 @@ export interface OSServices {
   fetch?: FetchFunction;
   /** The system printer, when the platform provides a transport for one. */
   printer?: PrintService;
+  /** Offer a file to the host user, when the platform can. */
+  download?: DownloadService;
   images?: ImageService;
   video?: VideoService;
   camera?: CameraService;
@@ -95,6 +98,11 @@ export interface OSServices {
   /** Remove the drag/resize outline and call the stored commit callback. */
   hideWindowOutline: () => void;
   scheduleRepaint: () => void;
+  /**
+   * Format the startup disk and come back on a first-boot volume (desktop
+   * shortcuts restored). Reloads the machine when the platform can.
+   */
+  eraseDisk: () => Promise<void>;
 }
 
 export const OSContext = createContext<OSServices | null>(null);

@@ -148,7 +148,7 @@ export function Menubar(props: MenubarProps): JSX.Element {
         <Show
           when={appleSprite}
           fallback={
-            <text font="menu" color={openIdx() === -1 ? 0 : 1} verticalAlign="middle">
+            <text font="menu" nowrap color={openIdx() === -1 ? 0 : 1} verticalAlign="middle">
               {"\uF8FF"}
             </text>
           }
@@ -185,6 +185,7 @@ export function Menubar(props: MenubarProps): JSX.Element {
                 align="center"
                 verticalAlign="middle"
                 color={isOpen() ? 0 : 1}
+                nowrap
               >
                 {menu.label}
               </text>
@@ -272,7 +273,7 @@ function MenuDropdown(props: MenuDropdownProps): JSX.Element {
           >
             <Show when={riSelf.value === rg.value}>
               <box position="absolute" left={8} top={0} width={CHECK_COL_W} height={ITEM_H} justifyContent="center">
-                <text font={MENU_FONT} color={isHighlighted() ? 0 : 1} verticalAlign="middle">
+                <text font={MENU_FONT} nowrap color={isHighlighted() ? 0 : 1} verticalAlign="middle">
                   {CHECK_MARK}
                 </text>
               </box>
@@ -285,7 +286,7 @@ function MenuDropdown(props: MenuDropdownProps): JSX.Element {
               height={ITEM_H}
               justifyContent="center"
             >
-              <text font={MENU_FONT} color={isHighlighted() ? 0 : 1} verticalAlign="middle">
+              <text font={MENU_FONT} nowrap color={isHighlighted() ? 0 : 1} verticalAlign="middle">
                 {riSelf.label}
               </text>
             </box>
@@ -311,14 +312,14 @@ function MenuDropdown(props: MenuDropdownProps): JSX.Element {
           onClick={() => { if (!ai.disabled) props.onRun(ai); }}
         >
           <box position="absolute" left={8} top={0} width={w - 16} height={ITEM_H} justifyContent="center">
-            <text font={MENU_FONT} color={isHighlighted() && !ai.disabled ? 0 : 1}
+            <text font={MENU_FONT} nowrap color={isHighlighted() && !ai.disabled ? 0 : 1}
               stipple={ai.disabled} verticalAlign="middle">
               {ai.label}
             </text>
           </box>
           <Show when={ai.shortcut}>
             <box position="absolute" left={w - 40} top={0} width={36} height={ITEM_H} justifyContent="center">
-              <text font={MENU_FONT} align="right" verticalAlign="middle"
+              <text font={MENU_FONT} nowrap align="right" verticalAlign="middle"
                 color={isHighlighted() && !ai.disabled ? 0 : 1}>
                 {`${COMMAND_KEY}${ai.shortcut}`}
               </text>

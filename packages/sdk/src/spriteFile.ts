@@ -1,12 +1,14 @@
 /**
  * Sprite files — `image/x-mockintosh-sprite` — are how apps keep 1-bit
  * pictures in the file system: a JSON body with the sprite's size and its
- * base64 2 bpp pixels (`encodeSprite`). PhotoBooth writes them; Picture opens
- * them; the Finder shows them with a picture icon.
+ * base64 2 bpp pixels (`encodeSprite`). PhotoBooth and Dither write them;
+ * Dither reopens them (Picture if Dither is absent); the Finder shows them
+ * with a picture icon.
  */
 import { MIME, type FSFile, type NodeAttributes } from "@mockintosh/fs";
-import { defineSprite, encodeSprite, type Sprite } from "@mockintosh/ui";
+import { defineSprite, encodeSprite, type ImageFrame, type Sprite } from "@mockintosh/ui";
 import type { AppFileSystem } from "./index";
+import type { ImageService } from "./media";
 
 /** JSON body of a sprite file. */
 export interface SpriteFileContent {
@@ -26,6 +28,51 @@ export async function readSpriteFile(fs: AppFileSystem, fileId: string): Promise
   const content = await fs.readJSON<unknown>(fileId);
   if (!isSpriteFileContent(content)) return null;
   return defineSprite(content.width, content.height, content.data);
+}
+
+/**
+ * Expand a 1-bit sprite to RGBA so adjust / dither / decode-style pipelines
+ * can take a Photo Booth or Dither save. `1` = black → rgb 0; `0` = white → 255.
+ */
+export function spriteToImageFrame(sprite: Sprite): ImageFrame {
+  const { width, height, data } = sprite;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0, o = 0; i < data.length; i++, o += 4) {
+    const v = data[i] ? 0 : 255;
+    rgba[o] = v;
+    rgba[o + 1] = v;
+    rgba[o + 2] = v;
+    rgba[o + 3] = 255;
+  }
+  return { width, height, rgba };
+}
+
+export interface ReadImageFileOptions {
+  maxWidth?: number;
+  maxHeight?: number;
+}
+
+/**
+ * Load a still as RGBA. Sprite files are expanded locally — never handed to
+ * `images.decode`, which would feed JSON to `createImageBitmap` and hang.
+ */
+export async function readImageFile(
+  fs: AppFileSystem,
+  images: ImageService | undefined,
+  fileId: string,
+  options?: ReadImageFileOptions,
+): Promise<ImageFrame> {
+  const file = fs.file(fileId);
+  if (!file) throw new Error("The image could not be found.");
+  if (file.type === MIME.sprite) {
+    const sprite = await readSpriteFile(fs, fileId);
+    if (!sprite) throw new Error(`Couldn't read "${file.name}".`);
+    return spriteToImageFrame(sprite);
+  }
+  if (!images) throw new Error("This Macintosh cannot decode images.");
+  const bytes = await fs.readBytes(fileId);
+  if (!bytes) throw new Error(`Couldn't read "${file.name}".`);
+  return images.decode(bytes, file.type, options);
 }
 
 export interface WriteSpriteFileOptions {

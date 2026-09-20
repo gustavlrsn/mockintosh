@@ -9,6 +9,8 @@ export interface FSBackend {
   readBlob(id: string): Promise<Uint8Array | null>;
   writeBlob(id: string, bytes: Uint8Array): Promise<void>;
   deleteBlob(id: string): Promise<void>;
+  /** Drop the catalog and every blob — a formatted disk. */
+  clear(): Promise<void>;
 }
 
 /**
@@ -44,6 +46,11 @@ export class InMemoryBackend implements FSBackend {
 
   async deleteBlob(id: string): Promise<void> {
     this.blobs.delete(id);
+  }
+
+  async clear(): Promise<void> {
+    this.catalog = null;
+    this.blobs.clear();
   }
 
   /** Test helper: ids of every stored blob. */

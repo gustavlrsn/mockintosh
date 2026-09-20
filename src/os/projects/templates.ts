@@ -5,7 +5,7 @@ export function counterSource(id: string, title: string): string {
 function Counter() {
   const [count, setCount] = createSignal(0);
   return <box padding={12} gap={8}>
-    <text semantic={{name: "counter-value"}}>{String(count())}</text>
+    <text nowrap semantic={{name: "counter-value"}}>{String(count())}</text>
     <Button name="counter-increment" label="Add one" onClick={() => setCount(count() + 1)} />
   </box>;
 }
@@ -19,7 +19,7 @@ export function blankSource(id: string, title: string): string {
 
 function App() {
   return <box padding={12}>
-    <text font="body" semantic={{name: "app-title"}}>${title}</text>
+    <text font="body" nowrap semantic={{name: "app-title"}}>${title}</text>
   </box>;
 }
 

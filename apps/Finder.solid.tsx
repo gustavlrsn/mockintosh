@@ -974,7 +974,7 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
     <>
       <WindowHeader height={INFO_BAR_H}>
         <box width="100%" height="100%" paddingLeft={4} justifyContent="center">
-          <text font="menu" verticalAlign="middle">{itemCount()}</text>
+          <text font="menu" nowrap verticalAlign="middle">{itemCount()}</text>
         </box>
       </WindowHeader>
       {/* Content drop zone (below icons in z-order = lower priority) */}
@@ -1275,6 +1275,7 @@ function IconCell(props: IconCellProps): JSX.Element {
             font={FONT}
             color={isHighlighted() ? 0 : 1}
             background={isHighlighted() ? 1 : 0}
+            nowrap
           >
             {icon().title}
           </text>
@@ -1487,7 +1488,24 @@ export function buildFinderMenus(fs: FileSystem, activeDirId?: string, selection
         },
         { type: "separator" },
         { label: "Eject Disk",  disabled: true },
-        { label: "Erase Disk…", disabled: true },
+        {
+          label: "Erase Disk…",
+          disabled: !selection?.os,
+          onClick: () => {
+            const os = selection?.os;
+            if (!os) return;
+            void (async () => {
+              const volume = fs.locate("volume");
+              const choice = await os.showDialog({
+                message: `Erase "${volume?.name ?? "this disk"}"? Everything on this disk will be lost.`,
+                buttons: ["Cancel", "Erase"],
+                variant: "caution",
+              });
+              if (choice !== "Erase") return;
+              await os.eraseDisk();
+            })();
+          },
+        },
         { type: "separator" },
         { label: "Restart",   disabled: true },
         { label: "Shut Down", disabled: true },

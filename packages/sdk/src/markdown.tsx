@@ -27,7 +27,7 @@ function Block(props: { node: LayoutNode; onLink?: (href: string) => void }): JS
   if (node.type === "listItem") {
     return (
       <box flexDirection="row" gap={4} paddingLeft={node.indent * 8}>
-        <text font="body">•</text>
+        <text font="body" nowrap>•</text>
         <InlineRun segments={node.segments} />
       </box>
     );

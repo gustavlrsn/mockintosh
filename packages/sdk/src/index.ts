@@ -35,6 +35,8 @@ export {
   isFSError,
   inferMimeType,
   isTextType,
+  isImageType,
+  IMAGE_TYPES,
   type NodeId,
   type NodeRole,
   type FSNode,
@@ -48,8 +50,50 @@ export {
 
 // The screen is 1-bit: every pixel is one of two inks. Sprites are the
 // 1-bit image asset format; `defineSprite` / `fromGrid` build them.
-export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid, toBits, createDitherer } from "@mockintosh/ui";
-export type { Sprite, ImageFrame, DitherMode, DitherOptions } from "@mockintosh/ui";
+export {
+  BLACK,
+  WHITE,
+  defineSprite,
+  encodeSprite,
+  fromGrid,
+  toBits,
+  createDitherer,
+  coverFrame,
+  rasterizeFrame,
+  isImageFrame,
+  isDitheredAsset,
+  Dithered,
+  encodePng1bit,
+  ASCII_TILE,
+  ASCII_MATCH_MODES,
+  ASCII_PUNCH_MIN,
+  ASCII_PUNCH_MAX,
+  ASCII_PUNCH_DEFAULT,
+  ASCII_DIRECTIONAL_DEFAULT,
+  ASCII_NORMALIZE_DEFAULT,
+  ASCII_DIFFUSE_DEFAULT,
+  BASELINE_ASCII,
+  resolveAsciiOptions,
+  isBaselineAscii,
+  asciiOptionsRevision,
+  asciiToBits,
+  createAsciiDitherer,
+  listAsciiGlyphs,
+  renderAsciiGlyphAtlas,
+} from "@mockintosh/ui";
+export type {
+  Sprite,
+  ImageFrame,
+  DitherMode,
+  DitherOptions,
+  CoverFrameOptions,
+  DitheredAsset,
+  DitheredProps,
+  DitheredSrc,
+  AsciiMatchMode,
+  AsciiDitherOptions,
+  ResolvedAsciiOptions,
+} from "@mockintosh/ui";
 export type {
   ImageService,
   VideoSource,
@@ -66,9 +110,12 @@ export type { Resource, Job, Diagnostic, ChatMessage, CompleteResult, OpenAITool
 export { parse, resource, jobSchema } from "@mockintosh/protocol";
 export {
   readSpriteFile,
+  readImageFile,
+  spriteToImageFrame,
   writeSpriteFile,
   type SpriteFileContent,
   type WriteSpriteFileOptions,
+  type ReadImageFileOptions,
 } from "./spriteFile";
 
 /** Classic Alert() icon: System ICON 0 / 1 / 2 (stop / note / caution). */
@@ -145,6 +192,22 @@ export interface PrintPictureOptions {
  * the platform can reach one; apps that print should hide the feature when
  * `print` is undefined.
  */
+/** A file the host user can take away (browser download, SD card, …). */
+export interface HostDownload {
+  name: string;
+  type: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * Offer a file to the host user. Present on `useApp()` only when the
+ * platform can; hide Export UI when `download` is undefined.
+ */
+export interface DownloadService {
+  /** Trigger a host save. On the web this starts a download; call it from a click. */
+  save(file: HostDownload): Promise<void>;
+}
+
 export interface PrintService {
   /** Paper width in dots — 576 for 80 mm paper at 203 dpi. */
   readonly paperWidth: number;
@@ -248,6 +311,8 @@ export interface AppContext {
   capabilities: ReadonlySet<Capability>;
   /** The system printer, when this platform has one. */
   print?: PrintService;
+  /** Offer a file to the host user, when this platform can. */
+  download?: DownloadService;
   /** Decode PNG/JPEG/GIF, when this platform can. */
   images?: ImageService;
   /** Play compressed video, when this platform can. */
@@ -291,6 +356,7 @@ export type FetchFunction = (url: string, options?: FetchRequest) => Promise<Fet
  * - `network`   — `useApp().fetch` is available
  * - `clipboard` — copy and paste work
  * - `printer`   — `useApp().print` is available
+ * - `download`  — `useApp().download` is available
  * - `camera`    — `useApp().camera` is available
  * - `video`     — `useApp().video` is available
  * - `images`    — `useApp().images` is available
@@ -300,6 +366,7 @@ export type Capability =
   | "network"
   | "clipboard"
   | "printer"
+  | "download"
   | "camera"
   | "video"
   | "images"
@@ -456,10 +523,18 @@ export function useApp(): AppServices {
 
 export {
   measureText,
+  useTheme,
+  useRadius,
+  themeRadius,
+  RADIUS_SCALES,
+  DEFAULT_THEME,
   type Ink,
   type RasterSurface,
   type RasterPaintRect,
   type RasterPaintFn,
+  type UITheme,
+  type RadiusScale,
+  type RadiusStep,
 } from "@mockintosh/ui";
 
 export {
@@ -476,9 +551,45 @@ export {
   isPending,
   Show,
   For,
+  Accordion,
+  Attachment,
+  Avatar,
+  Badge,
+  Breadcrumb,
+  Bubble,
   Button,
-  TextInput,
+  ButtonGroup,
+  Card,
   Checkbox,
+  Disclosure,
+  Empty,
+  Field,
+  InputGroup,
+  Item,
+  Kbd,
+  Label,
+  Marker,
+  Menu,
+  Message,
+  MessageScroller,
+  Note,
+  Overlay,
+  Pagination,
+  Popover,
+  Progress,
+  Questionnaire,
+  Radio,
+  RadioGroup,
+  Select,
+  Slider,
+  Spinner,
+  Switch,
+  Table,
+  Tabs,
+  TextInput,
+  Toggle,
+  ToggleGroup,
+  Tooltip,
 } from "@mockintosh/ui";
 
 export { Markdown, parseMarkdown } from "./markdown";

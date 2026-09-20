@@ -13,6 +13,9 @@ describe("capabilities", () => {
       camera: { open: async () => ({ frame: () => null, width: 0, height: 0, close() {} }) },
     };
     expect([...platformCapabilities(connected)].sort()).toEqual(["camera", "network"]);
+
+    const withDownload = { ...bare, download: { save: async () => {} } };
+    expect([...platformCapabilities(withDownload)]).toEqual(["download"]);
   });
 
   it("lists what is missing, in declaration order", () => {

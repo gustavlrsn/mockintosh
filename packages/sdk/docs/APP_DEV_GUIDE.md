@@ -17,10 +17,12 @@ These ship with the OS. SDK-clean apps compile under the in-OS project compiler 
 | App | Source | Kind |
 |---|---|---|
 | MacPaint | `MacPaint.tsx` | SDK-clean |
+| Canvas | `Canvas.tsx` | SDK-clean |
 | Safari | `Safari.tsx` | SDK-clean |
 | Testing | `Testing.tsx` | SDK-clean |
 | File | `FileViewer.tsx` | SDK-clean |
 | Picture | `Picture.tsx` | SDK-clean |
+| Dither | `Dither.tsx` | SDK-clean |
 | Video Player | `VideoPlayer.tsx` | SDK-clean |
 | Photo Booth | `PhotoBooth.tsx` | SDK-clean |
 | Source Editor | `SourceEditor.tsx` | SDK-clean |
@@ -55,7 +57,7 @@ export default defineApp({
 
 ## Solid 2
 
-Import reactive primitives from `@mockintosh/sdk` (`createSignal`, `createEffect`, `createMemo`, `onSettled`, `onCleanup`, `Show`, `For`, `Loading`, `Errored`, `isPending`). Do not import `solid-js/store`, `onMount`, `Index`, `ErrorBoundary`, `Suspense`, or `Context.Provider` — contexts are used as components (`<ThemeContext>…</ThemeContext>`).
+Import reactive primitives from `@mockintosh/sdk` (`createSignal`, `createEffect`, `createMemo`, `onSettled`, `onCleanup`, `Show`, `For`, `Loading`, `Errored`, `isPending`). Do not import `solid-js/store`, `onMount`, `Index`, `ErrorBoundary`, `Suspense`, or `Context.Provider` — contexts are used as components (`<FocusContext>…</FocusContext>`).
 
 - **Effects** are `createEffect(compute, apply)`. `compute` only reads signals and returns a value; `apply` uses that value (menus, host writes). `compute` runs immediately when the effect is created — declare every signal it reads *above* the `createEffect` call.
 - **Mount** is `onSettled`, not `onMount`. Do not call `flush()` from `onSettled` or from an effect `apply`.
@@ -64,7 +66,9 @@ Import reactive primitives from `@mockintosh/sdk` (`createSignal`, `createEffect
 
 ## The Rendering Model
 
-JSX compiles through `@mockintosh/ui` (universal Solid renderer) into a retained `box` / `text` / `image` / `raster` / `bitmap` tree. The OS layouts that tree with flexbox and paints it through QuickDraw into the framebuffer.
+JSX compiles through `@mockintosh/ui` (universal Solid renderer) into a retained `box` / `text` / `image` / `raster` / `bitmap` tree. Those five lowercase tags are the **host elements** — the only nodes the engine measures and paints. `Button`, `TextInput`, `Dithered`, and the rest are **widgets**: Solid functions that compose host elements. A new look is a new widget or a prop, not a new tag.
+
+The OS layouts that tree with flexbox and paints it through QuickDraw into the framebuffer.
 
 ```tsx
 <box padding={8} flexDirection="column" gap={6} background={0}>
@@ -199,6 +203,7 @@ export default defineApp({
 - `setMenus(menus)` — this window's menubar (see [Menus](#menus))
 - `fetch` — network access, when this Macintosh has it (see [Capabilities](#capabilities))
 - `print` — the system printer, when the platform has one (see [Printing](#printing))
+- `download` — offer a file to the host user (`save({ name, type, bytes })`), when the platform can
 - `images` / `video` / `camera` — decode rasters, play video, or open a camera (see [Capabilities](#capabilities))
 - `scheduler` — `requestFrame` / `now` (no `requestAnimationFrame` / `performance`)
 - `capabilities` — the set of things this Macintosh can do (see [Capabilities](#capabilities))
@@ -217,6 +222,7 @@ Mockintosh runs in more than one place — a browser today, small devices with a
 | `network`   | `useApp().fetch` is available                                         |
 | `clipboard` | copy and paste work                                                   |
 | `printer`   | `useApp().print` is available                                         |
+| `download`  | `useApp().download` is available                                      |
 | `camera`    | `useApp().camera` is available                                        |
 | `video`     | `useApp().video` is available                                         |
 | `images`    | `useApp().images` is available                                        |
@@ -314,7 +320,7 @@ export const sprites: Record<string, Sprite> = {
 
 Prefix names with your app id (`"myapp/icon"`). OS sprites use `"icon/"` and `"chrome/"`.
 
-Sprites are also a file type — `image/x-mockintosh-sprite`, `MIME.sprite` — which is how an app keeps a picture in the user's file system (PhotoBooth saves photos this way; Picture opens them). `readSpriteFile(fs, fileId)` decodes one; `writeSpriteFile(fs, parentId, name, sprite, { attributes })` writes one, optionally with a Finder `icon` attribute:
+Sprites are also a file type — `image/x-mockintosh-sprite`, `MIME.sprite` — which is how an app keeps a picture in the user's file system (PhotoBooth and Dither save this way; Dither reopens them, Picture if Dither is absent). `readSpriteFile(fs, fileId)` decodes one; `readImageFile(fs, images, fileId)` expands a sprite or decodes a still — never pass sprite bytes to `images.decode`. `writeSpriteFile(fs, parentId, name, sprite, { attributes })` writes one, optionally with a Finder `icon` attribute:
 
 ```tsx
 const { fs } = useApp();

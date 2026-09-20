@@ -14,7 +14,7 @@
  */
 import { createStore, flush, getObserver, runWithOwner, snapshot, type StoreSetter } from "solid-js";
 import type { FSBackend } from "./backend";
-import { CURRENT_CATALOG_VERSION, parseCatalog, type CatalogDocument } from "./catalogDocument";
+import { CURRENT_CATALOG_VERSION, emptyCatalog, parseCatalog, type CatalogDocument } from "./catalogDocument";
 import { FSError } from "./errors";
 import { inferMimeType } from "./mime";
 import {
@@ -513,6 +513,35 @@ export class FileSystem {
   // =========================================================================
   // Persistence
   // =========================================================================
+
+  /**
+   * Format the disk: empty catalog, no blobs. The next `bootstrapFileSystem`
+   * sees a first-boot volume.
+   */
+  async erase(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    if (this.persistInFlight) {
+      try { await this.persistInFlight; } catch { /* wipe anyway */ }
+    }
+    await this.backend.clear();
+    const empty = emptyCatalog(this.now());
+    this.commit((s) => {
+      for (const id of Object.keys(s.nodes)) {
+        if (id !== ROOT_ID) delete s.nodes[id];
+      }
+      s.nodes[ROOT_ID] = empty.nodes[ROOT_ID]!;
+      for (const id of Object.keys(s.attributes)) delete s.attributes[id];
+      for (const id of Object.keys(s.childIds)) {
+        if (id !== ROOT_ID) delete s.childIds[id];
+      }
+      s.childIds[ROOT_ID] = [];
+      for (const key of Object.keys(s.roles)) delete s.roles[key];
+    });
+    await this.flush();
+  }
 
   /** Write the catalog now if it has unsaved changes. */
   async flush(): Promise<void> {

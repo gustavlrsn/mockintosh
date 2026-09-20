@@ -13,6 +13,7 @@ import { pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
 import type {
   HostCapability,
   Platform,
+  PlatformDropEvent,
   PlatformKeyEvent,
   PlatformPointerEvent,
   PlatformScheduler,
@@ -32,6 +33,8 @@ export interface HeadlessPlatform extends Platform {
   pointer(event: PlatformPointerEvent): void;
   /** Inject a key event as if the keyboard driver produced it. */
   key(event: PlatformKeyEvent): void;
+  /** Inject a host file drop as if the user dragged onto the screen. */
+  drop(event: PlatformDropEvent): void;
   /** Press and release at (x, y). */
   click(x: number, y: number): void;
   /** Advance the clock by `ms` and run every pending frame callback once. */
@@ -46,6 +49,7 @@ export function createHeadlessPlatform(options: HeadlessPlatformOptions): Headle
 
   const pointerHandlers = new Set<(e: PlatformPointerEvent) => void>();
   const keyHandlers = new Set<(e: PlatformKeyEvent) => void>();
+  const dropHandlers = new Set<(e: PlatformDropEvent) => void>();
 
   let clock = 0;
   let frameCallbacks: Array<(timeMs: number) => void> = [];
@@ -78,6 +82,10 @@ export function createHeadlessPlatform(options: HeadlessPlatformOptions): Headle
         keyHandlers.add(handler);
         return () => keyHandlers.delete(handler);
       },
+      onDrop(handler) {
+        dropHandlers.add(handler);
+        return () => dropHandlers.delete(handler);
+      },
     },
     scheduler,
     storage: new InMemoryBackend(),
@@ -99,6 +107,9 @@ export function createHeadlessPlatform(options: HeadlessPlatformOptions): Headle
     },
     key(event) {
       keyHandlers.forEach((h) => h(event));
+    },
+    drop(event) {
+      dropHandlers.forEach((h) => h(event));
     },
     click(x, y) {
       this.pointer({ type: "down", x, y, button: 0 });

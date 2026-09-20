@@ -87,6 +87,7 @@ export function createAppContext(
     capabilities: os.capabilities,
     fetch: os.fetch,
     print: os.printer,
+    download: os.download,
     images: os.images,
     video: os.video,
     camera: os.camera,

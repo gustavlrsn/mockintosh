@@ -7,6 +7,7 @@
 import { registerApp } from "./os/apps";
 import Testing from "@/apps/Testing";
 import FileViewer from "@/apps/FileViewer";
+import Dither from "@/apps/Dither";
 import Picture from "@/apps/Picture";
 import VideoPlayer from "@/apps/VideoPlayer";
 import PhotoBooth from "@/apps/PhotoBooth";
@@ -16,10 +17,12 @@ import Safari, { SafariStream, SafariTextweb } from "@/apps/Safari";
 import SpotifyPlayer from "@/apps/SpotifyPlayer";
 import IconGallery from "@/apps/IconGallery";
 import MacPaint from "@/apps/MacPaint";
+import Canvas from "@/apps/Canvas";
 
 for (const app of [
   Testing,
   FileViewer,
+  Dither,
   Picture,
   VideoPlayer,
   PhotoBooth,
@@ -31,6 +34,7 @@ for (const app of [
   SpotifyPlayer,
   IconGallery,
   MacPaint,
+  Canvas,
 ]) {
   registerApp(app);
 }

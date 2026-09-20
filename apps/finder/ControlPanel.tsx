@@ -91,11 +91,11 @@ export function ControlPanel(_props: Record<string, unknown>): JSX.Element {
             borderColor={1}
           />
           <box flexDirection="column" gap={2} flexGrow={1}>
-            <text font="body">Desktop pattern</text>
-            <text font="body" semantic={{ name: `${desktopPatternName}-value`, role: "status" }}>
+            <text font="body" nowrap>Desktop pattern</text>
+            <text font="body" nowrap semantic={{ name: `${desktopPatternName}-value`, role: "status" }}>
               {settings.pattern()}
             </text>
-            <text>{error()}</text>
+            <text nowrap>{error()}</text>
           </box>
         </box>
       </WindowHeader>

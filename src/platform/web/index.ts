@@ -3,14 +3,17 @@
  * `requestAnimationFrame` for the clock, OPFS for the disk, and WebUSB for
  * the printer. This is the only OS-level module that may use DOM APIs.
  */
+import type { BitMap } from "@mockintosh/quickdraw";
 import { InMemoryBackend } from "@mockintosh/fs";
 import { OPFSBackend, isOPFSAvailable } from "./OPFSBackend";
 import { WebUSBPrinterTransport, isWebUSBAvailable } from "./WebUSBPrinterTransport";
 import type { UIClipboard } from "@mockintosh/ui";
 import type {
   HostCapability,
+  HostFileDrop,
   Platform,
   PlatformDisplay,
+  PlatformDropEvent,
   PlatformInput,
   PlatformKeyEvent,
   PlatformPointerEvent,
@@ -18,7 +21,8 @@ import type {
   PointerButton,
 } from "../types";
 import { browserBuilder } from "./builder";
-import { CanvasPresenter } from "./CanvasPresenter";
+import { CanvasPresenter, createScreenCanvas, wheelIsPinchZoom } from "@mockintosh/ui/web";
+import { createWebDownloadService } from "./download";
 import { createWebImageService } from "./media/images";
 import { createWebVideoService } from "./media/video";
 import { createWebCameraService } from "./media/camera";
@@ -39,39 +43,28 @@ export const DEFAULT_SCREEN = { width: 512, height: 342 } as const;
 export function createWebPlatform(options: WebPlatformOptions): Platform {
   const { root, width, height } = options;
 
-  // --- Screen: an integer-zoomed canvas that fits the window ---
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  canvas.tabIndex = 0; // focusable so it receives keyboard events
-  canvas.style.outline = "none";
-  root.appendChild(canvas);
-  const ctx2d = canvas.getContext("2d", { alpha: false })!;
-
-  let zoom = 1;
-  function fitToWindow(): void {
-    zoom = Math.max(
-      1,
-      Math.min(Math.floor(window.innerWidth / width), Math.floor(window.innerHeight / height))
-    );
-    canvas.style.width = `${width * zoom}px`;
-    canvas.style.height = `${height * zoom}px`;
-  }
-  fitToWindow();
-  window.addEventListener("resize", fitToWindow);
+  const screenEl = createScreenCanvas(root, width, height);
+  const { canvas, ctx } = screenEl;
 
   let presenter: CanvasPresenter | null = null;
+  let lastScreen: BitMap | null = null;
   const display: PlatformDisplay = {
     width,
     height,
     present(screen) {
-      presenter ??= new CanvasPresenter(screen, ctx2d);
-      presenter.present();
+      lastScreen = screen;
+      presenter ??= new CanvasPresenter(screen, ctx);
+      presenter.present(screen);
     },
   };
+  screenEl.subscribeInvalidate(() => {
+    if (!lastScreen) return;
+    presenter ??= new CanvasPresenter(lastScreen, ctx);
+    presenter.present(lastScreen);
+  });
 
   // --- Input: DOM events → screen-space pointer/key events ---
-  const input = createDOMInput(canvas, () => zoom);
+  const input = createDOMInput(canvas, screenEl.toScreen);
 
   // --- Clock ---
   const scheduler: PlatformScheduler = {
@@ -114,6 +107,7 @@ export function createWebPlatform(options: WebPlatformOptions): Platform {
     browser: createWebBrowserService(),
     clipboard,
     printer: isWebUSBAvailable() ? new WebUSBPrinterTransport() : undefined,
+    download: createWebDownloadService(),
     fetch: globalThis.fetch.bind(globalThis),
     images: createWebImageService(),
     video: createWebVideoService(),
@@ -125,21 +119,23 @@ export function createWebPlatform(options: WebPlatformOptions): Platform {
       try { return await import(/* @vite-ignore */ url); } finally { URL.revokeObjectURL(url); }
     },
     loadModule: (url) => import(/* @vite-ignore */ url),
+    reload() {
+      location.reload();
+    },
   };
 }
 
-function createDOMInput(canvas: HTMLCanvasElement, zoom: () => number): PlatformInput {
+function createDOMInput(
+  canvas: HTMLCanvasElement,
+  toScreen: (e: MouseEvent) => { x: number; y: number },
+): PlatformInput {
   const pointerHandlers = new Set<(e: PlatformPointerEvent) => void>();
   const keyHandlers = new Set<(e: PlatformKeyEvent) => void>();
+  const dropHandlers = new Set<(e: PlatformDropEvent) => void>();
 
   const emitPointer = (e: PlatformPointerEvent) => pointerHandlers.forEach((h) => h(e));
   const emitKey = (e: PlatformKeyEvent) => keyHandlers.forEach((h) => h(e));
-
-  function toScreen(e: MouseEvent): { x: number; y: number } {
-    const rect = canvas.getBoundingClientRect();
-    const z = zoom();
-    return { x: Math.floor((e.clientX - rect.left) / z), y: Math.floor((e.clientY - rect.top) / z) };
-  }
+  const emitDrop = (e: PlatformDropEvent) => dropHandlers.forEach((h) => h(e));
   const button = (e: MouseEvent): PointerButton => (e.button === 1 || e.button === 2 ? e.button : 0);
 
   canvas.addEventListener("mousedown", (e) => {
@@ -169,6 +165,7 @@ function createDOMInput(canvas: HTMLCanvasElement, zoom: () => number): Platform
     "wheel",
     (e) => {
       e.preventDefault();
+      if (wheelIsPinchZoom(e)) return;
       emitPointer({ type: "scroll", ...toScreen(e), deltaX: e.deltaX, deltaY: e.deltaY });
     },
     { passive: false }
@@ -182,6 +179,31 @@ function createDOMInput(canvas: HTMLCanvasElement, zoom: () => number): Platform
   window.addEventListener("keydown", (e) => emitKey(keyEvent("down", e)));
   window.addEventListener("keyup", (e) => emitKey(keyEvent("up", e)));
 
+  const allowDrop = (e: DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  };
+  const preventNav = (e: DragEvent) => {
+    e.preventDefault();
+  };
+  window.addEventListener("dragover", preventNav);
+  window.addEventListener("drop", preventNav);
+  canvas.addEventListener("dragover", allowDrop);
+  canvas.addEventListener("drop", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const list = e.dataTransfer?.files;
+    if (!list?.length) return;
+    const pos = toScreen(e);
+    void Promise.all(
+      Array.from(list).map(async (file): Promise<HostFileDrop> => ({
+        name: file.name,
+        type: file.type,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      })),
+    ).then((files) => emitDrop({ ...pos, files }));
+  });
+
   return {
     onPointer(handler) {
       pointerHandlers.add(handler);
@@ -190,6 +212,10 @@ function createDOMInput(canvas: HTMLCanvasElement, zoom: () => number): Platform
     onKey(handler) {
       keyHandlers.add(handler);
       return () => keyHandlers.delete(handler);
+    },
+    onDrop(handler) {
+      dropHandlers.add(handler);
+      return () => dropHandlers.delete(handler);
     },
   };
 }

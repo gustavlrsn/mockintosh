@@ -75,7 +75,10 @@ export function DialogApp(props: DialogProps): JSX.Element {
           {(label) => (
             <Button
               label={label}
-              default={label === defaultLabel()}
+              font="menu"
+              height={20}
+              borderRadius={5}
+              ring={label === defaultLabel()}
               onClick={() => finish(label)}
             />
           )}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { FileSystem, InMemoryBackend, MIME } from "@mockintosh/fs";
+import { FileSystem, InMemoryBackend, MIME, ROOT_ID } from "@mockintosh/fs";
 import { bootstrapFileSystem, STARTUP_VOLUME_NAME } from "./fsBootstrap";
 import { createAppStorage } from "./appStorage";
 
@@ -23,6 +23,24 @@ describe("bootstrapFileSystem", () => {
     expect(shortcuts.every((n) => n.kind === "file" && n.type === MIME.appShortcut)).toBe(true);
   });
 
+  it("erase() then bootstrap yields a first-boot desktop including Canvas", async () => {
+    const fs = await bootedFS();
+    const desktop = fs.locate("desktop")!;
+    await fs.writeJSON(desktop.id, "scratch", { n: 1 }, { type: MIME.json });
+    expect(fs.child(desktop.id, "scratch")).toBeDefined();
+
+    await fs.erase();
+    expect(fs.volumes()).toEqual([]);
+    await bootstrapFileSystem(fs);
+
+    const names = fs.children(fs.locate("desktop")!.id).map((n) => n.name);
+    expect(names).toContain("Canvas");
+    expect(names).toContain("MacPaint");
+    expect(names).toContain("Dither");
+    expect(names).not.toContain("scratch");
+    expect(fs.locate("volume")?.name).toBe(STARTUP_VOLUME_NAME);
+  });
+
   it("repairs missing role folders without touching user renames", async () => {
     const fs = await bootedFS();
     const trash = fs.locate("trash")!;
@@ -32,6 +50,32 @@ describe("bootstrapFileSystem", () => {
     expect(fs.locate("trash")?.name).toBe("Bin");
     expect(fs.locate("system")).toBeDefined();
     expect(fs.locate("preferences")).toBeDefined();
+  });
+
+  it("adds a Dither shortcut to an existing desktop that lacks one", async () => {
+    const fs = await FileSystem.open({ backend: new InMemoryBackend(), persistDelayMs: 0 });
+    const hd = fs.mkdir(ROOT_ID, STARTUP_VOLUME_NAME, { role: "volume" });
+    fs.mkdir(hd.id, "Desktop Folder", { role: "desktop" });
+    fs.mkdir(hd.id, "Trash", { role: "trash" });
+    fs.mkdir(hd.id, "Applications", { role: "applications" });
+    const system = fs.mkdir(hd.id, "System Folder", { role: "system" });
+    fs.mkdir(system.id, "Preferences", { role: "preferences" });
+    await bootstrapFileSystem(fs);
+    const dither = fs.child(fs.locate("desktop")!.id, "Dither");
+    expect(dither).toMatchObject({
+      kind: "file",
+      type: MIME.appShortcut,
+    });
+    expect(fs.attributes(dither!.id).icon).toBe("dither/icon");
+  });
+
+  it("updates a camera-icon Dither shortcut to Scanned Art", async () => {
+    const fs = await bootedFS();
+    const desktop = fs.locate("desktop")!;
+    const dither = fs.child(desktop.id, "Dither")!;
+    fs.setAttributes(dither.id, { icon: "icon/camera" });
+    await bootstrapFileSystem(fs);
+    expect(fs.attributes(dither.id).icon).toBe("dither/icon");
   });
 });
 

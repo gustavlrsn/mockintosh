@@ -2,14 +2,34 @@ import { Show, createEffect, createSignal, onCleanup, onSettled } from "solid-js
 import type { JSX } from "@mockintosh/ui";
 import { Button, type Ink, type RasterSurface } from "@mockintosh/ui";
 import {
-  createDitherer,
+  ASCII_DIFFUSE_DEFAULT,
+  ASCII_DIRECTIONAL_DEFAULT,
+  ASCII_NORMALIZE_DEFAULT,
+  ASCII_PUNCH_DEFAULT,
+  asciiOptionsRevision,
+  coverFrame,
   defineApp,
+  isBaselineAscii,
+  renderAsciiGlyphAtlas,
   useApp,
   writeSpriteFile,
+  type AsciiDitherOptions,
   type CameraSource,
-  type DitherMode,
   type ImageFrame,
 } from "@mockintosh/sdk";
+import { AdjustSlider } from "./photobooth/AdjustSlider";
+import { AsciiControls } from "./photobooth/AsciiControls";
+import { AsciiCompare, COMPARE_WINDOW } from "./photobooth/AsciiCompare";
+import {
+  applyAdjustInPlace,
+  BRIGHTNESS_DEFAULT,
+  BRIGHTNESS_MAX,
+  BRIGHTNESS_MIN,
+  CONTRAST_DEFAULT,
+  CONTRAST_MAX,
+  CONTRAST_MIN,
+} from "./photobooth/adjust";
+import { createPhotoDitherer, type PhotoDither } from "./photobooth/ditherMode";
 
 /** Viewfinder size in the app's own (windowed) window. */
 const PREVIEW = 288;
@@ -49,7 +69,14 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   const [viewingPhoto, setViewingPhoto] = createSignal<number | null>(null);
   const [photos, setPhotos] = createSignal<Photo[]>([]);
   const [flash, setFlash] = createSignal(false);
-  const [ditherMode, setDitherMode] = createSignal<DitherMode>("atkinson");
+  const [ditherMode, setDitherMode] = createSignal<PhotoDither>("atkinson");
+  const [showGlyphs, setShowGlyphs] = createSignal(false);
+  const [contrast, setContrast] = createSignal(CONTRAST_DEFAULT);
+  const [brightness, setBrightness] = createSignal(BRIGHTNESS_DEFAULT);
+  const [punch, setPunch] = createSignal(ASCII_PUNCH_DEFAULT);
+  const [directional, setDirectional] = createSignal(ASCII_DIRECTIONAL_DEFAULT);
+  const [normalize, setNormalize] = createSignal(ASCII_NORMALIZE_DEFAULT);
+  const [diffuse, setDiffuse] = createSignal(ASCII_DIFFUSE_DEFAULT);
   const [frame, setFrame] = createSignal(0);
 
   const isFullScreen = () => win.kind() === "fullscreen";
@@ -58,14 +85,16 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
 
   let camera: CameraSource | null = null;
   let live: Photo | null = null;
+  let scaled: ImageFrame | null = null;
   let dither: ((frame: ImageFrame, out: Uint8Array) => void) | null = null;
-  let ditherW = 0;
-  let ditherH = 0;
-  let ditherKind: DitherMode | null = null;
+  let ditherKey = "";
   let cancelFrame: (() => void) | null = null;
   let countdownTimer: ReturnType<typeof setTimeout> | null = null;
   let flashTimer: ReturnType<typeof setTimeout> | null = null;
   let lastCapture = 0;
+  let atlas: Uint8Array | null = null;
+  let atlasW = 0;
+  let atlasH = 0;
 
   function stopLoop(): void {
     cancelFrame?.();
@@ -73,21 +102,25 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   }
 
   function captureLoop(now: number): void {
-    if (!win.isActive() || loading() || errorText() || viewingPhoto() !== null) {
+    if (!win.isActive() || loading() || errorText() || viewingPhoto() !== null || showGlyphs()) {
       cancelFrame = app.scheduler.requestFrame(captureLoop);
       return;
     }
     const src = camera?.frame() ?? null;
-    if (src && now - lastCapture >= CAPTURE_INTERVAL_MS) {
+    const { width, height } = view();
+    if (src && width > 0 && height > 0 && now - lastCapture >= CAPTURE_INTERVAL_MS) {
       const mode = ditherMode();
-      if (!dither || ditherW !== src.width || ditherH !== src.height || ditherKind !== mode) {
-        ditherW = src.width;
-        ditherH = src.height;
-        ditherKind = mode;
-        dither = createDitherer(src.width, src.height, mode);
-        live = { pixels: new Uint8Array(src.width * src.height), width: src.width, height: src.height, timestamp: 0 };
+      const ascii = asciiOpts();
+      const key = `${mode}|${width}|${height}|${asciiOptionsRevision(ascii)}`;
+      if (!dither || !scaled || ditherKey !== key) {
+        ditherKey = key;
+        dither = createPhotoDitherer(mode, width, height, ascii);
+        scaled = { width, height, rgba: new Uint8ClampedArray(width * height * 4) };
+        live = { pixels: new Uint8Array(width * height), width, height, timestamp: 0 };
       }
-      dither(src, live!.pixels);
+      coverFrame(src, scaled, { mirror: true });
+      applyAdjustInPlace(scaled, { contrast: contrast(), brightness: brightness() });
+      dither(scaled, live!.pixels);
       lastCapture = now;
       setFrame((n) => n + 1);
     }
@@ -162,6 +195,32 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
     win.setFullScreen(!isFullScreen());
   }
 
+  function asciiOpts(): AsciiDitherOptions {
+    return {
+      punch: punch(),
+      directional: directional(),
+      normalize: normalize(),
+      diffuse: diffuse(),
+    };
+  }
+
+  function resetAscii(): void {
+    setPunch(ASCII_PUNCH_DEFAULT);
+    setDirectional(ASCII_DIRECTIONAL_DEFAULT);
+    setNormalize(ASCII_NORMALIZE_DEFAULT);
+    setDiffuse(ASCII_DIFFUSE_DEFAULT);
+  }
+
+  function openCompare(): void {
+    app.openWindow({
+      title: "ASCII Compare",
+      size: { width: COMPARE_WINDOW.width, height: COMPARE_WINDOW.height },
+      scrollable: false,
+      resizable: false,
+      Component: AsciiCompare,
+    });
+  }
+
   createEffect(
     () => ({
       viewing: viewingPhoto(),
@@ -170,8 +229,17 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
       errorText: errorText(),
       isFullScreen: isFullScreen(),
       ditherMode: ditherMode(),
+      showGlyphs: showGlyphs(),
+      contrast: contrast(),
+      brightness: brightness(),
+      punch: punch(),
+      directional: directional(),
+      normalize: normalize(),
+      diffuse: diffuse(),
     }),
-    ({ viewing, counting, loading: isLoading, errorText: err, isFullScreen: full, ditherMode: mode }) => {
+    ({ viewing, counting, loading: isLoading, errorText: err, isFullScreen: full, ditherMode: mode, showGlyphs: glyphs, contrast: contrastAmt, brightness: brightAmt }) => {
+    const ascii = asciiOpts();
+    const toneDefault = contrastAmt === CONTRAST_DEFAULT && brightAmt === BRIGHTNESS_DEFAULT;
     app.setMenus([
       {
         label: "File",
@@ -179,8 +247,13 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
           {
             label: "Take Photo",
             shortcut: "T",
-            disabled: counting || viewing !== null || isLoading || !!err,
+            disabled: counting || viewing !== null || isLoading || !!err || glyphs,
             onClick: () => startCountdown(),
+          },
+          {
+            label: "Compare Reference",
+            shortcut: "R",
+            onClick: openCompare,
           },
         ],
       },
@@ -192,6 +265,31 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
             shortcut: "F",
             onClick: toggleFullScreen,
           },
+          {
+            label: glyphs ? "Hide Character Set" : "Character Set",
+            onClick: () => {
+              setShowGlyphs((on) => !on);
+              setFrame((n) => n + 1);
+            },
+          },
+        ],
+      },
+      {
+        label: "Adjust",
+        items: [
+          {
+            label: "Reset Tone",
+            disabled: toneDefault,
+            onClick: () => {
+              setContrast(CONTRAST_DEFAULT);
+              setBrightness(BRIGHTNESS_DEFAULT);
+            },
+          },
+          {
+            label: "Reset Ascii",
+            disabled: mode !== "ascii" || isBaselineAscii(ascii),
+            onClick: resetAscii,
+          },
         ],
       },
       {
@@ -200,10 +298,11 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
           {
             type: "radiogroup",
             value: mode,
-            onValueChange: (v) => setDitherMode(v as DitherMode),
+            onValueChange: (v) => setDitherMode(v as PhotoDither),
             items: [
               { label: "Atkinson", value: "atkinson" },
               { label: "Bayer", value: "bayer" },
+              { label: "Ascii", value: "ascii" },
             ],
           },
         ],
@@ -238,6 +337,16 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
           revision={frame()}
           onPaint={(surface) => {
             const size = { width: surface.rect.width, height: surface.rect.height };
+            if (showGlyphs()) {
+              if (!atlas || atlasW !== size.width || atlasH !== size.height) {
+                atlas = renderAsciiGlyphAtlas(size.width, size.height);
+                atlasW = size.width;
+                atlasH = size.height;
+              }
+              surface.fill(0);
+              surface.blitPixels(atlas, size.width, size.height, 0, 0);
+              return;
+            }
             if (flash()) {
               paintPicture(surface, null, size, 0);
               return;
@@ -245,6 +354,56 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
             paintPicture(surface, viewing() ?? liveFrame(), size, 0);
           }}
         />
+        <Show when={viewingPhoto() === null && !showGlyphs() && !loading() && !errorText()}>
+          <box
+            position="absolute"
+            left={0}
+            bottom={0}
+            width={view().width}
+            padding={4}
+            flexDirection="column"
+            gap={2}
+            background={0}
+          >
+            <AdjustSlider
+              name="contrast"
+              label="Contrast"
+              labelWidth={48}
+              value={contrast()}
+              min={CONTRAST_MIN}
+              max={CONTRAST_MAX}
+              trackWidth={Math.max(80, view().width - 120)}
+              format={(v) => `${Math.round(v * 100)}%`}
+              onChange={setContrast}
+            />
+            <AdjustSlider
+              name="brightness"
+              label="Bright"
+              labelWidth={48}
+              value={brightness()}
+              min={BRIGHTNESS_MIN}
+              max={BRIGHTNESS_MAX}
+              step={2}
+              trackWidth={Math.max(80, view().width - 120)}
+              format={(v) => (v > 0 ? `+${v}` : String(v))}
+              onChange={setBrightness}
+            />
+            <Show when={ditherMode() === "ascii"}>
+              <AsciiControls
+                punch={punch()}
+                directional={directional()}
+                normalize={normalize()}
+                diffuse={diffuse()}
+                trackWidth={Math.max(80, view().width - 120)}
+                labelWidth={48}
+                onPunch={setPunch}
+                onDirectional={setDirectional}
+                onNormalize={setNormalize}
+                onDiffuse={setDiffuse}
+              />
+            </Show>
+          </box>
+        </Show>
         <Show when={loading()}>
           <box position="absolute" left={0} top={0} width={view().width} height={view().height} justifyContent="center" alignItems="center">
             <box background={0} padding={2}>
@@ -317,7 +476,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
           <box flexGrow={1} />
           <Button
             label={countdown() !== null ? String(countdown()) : "Snap"}
-            disabled={countdown() !== null || loading() || !!errorText()}
+            disabled={countdown() !== null || loading() || !!errorText() || showGlyphs()}
             onClick={() => startCountdown()}
           />
           <box flexGrow={1} />

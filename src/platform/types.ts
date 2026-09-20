@@ -21,6 +21,7 @@ import type {
   CameraService,
   Capability,
   FetchFunction,
+  DownloadService,
   ImageService,
   VideoService,
 } from "@mockintosh/sdk";
@@ -56,12 +57,28 @@ export interface PlatformKeyEvent {
   modifiers: Modifiers;
 }
 
+/** A file the host user dropped onto the screen (browser `<input>` / drag). */
+export interface HostFileDrop {
+  name: string;
+  type: string;
+  bytes: Uint8Array;
+}
+
+export interface PlatformDropEvent {
+  /** Screen coordinates, already scaled to the display's pixel grid. */
+  x: number;
+  y: number;
+  files: HostFileDrop[];
+}
+
 /** Returned by every subscription; call to unsubscribe. */
 export type Unsubscribe = () => void;
 
 export interface PlatformInput {
   onPointer(handler: (event: PlatformPointerEvent) => void): Unsubscribe;
   onKey(handler: (event: PlatformKeyEvent) => void): Unsubscribe;
+  /** Host files dropped onto the screen. Absent on hosts with no such notion. */
+  onDrop?(handler: (event: PlatformDropEvent) => void): Unsubscribe;
 }
 
 /**
@@ -96,6 +113,7 @@ export interface Platform {
   hostCapabilities: readonly HostCapability[];
   clipboard?: UIClipboard;
   printer?: PrinterTransport;
+  download?: DownloadService;
   fetch?: FetchFunction;
   images?: ImageService;
   video?: VideoService;
@@ -113,6 +131,12 @@ export interface Platform {
   builder?: import("../shared/buildContract").BuildProvider;
   /** Read-only OS source volume (`/system/source`). Absent = no source volume. */
   source?: SourceProvider;
+  /**
+   * Reboot this machine. The web host reloads the page; a firmware host
+   * would jump to ROM. Absent on headless tests — `eraseDisk` then
+   * re-bootstraps in place.
+   */
+  reload?(): void;
 }
 
 export interface SourceFile {

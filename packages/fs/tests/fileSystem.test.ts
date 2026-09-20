@@ -238,6 +238,23 @@ describe("FileSystem — persistence", () => {
     expect(await reopened.readText(f.id)).toBe("abc");
   });
 
+  it("erase() formats the disk and a reopen sees only the root", async () => {
+    const { fs, backend, hd } = await openMac();
+    const file = await fs.writeFile(hd.id, "secret.txt", "keep out");
+    await fs.flush();
+    expect(backend.blobIds()).toContain(file.id);
+
+    await fs.erase();
+    expect(fs.volumes()).toEqual([]);
+    expect(fs.children(ROOT_ID)).toEqual([]);
+    expect(backend.blobIds()).toEqual([]);
+    expect(await backend.readCatalog()).toContain(`"${ROOT_ID}"`);
+
+    const reopened = await FileSystem.open({ backend, persistDelayMs: 0 });
+    expect(reopened.volumes()).toEqual([]);
+    expect(reopened.node(file.id)).toBeUndefined();
+  });
+
   it("writes the body before the catalog entry appears", async () => {
     const events: string[] = [];
     const inner = new InMemoryBackend();
@@ -248,6 +265,7 @@ describe("FileSystem — persistence", () => {
       readBlob: (id) => inner.readBlob(id),
       writeBlob: (id, b) => { events.push("blob"); return inner.writeBlob(id, b); },
       deleteBlob: (id) => { events.push("delete"); return inner.deleteBlob(id); },
+      clear: () => { events.push("clear"); return inner.clear(); },
     };
     const fs = await FileSystem.open({ backend: spy, persistDelayMs: 0 });
     await fs.flush();

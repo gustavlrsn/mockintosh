@@ -5,6 +5,7 @@
     "skipLibCheck": true,
     "strict": false,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "target": "es2020",
@@ -36,5 +37,5 @@
     "utils/**/*.ts",
     "vite-env.d.ts"
   ],
-  "exclude": ["node_modules", "dist", "api", "scripts", "packages/quickdraw"]
+  "exclude": ["node_modules", "dist", "api", "scripts", "packages/quickdraw", "packages/ui/src/vite/**"]
 }

@@ -72,6 +72,18 @@ export class OPFSBackend implements FSBackend {
       // Already gone — deleting is idempotent.
     }
   }
+
+  async clear(): Promise<void> {
+    const storageRoot = await navigator.storage.getDirectory();
+    try {
+      await storageRoot.removeEntry(FS_DIR, { recursive: true });
+    } catch {
+      // Already gone.
+    }
+    this.root = null;
+    this.files = null;
+    await this.init();
+  }
 }
 
 async function writeWhole(

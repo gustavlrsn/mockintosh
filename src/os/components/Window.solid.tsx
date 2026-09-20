@@ -412,6 +412,7 @@ export function Window(props: WindowProps): JSX.Element {
             font="menu"
             align="center"
             verticalAlign="middle"
+            nowrap
           >
             {titlePending() ? `${props.win.title}…` : props.win.title}
           </text>
@@ -697,6 +698,7 @@ function DefaultInfoBar(props: { win: OSWindow }): JSX.Element {
       height="100%"
       font="menu"
       verticalAlign="middle"
+      nowrap
     >
       {(props.win.infoBar ?? []).join("   ")}
     </text>
