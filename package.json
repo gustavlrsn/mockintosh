@@ -3,10 +3,13 @@
   "version": "0.4.0",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "sites/*"
   ],
   "scripts": {
     "dev": "npm run build:content && vite",
+    "dev:ui": "npm run dev --prefix sites/ui",
+    "build:ui": "npm run build --prefix sites/ui",
     "build": "npm run build:content && vite build",
     "preview": "vite preview",
     "dev:api": "tsx scripts/dev-api.ts",
@@ -26,6 +29,13 @@
     "icons:import": "tsx scripts/import-icon.ts",
     "icons:refresh-catalog": "tsx scripts/refresh-icon-catalog.ts",
     "icons:gallery": "tsx scripts/icons-gallery.ts",
+    "glyphs:ascii": "tsx scripts/preview-ascii-glyphs.ts --out /tmp/ascii-glyphs.png",
+    "fonts:import-pixel": "python3 scripts/import-geist-pixel.py",
+    "fonts:import-lisa": "python3 scripts/import-lisa-terminal.py",
+    "fonts:import-geneva-bold": "tsx scripts/import-geneva-bold.ts",
+    "fonts:import-geneva-12": "python3 scripts/import-geneva-12.py && tsx scripts/import-geneva-12-bold.ts",
+    "fonts:import-city": "python3 scripts/import-city-fonts.py",
+    "fonts:preview-pixel": "tsx scripts/preview-pixel-font.ts",
     "icons:extract-753": "python3 scripts/extract-system753-icons.py",
     "resources:extract-753": "python3 scripts/extract-system753-resources.py"
   },
