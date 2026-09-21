@@ -1,3 +1,0 @@
-Installing and running the project locally
-
-Install node + npm and git if you haven't already, and then run

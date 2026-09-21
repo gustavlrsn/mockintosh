@@ -19,6 +19,9 @@ dist
 
 # misc
 .DS_Store
+.vscode
+.cursor
+.claude
 
 # debug
 npm-debug.log*

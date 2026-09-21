@@ -1,19 +1,21 @@
-# Welcome
+# Mockintosh
 
-Mockintosh is a mock operating system in classic Macintosh OS style.
+A mock operating system in classic Macintosh OS style.
 
-The code is [open source](https://github.com/gustavlrsn/mockintosh) but all credit for the design language and most icons belong to [Susan Kare](https://twitter.com/SusanKare), the designer of the original Macintosh GUI.
-
-It is built with React and instructions on how to set up the development environment are in CONTRIBUTING.md.
-
-\- [@gustavlrsn](https://twitter.com/gustavlrsn)
+- [mockintosh.com](https://mockintosh.com) — the OS
+- [ui.mockintosh.com](https://ui.mockintosh.com) — the 1-bit UI kit
 
 ![mockintosh 1-bit](https://mockintosh.com/mockintosh.png)
 
-### Development
+This repo is a 1-bit drawing engine, a standalone UI kit, and the OS built on them. See [ARCHITECTURE.md](ARCHITECTURE.md) and the [app developer guide](packages/sdk/docs/APP_DEV_GUIDE.md).
 
-`esc-pos-encoder` needs some support canvas libraries to be able to be installed (ref: https://github.com/NielsLeenheer/EscPosEncoder/issues/73)
+Design language and most icons are [Susan Kare](https://twitter.com/SusanKare)’s.
 
-add those with
+```
+npm install
+npm run dev
+```
 
-`brew install pkg-config cairo pango libpng jpeg giflib librsvg`
+Macintosh, QuickDraw, and Finder are trademarks of Apple Inc. This project is not affiliated with Apple.
+
+\- [@gustavlrsn](https://twitter.com/gustavlrsn)

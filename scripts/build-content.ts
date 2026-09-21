@@ -13,7 +13,7 @@ import matter from "gray-matter";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
-const FILES = ["README.md", "CONTRIBUTING.md"];
+const FILES = ["README.md"];
 const OUT_DIR = path.join(ROOT, "public", "content");
 
 function stripMarkdown(md: string): string {
