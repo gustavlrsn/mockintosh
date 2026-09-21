@@ -1,7 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import { createNode, setNodeProperty } from "../src/nodes";
 import { computeLayout } from "../src/layout";
-import { createDoubleClickTracker, createPointerDispatcher, hitTest, nodeAt, TOUCH_SLOP } from "../src/pointer";
+import {
+  createDoubleClickTracker,
+  createPointerDispatcher,
+  hitTest,
+  nodeAt,
+  TOUCH_SLOP,
+  type PointerScheduler,
+} from "../src/pointer";
 import { createFocusManager } from "../src/focus";
 import type { MeasureFunc } from "../src/layout";
 
@@ -405,6 +412,73 @@ describe("touch pan", () => {
     ptr.dispatch("mousedown", 20, 20, { kind: "touch" });
     ptr.dispatch("mouseup", 20, 20, { kind: "touch", cancel: true });
     expect(clicked).toBe(0);
+  });
+});
+
+function fakeClock(): PointerScheduler & { advance(ms: number): void } {
+  let now = 0;
+  const frames: Array<(t: number) => void> = [];
+  return {
+    now: () => now,
+    requestFrame(cb) {
+      frames.push(cb);
+      return frames.length;
+    },
+    cancelFrame() {
+      frames.length = 0;
+    },
+    advance(ms) {
+      now += ms;
+      const batch = frames.splice(0);
+      for (const cb of batch) cb(now);
+    },
+  };
+}
+
+describe("touch flick", () => {
+  it("coasts after a fast vertical pan", () => {
+    const { root, pane } = scrollTree();
+    const clock = fakeClock();
+    const ptr = createPointerDispatcher(root, createFocusManager(root), undefined, clock);
+    ptr.dispatch("mousedown", 20, 30, { kind: "touch" });
+    clock.advance(16);
+    ptr.dispatch("mousemove", 20, 14, { kind: "touch" });
+    const dragged = pane._scrollOffset;
+    expect(dragged).toBeGreaterThan(0);
+    ptr.dispatch("mouseup", 20, 14, { kind: "touch" });
+    clock.advance(16);
+    expect(pane._scrollOffset).toBeGreaterThan(dragged);
+    expect(Number.isInteger(pane._scrollOffset)).toBe(true);
+    ptr.stopFlick();
+  });
+
+  it("does not coast when the finger pauses", () => {
+    const { root, pane } = scrollTree();
+    const clock = fakeClock();
+    const ptr = createPointerDispatcher(root, createFocusManager(root), undefined, clock);
+    ptr.dispatch("mousedown", 20, 30, { kind: "touch" });
+    clock.advance(16);
+    ptr.dispatch("mousemove", 20, 14, { kind: "touch" });
+    const dragged = pane._scrollOffset;
+    clock.advance(120);
+    ptr.dispatch("mouseup", 20, 14, { kind: "touch" });
+    clock.advance(16);
+    expect(pane._scrollOffset).toBe(dragged);
+  });
+
+  it("cancels a coast on the next press", () => {
+    const { root, pane } = scrollTree();
+    const clock = fakeClock();
+    const ptr = createPointerDispatcher(root, createFocusManager(root), undefined, clock);
+    ptr.dispatch("mousedown", 20, 30, { kind: "touch" });
+    clock.advance(16);
+    ptr.dispatch("mousemove", 20, 14, { kind: "touch" });
+    ptr.dispatch("mouseup", 20, 14, { kind: "touch" });
+    ptr.dispatch("mousedown", 20, 14, { kind: "touch" });
+    const held = pane._scrollOffset;
+    clock.advance(16);
+    expect(pane._scrollOffset).toBe(held);
+    ptr.stopFlick();
   });
 });
 

@@ -100,9 +100,20 @@ export function createScreenCanvas(
     canvas.style.height = `${height * zoom}px`;
   }
 
+  function cssViewport(): { width: number; height: number } {
+    // Layout viewport, not visualViewport — the URL bar toggling mid-flick
+    // must not reallocate the framebuffer.
+    const doc = document.documentElement;
+    return {
+      width: window.innerWidth || doc.clientWidth,
+      height: window.innerHeight || doc.clientHeight,
+    };
+  }
+
   function fitViewport(scale: number): boolean {
     zoom = Math.max(1, Math.round(scale));
-    const next = viewportLogicalSize(window.innerWidth, window.innerHeight, zoom);
+    const css = cssViewport();
+    const next = viewportLogicalSize(css.width, css.height, zoom);
     const changed = next.width !== logicalWidth || next.height !== logicalHeight;
     applyBackingStore(next.width, next.height);
     canvas.style.width = `${next.width * zoom}px`;
@@ -156,7 +167,6 @@ export function createScreenCanvas(
   document.addEventListener("visibilitychange", onVisible);
   const vv = typeof visualViewport !== "undefined" ? visualViewport : null;
   vv?.addEventListener("resize", onWindowResize);
-  vv?.addEventListener("scroll", invalidate);
   watchDpr();
   canvas.addEventListener("gesturestart", preventGesture);
   canvas.addEventListener("gesturechange", preventGesture);
@@ -194,7 +204,6 @@ export function createScreenCanvas(
       window.removeEventListener("pageshow", invalidate);
       document.removeEventListener("visibilitychange", onVisible);
       vv?.removeEventListener("resize", onWindowResize);
-      vv?.removeEventListener("scroll", invalidate);
       dprMedia?.removeEventListener("change", onDprChange);
       canvas.removeEventListener("gesturestart", preventGesture);
       canvas.removeEventListener("gesturechange", preventGesture);

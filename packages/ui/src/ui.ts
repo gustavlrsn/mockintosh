@@ -232,7 +232,11 @@ export function createUI(config: UIConfig): UIInstance {
         });
       }
 
-      return () => { disposed = true; cleanup(); };
+      return () => {
+        disposed = true;
+        pointer.stopFlick();
+        cleanup();
+      };
     },
 
     frame(): void {

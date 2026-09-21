@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createNode } from "../src/nodes";
-import { scrollOverflow, scrollTrack } from "../src/scroll";
+import { scrollOverflow, scrollPaintOffset, scrollTrack } from "../src/scroll";
 
 function pane(height: number, contentHeight: number, offset = 0) {
   const box = createNode("box");
@@ -14,6 +14,13 @@ function pane(height: number, contentHeight: number, offset = 0) {
   box.children = [child];
   return box;
 }
+
+describe("scrollPaintOffset", () => {
+  it("snaps a half-pixel flick offset to a whole row", () => {
+    const box = pane(40, 100, 10.5);
+    expect(scrollPaintOffset(box)).toBe(11);
+  });
+});
 
 describe("scrollOverflow", () => {
   it("is zero when content fits", () => {

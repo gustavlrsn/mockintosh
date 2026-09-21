@@ -118,7 +118,7 @@ Layout is flexbox with the same defaults as CSS/Yoga: `flexDirection="column"`, 
 
 There is no CSS, so there are no media queries. `useViewport()` is the framebuffer size (`{ width, height }` in logical pixels). It is a signal: `resize` updates it. Branch in Solid (`<Show when={vp().width < 320}>`) rather than putting breakpoint objects on style props.
 
-Borders follow the CSS box model: `borderWidth` insets the padding box, so children (flow *and* absolute — `left={0}` means "just inside the border") are laid out inside it and never sit on top of it. `overflow="hidden"` / `"scroll"` clip children to the inside of the border. A bordered panel therefore keeps its border no matter what you put in it — you don't need to pad by hand.
+Borders follow the CSS box model: `borderWidth` insets the padding box, so children (flow *and* absolute — `left={0}` means "just inside the border") are laid out inside it and never sit on top of it. `overflow="hidden"` / `"scroll"` clip children to the inside of the border. A bordered panel therefore keeps its border no matter what you put in it — you don't need to pad by hand. Touch pans an `overflow="scroll"` pane after slop and coasts after a flick; a mouse still uses the wheel.
 
 ```tsx
 <box padding={8} gap={6}>

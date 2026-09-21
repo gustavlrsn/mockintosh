@@ -1,4 +1,5 @@
 import { isDitherGradientFill, resolveBorderWidth, type CanvasNode, type LayoutRect, type NodeType } from "./nodes";
+import { scrollPaintOffset } from "./scroll";
 import type { SemanticMetadata } from "./inspection";
 
 const OMIT_PROPS = new Set([
@@ -86,7 +87,7 @@ export function debugInspectTree(root: CanvasNode): DebugNode {
         height: Math.max(0, rect.height - 2 * border),
       });
     }
-    const childOffset = offset - (node.style.overflow === "scroll" ? node._scrollOffset : 0);
+    const childOffset = offset - (node.style.overflow === "scroll" ? scrollPaintOffset(node) : 0);
     const children = Object.freeze(node.children.map((child) => visit(child, childClip, childOffset)));
     return Object.freeze({
       id: node.id,

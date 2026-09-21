@@ -355,6 +355,14 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
   canvas.addEventListener("keydown", onKeyDown);
   canvas.addEventListener("keyup", onKeyUp);
 
+  const paintTree = () => {
+    ui!.frame();
+    if (usesComposite()) compositeFrame();
+    else {
+      framed = true;
+      presenter?.present(screen);
+    }
+  };
   const tick = () => {
     if (disposed) return;
     if (overlay) {
@@ -362,21 +370,34 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
       if (overlay) {
         if (dirty) {
           dirty = false;
-          ui!.frame();
+          try {
+            paintTree();
+          } catch (error) {
+            dirty = true;
+            throw error;
+          }
+        } else {
+          compositeFrame();
         }
-        compositeFrame();
       }
     } else if (dirty) {
       dirty = false;
-      ui!.frame();
-      if (usesComposite()) compositeFrame();
-      else {
-        framed = true;
-        presenter?.present(screen);
+      try {
+        paintTree();
+      } catch (error) {
+        dirty = true;
+        throw error;
       }
     }
     frameId = requestAnimationFrame(tick);
   };
+  try {
+    paintTree();
+    dirty = false;
+  } catch (error) {
+    dirty = true;
+    console.error(error);
+  }
   frameId = requestAnimationFrame(tick);
 
   return {

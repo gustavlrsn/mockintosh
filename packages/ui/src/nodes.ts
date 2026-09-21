@@ -608,7 +608,7 @@ export const EVENT_PROP_NAMES = new Set<string>([
 
 export function setNodeProperty(node: CanvasNode, name: string, value: unknown): void {
   if (name === "scrollOffset") {
-    node._scrollOffset = (value as number) || 0;
+    node._scrollOffset = Math.round((value as number) || 0);
     return;
   }
   if (name === "scrollKey") {

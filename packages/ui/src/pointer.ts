@@ -2,7 +2,8 @@
  * Pointer dispatch — hit-tests the CanvasNode tree and delivers mouse events
  * with implicit capture: the node that received mousedown keeps receiving
  * drag / mouseup until release. A `kind: "touch"` press becomes overflow
- * scroll after slop when the gesture is vertical; mouse still uses wheel.
+ * scroll after slop when the gesture is vertical; a flick then coasts
+ * with exponential decay. Mouse still uses wheel.
  */
 
 import {
@@ -16,7 +17,8 @@ import {
 } from "./nodes";
 import type { FocusManager } from "./focus";
 import { scheduleRepaint } from "./renderer";
-import { scrollOverflow } from "./scroll";
+import { scrollOverflow, scrollPaintOffset } from "./scroll";
+import { createPanVelocity, stepFlick } from "./scrollInertia";
 
 export { scrollOverflow } from "./scroll";
 
@@ -83,6 +85,27 @@ export interface PointerDispatcher {
     y: number,
     extras?: PointerExtras
   ): void;
+  /** Cancel a running flick. Safe when idle. */
+  stopFlick(): void;
+}
+
+/** Injected clock so tests can tick a flick without `requestAnimationFrame`. */
+export interface PointerScheduler {
+  now(): number;
+  requestFrame(cb: (time: number) => void): unknown;
+  cancelFrame(id: unknown): void;
+}
+
+function defaultNow(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function defaultScheduler(): PointerScheduler {
+  return {
+    now: defaultNow,
+    requestFrame: (cb) => requestAnimationFrame(cb),
+    cancelFrame: (id) => cancelAnimationFrame(id as number),
+  };
 }
 
 interface ClipRect {
@@ -131,7 +154,7 @@ function childPaintOffset(node: CanvasNode, ox: number, oy: number): { ox: numbe
   const raise = shadowRaise(node);
   return {
     ox: ox - raise,
-    oy: (node.style.overflow === "scroll" ? oy - node._scrollOffset : oy) - raise,
+    oy: (node.style.overflow === "scroll" ? oy - scrollPaintOffset(node) : oy) - raise,
   };
 }
 
@@ -253,7 +276,7 @@ export function nodeAt(
 
 function applyWheel(node: CanvasNode, dy: number): boolean {
   const max = scrollOverflow(node);
-  const next = Math.max(0, Math.min(max, node._scrollOffset + dy));
+  const next = Math.max(0, Math.min(max, Math.round(node._scrollOffset + dy)));
   if (next === node._scrollOffset) return false;
   node._scrollOffset = next;
   // Offset is paint-only. markDirty would recompute flex on every wheel.
@@ -270,7 +293,7 @@ function localOf(node: CanvasNode, gx: number, gy: number): { lx: number; ly: nu
   while (n) {
     ox -= shadowRaise(n);
     oy -= shadowRaise(n);
-    if (n.style.overflow === "scroll") oy -= n._scrollOffset;
+    if (n.style.overflow === "scroll") oy -= scrollPaintOffset(n);
     n = n.parent;
   }
   return {
@@ -325,6 +348,7 @@ export function createPointerDispatcher(
   root: CanvasNode,
   focusManager: FocusManager,
   onError?: (error: unknown) => void,
+  scheduler: PointerScheduler = defaultScheduler(),
 ): PointerDispatcher {
   let hovered: CanvasNode | null = null;
   let captured: CanvasNode | null = null;
@@ -336,6 +360,13 @@ export function createPointerDispatcher(
   let pressing = false;
   let panning = false;
   let touchDecided = false;
+  const velocity = createPanVelocity();
+  let flickId: unknown = null;
+  let flickV = 0;
+  let flickX = 0;
+  let flickY = 0;
+  let flickT = 0;
+  let flickRemain = 0;
 
   function setHovered(next: CanvasNode | null): void {
     if (next === hovered) return;
@@ -354,7 +385,44 @@ export function createPointerDispatcher(
     hovered = next;
   }
 
+  function stopFlick(): void {
+    if (flickId != null) {
+      scheduler.cancelFrame(flickId);
+      flickId = null;
+    }
+    flickV = 0;
+    flickRemain = 0;
+  }
+
+  function tickFlick(time: number): void {
+    flickId = null;
+    const dt = Math.min(32, Math.max(0, time - flickT));
+    flickT = time;
+    const stepped = stepFlick(flickV, dt);
+    flickRemain += stepped.dy;
+    const dy = flickRemain < 0 ? Math.ceil(flickRemain) : Math.floor(flickRemain);
+    flickRemain -= dy;
+    const moved = dy === 0 || applyScroll(flickX, flickY, dy);
+    if (!moved) {
+      flickV = 0;
+      return;
+    }
+    flickV = stepped.velocity;
+    if (flickV === 0) return;
+    flickId = scheduler.requestFrame(tickFlick);
+  }
+
+  function startFlick(v: number, x: number, y: number): void {
+    stopFlick();
+    flickV = v;
+    flickX = x;
+    flickY = y;
+    flickT = scheduler.now();
+    flickId = scheduler.requestFrame(tickFlick);
+  }
+
   function rememberPress(extras: PointerExtras | undefined, x: number, y: number): void {
+    stopFlick();
     pressKind = extras?.kind ?? "mouse";
     pressX = x;
     pressY = y;
@@ -362,6 +430,7 @@ export function createPointerDispatcher(
     pressing = true;
     panning = false;
     touchDecided = pressKind !== "touch";
+    velocity.reset(y, scheduler.now());
   }
 
   function endPress(): void {
@@ -373,7 +442,7 @@ export function createPointerDispatcher(
     dragging = false;
   }
 
-  function applyScroll(x: number, y: number, dy: number): void {
+  function applyScroll(x: number, y: number, dy: number): boolean {
     // Start from the box under the pointer, not only a hit-target. An
     // overflow:scroll pane (ChatGippity's message list) has no handlers
     // of its own; hitTest would miss it and the window would eat the wheel.
@@ -385,15 +454,22 @@ export function createPointerDispatcher(
         const moved = applyWheel(node, dy);
         if (onScroll) {
           onScroll(dy);
-          return;
+          return true;
         }
-        if (moved) return;
+        if (moved) return true;
       } else if (onScroll) {
         onScroll(dy);
-        return;
+        return true;
       }
       node = node.parent;
     }
+    return false;
+  }
+
+  function panBy(x: number, y: number, dy: number): void {
+    if (dy === 0) return;
+    applyScroll(x, y, dy);
+    velocity.sample(y, scheduler.now());
   }
 
   function canPanFrom(x: number, y: number, dy: number): boolean {
@@ -429,10 +505,12 @@ export function createPointerDispatcher(
         onError?.(error);
       }
     },
+    stopFlick,
   };
 
   function dispatchInner(type: PointerType, x: number, y: number, extras?: PointerExtras) {
       if (type === "scroll") {
+        stopFlick();
         applyScroll(x, y, extras?.deltaY ?? 0);
         return;
       }
@@ -442,7 +520,7 @@ export function createPointerDispatcher(
           if (panning) {
             const dy = lastPanY - y;
             lastPanY = y;
-            if (dy !== 0) applyScroll(x, y, dy);
+            panBy(x, y, dy);
             return;
           }
           if (!touchDecided) {
@@ -457,7 +535,7 @@ export function createPointerDispatcher(
             if (Math.abs(dy) >= Math.abs(dx) && canPanFrom(pressX, pressY, gestureDy)) {
               stealPressForPan();
               lastPanY = y;
-              if (gestureDy !== 0) applyScroll(x, y, gestureDy);
+              panBy(x, y, gestureDy);
               return;
             }
           }
@@ -512,10 +590,12 @@ export function createPointerDispatcher(
       }
 
       if (type === "mouseup") {
-        const cancel = extras?.cancel === true || panning;
-        if (cancel) {
+        const cancel = extras?.cancel === true;
+        const flick = panning && !cancel ? velocity.release(scheduler.now()) : 0;
+        if (cancel || panning) {
           setHovered(null);
           endPress();
+          if (flick !== 0) startFlick(flick, x, y);
           return;
         }
         const target = captured;

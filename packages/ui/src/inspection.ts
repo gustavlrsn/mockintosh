@@ -1,4 +1,5 @@
 import { resolveBorderWidth, type CanvasNode, type LayoutRect } from "./nodes";
+import { scrollPaintOffset } from "./scroll";
 import type { FocusManager } from "./focus";
 export interface SemanticMetadata {
   name?: string;
@@ -73,7 +74,7 @@ export function inspectTree(root: CanvasNode, focus: FocusManager): readonly Ins
         height: Math.max(0, rect.height - 2 * border)
       });
     }
-    for (const child of node.children) visit(child, childClip, offset - (node.style.overflow === "scroll" ? node._scrollOffset : 0), enabled, windowId, masked);
+    for (const child of node.children) visit(child, childClip, offset - (node.style.overflow === "scroll" ? scrollPaintOffset(node) : 0), enabled, windowId, masked);
   }
   visit(root, root.layout, 0, true);
   return Object.freeze(out);

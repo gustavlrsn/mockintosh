@@ -90,7 +90,7 @@ import { fontFromProps, fontNameFromProps, fontStyleFromProps, textFace } from "
 import { encodeUiText, fontFamilyId } from "./fonts/strike";
 import { drawStyledLine } from "./fonts/bridge";
 import { textSelectionOf } from "./selectable";
-import { scrollTrack } from "./scroll";
+import { scrollPaintOffset, scrollTrack } from "./scroll";
 import { rasterizeDitherGradient } from "./ditherGradient";
 
 // -------------------------------------------------------------------------
@@ -346,7 +346,7 @@ function drawNode(
   const overflow = node.style.overflow;
   const clips = overflow === "hidden" || overflow === "scroll";
   const childOx = ox - raise;
-  const childOy = (overflow === "scroll" ? oy - node._scrollOffset : oy) - raise;
+  const childOy = (overflow === "scroll" ? oy - scrollPaintOffset(node) : oy) - raise;
   const inView = rectsOverlap(
     makeRect(y, x, y + height + raise, x + width + raise),
     viewBox(port),
@@ -857,7 +857,7 @@ function collectHitRectsNode(
   const raise = shadowRaise(node);
   const childExtraX = extraX - raise;
   const childExtraY =
-    extraY - (node.style.overflow === "scroll" ? node._scrollOffset ?? 0 : 0) - raise;
+    extraY - (node.style.overflow === "scroll" ? scrollPaintOffset(node) : 0) - raise;
 
   for (const child of node.children) {
     collectHitRectsNode(child, out, zIndex + 1, childExtraX, childExtraY);

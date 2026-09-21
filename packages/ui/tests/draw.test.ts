@@ -12,7 +12,9 @@ import { createNode } from "../src/nodes";
 import type { MeasureFunc } from "../src/layout";
 import { createFocusManager } from "../src/focus";
 import type { BitMap } from "@mockintosh/quickdraw";
-import { getBit, newBitMap } from "@mockintosh/quickdraw/bits";
+import { getBit, newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
+import { installFontBridge } from "../src/fonts/bridge";
+import { createMeasureFunc } from "../src/measure";
 
 const noMeasure: MeasureFunc = () => ({ width: 0, height: 0 });
 
@@ -335,5 +337,58 @@ describe("drawTree — nested boxes", () => {
 
     expect(parent.layout.y).toBeGreaterThanOrEqual(H);
     expect(px(screen, 0, 4)).toBe(1);
+  });
+});
+
+describe("drawTree — overflow scroll text", () => {
+  installFontBridge();
+  const measure = createMeasureFunc();
+
+  function paintScrolledText(offset: number) {
+    const w = 96;
+    const h = 48;
+    const screen = newBitMap(w, h);
+    const ctx = createDrawContext(screen);
+    const root = createNode("_root");
+    root.style = { width: w, height: h };
+    const pane = createNode("box");
+    pane.style = { overflow: "scroll", width: w, height: h, flexDirection: "column", paddingTop: 16 };
+    pane.props = { background: 0 };
+    pane._scrollOffset = offset;
+    const label = createNode("text");
+    label.props = { font: "body" };
+    const content = createNode("_text_content");
+    content.textContent = "Hello";
+    content.parent = label;
+    label.children = [content];
+    label.parent = pane;
+    pane.children = [label];
+    pane.parent = root;
+    root.children = [pane];
+    computeLayout(root, w, h, measure);
+    drawTree(root, ctx);
+    const pixels = pixelsFromBitMap(screen);
+    let ink = 0;
+    let minX = w, maxX = -1, minY = h, maxY = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!pixels[y * w + x]) continue;
+        ink++;
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+    }
+    return { ink, minX, maxX, minY, maxY };
+  }
+
+  it("still inks glyphs when the scroll offset is a half pixel", () => {
+    const whole = paintScrolledText(0);
+    const half = paintScrolledText(0.5);
+    expect(whole.ink).toBeGreaterThan(0);
+    expect(half.ink).toBeGreaterThan(0);
+    expect(half.maxX - half.minX).toBeLessThan(60);
+    expect(Math.abs(half.minX - whole.minX)).toBeLessThan(4);
   });
 });

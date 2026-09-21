@@ -115,7 +115,9 @@ function CompactMenu(): JSX.Element {
   const [open, setOpen] = createSignal(false);
   createEffect(
     () => router.path(),
-    () => setOpen(false),
+    () => {
+      setOpen(false);
+    },
   );
   const menuWidth = () => Math.min(220, Math.max(160, vp().width - 24));
   const menuHeight = () => Math.min(260, Math.max(80, vp().height - 80));

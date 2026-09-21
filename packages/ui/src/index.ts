@@ -64,7 +64,7 @@ export {
   DOUBLE_CLICK_DIST,
   TOUCH_SLOP,
 } from "./pointer";
-export type { PointerType, PointerKind, PointerExtras, PointerDispatcher } from "./pointer";
+export type { PointerType, PointerKind, PointerExtras, PointerDispatcher, PointerScheduler } from "./pointer";
 export { cursorAt, cursorOf, cssCursor, isNamedCursor, DEFAULT_CURSOR } from "./cursor";
 export type { CursorName, NamedCursor, CursorCSSTable } from "./cursor";
 export {

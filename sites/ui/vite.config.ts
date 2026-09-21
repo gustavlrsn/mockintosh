@@ -13,6 +13,7 @@ export default defineConfig({
     exclude: ["@mockintosh/ui", "@mockintosh/quickdraw"],
   },
   server: {
+    allowedHosts: true,
     fs: {
       allow: [root, kit],
     },

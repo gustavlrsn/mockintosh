@@ -8,6 +8,15 @@ function paddingEdge(node: CanvasNode, edge: "top" | "right" | "bottom" | "left"
   return node.style.paddingLeft ?? base;
 }
 
+/**
+ * Paint/hit Y for `overflow: scroll`. QuickDraw packs rows at `rowBytes`;
+ * a fractional dest Y becomes a horizontal byte offset and glyphs walk
+ * off the clip. Finger-drag stays on whole pixels; flick must too.
+ */
+export function scrollPaintOffset(node: CanvasNode): number {
+  return Math.round(node._scrollOffset);
+}
+
 /** How far `overflow: scroll` can move, from laid-out children. */
 export function scrollOverflow(node: CanvasNode): number {
   const bw = resolveBorderWidth(node);
