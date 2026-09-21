@@ -47,23 +47,24 @@ export function scheduleRepaint(): void {
   _repaintHook();
 }
 
-export const {
-  render,
-  effect,
-  memo,
-  createComponent,
-  createElement,
-  createTextNode,
-  insertNode,
-  insert,
-  spread,
-  setProp,
-  mergeProps,
-  applyRef,
-  ref,
-} = createRenderer<CanvasNode>({
+/**
+ * Function components that are on the stack while host nodes are created.
+ * `createComponent` pushes; `createElement` snapshots onto `debugOwner`.
+ * Nearest component is last on the stack, first on the frozen path.
+ */
+const ownerStack: string[] = [];
+
+function snapshotOwner(): readonly string[] | undefined {
+  if (ownerStack.length === 0) return undefined;
+  const path: string[] = [];
+  for (let i = ownerStack.length - 1; i >= 0; i--) path.push(ownerStack[i]);
+  return Object.freeze(path);
+}
+
+const renderer = createRenderer<CanvasNode>({
   createElement(type: string, staticProps?: Record<string, unknown>): CanvasNode {
     const node = createNode(toNodeType(type));
+    node.debugOwner = snapshotOwner();
     applyProps(node, staticProps);
     return node;
   },
@@ -71,6 +72,7 @@ export const {
   createTextNode(value: string): CanvasNode {
     const node = createNode("_text_content");
     node.textContent = value;
+    node.debugOwner = snapshotOwner();
     return node;
   },
 
@@ -116,3 +118,29 @@ export const {
     return parent.children[idx + 1];
   },
 });
+
+export const {
+  render,
+  effect,
+  memo,
+  createElement,
+  createTextNode,
+  insertNode,
+  insert,
+  spread,
+  setProp,
+  mergeProps,
+  applyRef,
+  ref,
+} = renderer;
+
+/** Push the component name so host leaves created inside it record `debugOwner`. */
+export function createComponent<T>(Comp: (props: T) => CanvasNode, props: T): CanvasNode {
+  const label = typeof Comp === "function" ? Comp.name : "";
+  if (label) ownerStack.push(label);
+  try {
+    return renderer.createComponent(Comp, props);
+  } finally {
+    if (label) ownerStack.pop();
+  }
+}

@@ -220,8 +220,9 @@ export function resizeDrawContext(ctx: DrawContext, screen: BitMap): void {
   SetPort(ctx.port);
 }
 
-function applyPenMode(_port: GrafPort, penMode: "copy" | "xor" | undefined): void {
+function applyPenMode(_port: GrafPort, penMode: "copy" | "xor" | "bic" | undefined): void {
   if (penMode === "xor") PenMode(patXor);
+  else if (penMode === "bic") PenMode(patBic);
   else PenNormal();
 }
 
@@ -236,7 +237,7 @@ function fillBackground(
   port: GrafPort,
   r: ReturnType<typeof makeRect>,
   background: Fill,
-  penMode: "copy" | "xor" | undefined,
+  penMode: "copy" | "xor" | "bic" | undefined,
   ovSize = 0
 ): void {
   applyPenMode(port, penMode);
@@ -260,7 +261,11 @@ function fillBackground(
     }
   } else {
     const pat = resolvePattern(background);
-    if (rounded) FillRoundRect(r, ovSize, ovSize, pat);
+    if (penMode === "xor" || penMode === "bic") {
+      PenPat(pat);
+      if (rounded) PaintRoundRect(r, ovSize, ovSize);
+      else PaintRect(r);
+    } else if (rounded) FillRoundRect(r, ovSize, ovSize, pat);
     else FillRect(r, pat);
   }
   PenNormal();
@@ -394,7 +399,7 @@ function drawBox(
       borderColor?: Ink;
       borderStyle?: "solid" | "dotted" | "dashed";
       shadow?: boolean;
-      penMode?: "copy" | "xor";
+      penMode?: "copy" | "xor" | "bic";
     };
 
   // QuickDraw `ovWd`/`ovHt` are corner-oval *diameters* (`RRects.a`).

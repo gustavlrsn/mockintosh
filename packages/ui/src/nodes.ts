@@ -323,8 +323,8 @@ export interface BoxProps extends LayoutStyle, EventHandlers, SemanticProps {
    * uses the same `borderRadius` as the face.
    */
   shadow?: boolean;
-  /** Transfer mode for fills and borders. */
-  penMode?: "copy" | "xor";
+  /** Transfer mode for fills and borders. `bic` punches paper through ink. */
+  penMode?: "copy" | "xor" | "bic";
   /** Skip this subtree in hit-testing (e.g. windows behind a modal). */
   inert?: boolean;
   /** Treat this node as a Tab-cycle / last-focus scope. */
@@ -486,6 +486,12 @@ export interface CanvasNode {
   parent: CanvasNode | null;
   /** Text content for `_text_content` nodes (Solid text nodes). */
   textContent: string;
+  /**
+   * Solid components that were on the owner stack when this node was
+   * created, nearest first (`Button`, then `HomePage`). Catalog DevTools
+   * and `debugInspect` read this; the draw path ignores it.
+   */
+  debugOwner?: readonly string[];
   _dirty: boolean;
   _eventHandlers: EventHandlers;
   _scrollOffset: number;
@@ -507,6 +513,7 @@ export function createNode(type: NodeType): CanvasNode {
     children: [],
     parent: null,
     textContent: "",
+    debugOwner: undefined,
     _dirty: true,
     _eventHandlers: {},
     _scrollOffset: 0,
