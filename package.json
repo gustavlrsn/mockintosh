@@ -6,6 +6,9 @@
     "packages/*",
     "sites/*"
   ],
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "npm run build:content && vite",
     "dev:ui": "npm run dev --prefix sites/ui",
