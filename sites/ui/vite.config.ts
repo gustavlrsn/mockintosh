@@ -22,13 +22,16 @@ export default defineConfig({
   },
   plugins: [
     solid({
-      include: [/src\/.*\.[tj]sx?$/, /packages\/ui\/.*\.[tj]sx?$/],
+      include: [/src\/.*\.[tj]sx?$/, /packages\/ui\/(?!src\/primitives\/).*\.[tj]sx?$/],
       solid: {
         generate: "universal",
         moduleName: "@mockintosh/ui/renderer",
       },
     }),
   ],
+  esbuild: {
+    keepNames: true,
+  },
   resolve: {
     alias: [
       { find: /^solid-js$/, replacement: resolve(repo, "node_modules/solid-js/dist/solid.js") },

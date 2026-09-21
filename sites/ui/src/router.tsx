@@ -1,6 +1,5 @@
 import { createContext, createSignal, onCleanup, useContext } from "@mockintosh/ui";
 import type { JSX } from "@mockintosh/ui";
-import { transitionTo } from "./inkMorph";
 import { normalizePath } from "./nav";
 
 export interface Router {
@@ -20,7 +19,7 @@ export function RouterProvider(props: { children?: JSX.Element }): JSX.Element {
   const [path, setPath] = createSignal(normalizePath(window.location.pathname));
 
   const onPop = () => {
-    transitionTo(() => setPath(normalizePath(window.location.pathname)));
+    setPath(normalizePath(window.location.pathname));
   };
   window.addEventListener("popstate", onPop);
   onCleanup(() => window.removeEventListener("popstate", onPop));
@@ -30,10 +29,8 @@ export function RouterProvider(props: { children?: JSX.Element }): JSX.Element {
     navigate(to: string) {
       const next = normalizePath(to);
       if (next === path()) return;
-      transitionTo(() => {
-        history.pushState(null, "", next);
-        setPath(next);
-      });
+      history.pushState(null, "", next);
+      setPath(next);
     },
   };
 

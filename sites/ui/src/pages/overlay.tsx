@@ -1,8 +1,11 @@
 import {
   Button,
+  Dialog,
+  DialogFooter,
   Menu,
   Popover,
   Select,
+  TextInput,
   Tooltip,
   createSignal,
 } from "@mockintosh/ui";
@@ -59,6 +62,48 @@ export function TooltipPage(): JSX.Element {
             <Button label="Save" onClick={() => {}} />
           </Tooltip>
         </box>
+      </Preview>
+    </box>
+  );
+}
+
+export function DialogPage(): JSX.Element {
+  const [open, setOpen] = createSignal(false);
+  const [name, setName] = createSignal("Kim");
+  return (
+    <box flexDirection="column" gap={16}>
+      <PageTitle
+        title="Dialog"
+        lede="Centered in-window modal. Parent owns open. Click outside or press Escape to dismiss. Not an OS alert; apps that need Finder Dialog Manager use showDialog."
+      />
+      <Preview
+        code={`<Dialog
+  open={open()}
+  onDismiss={() => setOpen(false)}
+  title="Edit profile"
+  description="Name is saved on this machine."
+  trigger={<Button label="Edit" onClick={() => setOpen(true)} />}
+>
+  <TextInput value={name()} onChange={setName} />
+  <DialogFooter>
+    <Button label="Cancel" onClick={() => setOpen(false)} />
+    <Button label="Save" ring onClick={() => setOpen(false)} />
+  </DialogFooter>
+</Dialog>`}
+      >
+        <Dialog
+          open={open()}
+          onDismiss={() => setOpen(false)}
+          title="Edit profile"
+          description="Name is saved on this machine."
+          trigger={<Button label="Edit" onClick={() => setOpen(true)} />}
+        >
+          <TextInput name="profile-name" value={name()} onChange={setName} />
+          <DialogFooter>
+            <Button name="profile-cancel" label="Cancel" onClick={() => setOpen(false)} />
+            <Button name="profile-save" label="Save" ring onClick={() => setOpen(false)} />
+          </DialogFooter>
+        </Dialog>
       </Preview>
     </box>
   );

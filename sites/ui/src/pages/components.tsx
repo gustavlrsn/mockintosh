@@ -2,6 +2,7 @@ import {
   Button,
   Checkbox,
   Dithered,
+  DitherTransition,
   Divider,
   Field,
   Label,
@@ -15,6 +16,7 @@ import {
   TextEditor,
   TextInput,
   createSignal,
+  onCleanup,
 } from "@mockintosh/ui";
 import type { ImageFrame, JSX } from "@mockintosh/ui";
 import { For } from "@mockintosh/ui";
@@ -47,7 +49,7 @@ import {
   MessageScrollerPage,
   QuestionnairePage,
 } from "./chat";
-import { MenuPage, PopoverPage, SelectPage, TooltipPage } from "./overlay";
+import { DialogPage, MenuPage, PopoverPage, SelectPage, TooltipPage } from "./overlay";
 
 function grayRamp(width: number, height: number): ImageFrame {
   const rgba = new Uint8ClampedArray(width * height * 4);
@@ -185,6 +187,75 @@ export function DitheredPage(): JSX.Element {
 />`}
       >
         <Dithered src={src} width={160} height={64} mode="atkinson" />
+      </Preview>
+    </box>
+  );
+}
+
+function inkPattern(
+  width: number,
+  height: number,
+  ink: (x: number, y: number) => boolean,
+): Uint8Array {
+  const pixels = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      pixels[y * width + x] = ink(x, y) ? 1 : 0;
+    }
+  }
+  return pixels;
+}
+
+export function DitherTransitionPage(): JSX.Element {
+  const width = 160;
+  const height = 64;
+  const from = inkPattern(width, height, (x) => x < width / 2);
+  const to = inkPattern(width, height, (x, y) => {
+    const dx = x - width * 0.65;
+    const dy = y - height / 2;
+    return dx * dx + dy * dy < 22 * 22;
+  });
+  const [progress, setProgress] = createSignal(1);
+  let frame = 0;
+  onCleanup(() => cancelAnimationFrame(frame));
+
+  const play = () => {
+    const started = performance.now();
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - started) / 180);
+      setProgress(t);
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    cancelAnimationFrame(frame);
+    setProgress(0);
+    frame = requestAnimationFrame(tick);
+  };
+
+  return (
+    <box flexDirection="column" gap={16}>
+      <PageTitle
+        title="Dither Transition"
+        lede="Bayer dissolve between two 1-bit frames. Shared ink stays; the rest fades on a 4x4 threshold. Drive progress yourself. The catalog does not run this on navigation."
+      />
+      <Preview
+        code={`<DitherTransition
+  from={from}
+  to={to}
+  width={160}
+  height={64}
+  progress={progress()}
+/>`}
+      >
+        <box flexDirection="column" gap={12}>
+          <DitherTransition
+            from={from}
+            to={to}
+            width={width}
+            height={height}
+            progress={progress()}
+          />
+          <Button label="Play" onClick={play} />
+        </box>
       </Preview>
     </box>
   );
@@ -500,8 +571,10 @@ export const COMPONENT_PAGES: Record<string, () => JSX.Element> = {
   "button-group": ButtonGroupPage,
   card: CardPage,
   checkbox: CheckboxPage,
+  dialog: DialogPage,
   disclosure: DisclosurePage,
   dithered: DitheredPage,
+  "dither-transition": DitherTransitionPage,
   divider: DividerPage,
   empty: EmptyPage,
   field: FieldPage,
