@@ -5,6 +5,7 @@ import {
   formatRgb8,
   hostPalettesEqual,
   paintBitMapRgba,
+  paintBitMapRgbaRect,
   parseRgb8,
 } from "../src/web/palette";
 
@@ -49,5 +50,25 @@ describe("paintBitMapRgba", () => {
     paintBitMapRgba(src, rgba, 1, 1);
     expect(Array.from(rgba)).toEqual([0, 0, 0, 255]);
     expect(hostPalettesEqual(DEFAULT_HOST_PALETTE, DEFAULT_HOST_PALETTE)).toBe(true);
+  });
+
+  it("paints a dirty rect without touching the rest of the buffer", () => {
+    const src = newBitMap(4, 2);
+    setBit(src, 2, 1, 1);
+    const rgba = new Uint8ClampedArray(4 * 2 * 4);
+    rgba.fill(7);
+    paintBitMapRgbaRect(
+      src,
+      rgba,
+      4,
+      2,
+      2,
+      1,
+      1,
+      1,
+      { foreground: { r: 9, g: 8, b: 7 }, background: { r: 1, g: 2, b: 3 } },
+    );
+    expect(Array.from(rgba.subarray(0, 4))).toEqual([7, 7, 7, 7]);
+    expect(Array.from(rgba.subarray((1 * 4 + 2) * 4, (1 * 4 + 3) * 4))).toEqual([9, 8, 7, 255]);
   });
 });

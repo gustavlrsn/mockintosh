@@ -65,21 +65,32 @@ export function parseRgb8(input: string): Rgb8 | null {
   return null;
 }
 
-/** Expand a packed BitMap into an RGBA buffer using the host palette. */
-export function paintBitMapRgba(
+/**
+ * Expand a rectangle of a packed BitMap into an RGBA buffer.
+ * `rgba` is `width × height`; (`left`, `top`) is in that space.
+ */
+export function paintBitMapRgbaRect(
   source: BitMap,
   rgba: Uint8ClampedArray,
   width: number,
   height: number,
+  left: number,
+  top: number,
+  rectWidth: number,
+  rectHeight: number,
   palette: HostPalette = DEFAULT_HOST_PALETTE,
 ): void {
   const ink = clampRgb8(palette.foreground);
   const paper = clampRgb8(palette.background);
   const { baseAddr, rowBytes } = source;
-  let j = 0;
-  for (let y = 0; y < height; y++) {
+  const x0 = Math.max(0, left | 0);
+  const y0 = Math.max(0, top | 0);
+  const x1 = Math.min(width, x0 + Math.max(0, rectWidth | 0));
+  const y1 = Math.min(height, y0 + Math.max(0, rectHeight | 0));
+  for (let y = y0; y < y1; y++) {
     const row = y * rowBytes;
-    for (let x = 0; x < width; x++, j += 4) {
+    let j = (y * width + x0) * 4;
+    for (let x = x0; x < x1; x++, j += 4) {
       const bit = (baseAddr[row + (x >> 3)] >> (7 - (x & 7))) & 1;
       const c = bit ? ink : paper;
       rgba[j] = c.r;
@@ -88,6 +99,17 @@ export function paintBitMapRgba(
       rgba[j + 3] = 255;
     }
   }
+}
+
+/** Expand a packed BitMap into an RGBA buffer using the host palette. */
+export function paintBitMapRgba(
+  source: BitMap,
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  palette: HostPalette = DEFAULT_HOST_PALETTE,
+): void {
+  paintBitMapRgbaRect(source, rgba, width, height, 0, 0, width, height, palette);
 }
 
 function clampChannel(n: number): number {
