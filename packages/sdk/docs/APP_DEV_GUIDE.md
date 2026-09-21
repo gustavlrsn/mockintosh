@@ -18,6 +18,7 @@ These ship with the OS. SDK-clean apps compile under the in-OS project compiler 
 |---|---|---|
 | MacPaint | `MacPaint.tsx` | SDK-clean |
 | Canvas | `Canvas.tsx` | SDK-clean |
+| Foundry | `Foundry.tsx` | SDK-clean |
 | Safari | `Safari.tsx` | SDK-clean |
 | Testing | `Testing.tsx` | SDK-clean |
 | File | `FileViewer.tsx` | SDK-clean |
@@ -114,6 +115,8 @@ Never index the framebuffer yourself: its memory layout (packed 1 bpp) is an imp
 ### Layout
 
 Layout is flexbox with the same defaults as CSS/Yoga: `flexDirection="column"`, `alignItems="stretch"`. A child with no explicit cross-axis size fills its parent, so `<text align="center">` centers within the parent without any manual width. Use `alignSelf`, an explicit `width`/`height`, or a `row` container to opt out. Prefer `flexGrow`, `gap`, `padding`, `justifyContent`, and `alignItems` over `position="absolute"` — reserve absolute placement for overlays and pixel-exact chrome.
+
+There is no CSS, so there are no media queries. `useViewport()` is the framebuffer size (`{ width, height }` in logical pixels). It is a signal: `resize` updates it. Branch in Solid (`<Show when={vp().width < 320}>`) rather than putting breakpoint objects on style props.
 
 Borders follow the CSS box model: `borderWidth` insets the padding box, so children (flow *and* absolute — `left={0}` means "just inside the border") are laid out inside it and never sit on top of it. `overflow="hidden"` / `"scroll"` clip children to the inside of the border. A bordered panel therefore keeps its border no matter what you put in it — you don't need to pad by hand.
 

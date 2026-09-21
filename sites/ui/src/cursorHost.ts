@@ -1,11 +1,11 @@
 import { createSignal } from "@mockintosh/ui";
-import type { CursorPresentation } from "@mockintosh/ui/web";
+import { hostPresentsCursor, type CursorPresentation } from "@mockintosh/ui/web";
 
 const KEY = "mockintosh-ui-cursors";
 
 export type SiteCursorMode = Extract<CursorPresentation, "css" | "mac">;
 
-let apply: ((mode: SiteCursorMode) => void) | undefined;
+let apply: ((mode: CursorPresentation) => void) | undefined;
 
 function readStored(): SiteCursorMode {
   try {
@@ -19,8 +19,15 @@ const [cursorMode, setCursorMode] = createSignal<SiteCursorMode>(readStored());
 
 export { cursorMode };
 
-export function bindCursorHost(fn: (mode: SiteCursorMode) => void): void {
+function presentable(mode: SiteCursorMode): CursorPresentation {
+  return hostPresentsCursor() ? mode : "none";
+}
+
+export function bindCursorHost(fn: (mode: CursorPresentation) => void): void {
   apply = fn;
+  if (typeof matchMedia !== "function") return;
+  const mq = matchMedia("(hover: hover) and (pointer: fine)");
+  mq.addEventListener("change", () => apply?.(presentable(cursorMode())));
 }
 
 export function setSiteCursors(mode: SiteCursorMode): void {
@@ -30,9 +37,9 @@ export function setSiteCursors(mode: SiteCursorMode): void {
     /* ignore quota / private mode */
   }
   setCursorMode(mode);
-  apply?.(mode);
+  apply?.(presentable(mode));
 }
 
-export function readCursorMode(): SiteCursorMode {
-  return cursorMode();
+export function readCursorMode(): CursorPresentation {
+  return presentable(cursorMode());
 }

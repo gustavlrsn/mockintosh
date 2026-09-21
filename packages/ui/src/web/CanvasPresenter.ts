@@ -1,8 +1,9 @@
-import type { BitMap } from "@mockintosh/quickdraw";
+import type { BitMap, Rect } from "@mockintosh/quickdraw";
 import {
   copyHostPalette,
   DEFAULT_HOST_PALETTE,
   paintBitMapRgba,
+  paintBitMapRgbaRect,
   type HostPalette,
 } from "./palette";
 
@@ -34,5 +35,17 @@ export class CanvasPresenter {
     const { width, height, data: rgba } = this.imageData;
     paintBitMapRgba(source, rgba, width, height, this.palette);
     this.ctx.putImageData(this.imageData, 0, 0);
+  }
+
+  /** Expand and blit one rectangle. `rect` may extend past the canvas. */
+  presentRect(source: BitMap, rect: Rect): void {
+    const { width, height, data: rgba } = this.imageData;
+    const left = Math.max(0, rect.left | 0);
+    const top = Math.max(0, rect.top | 0);
+    const rw = Math.min(width, rect.right | 0) - left;
+    const rh = Math.min(height, rect.bottom | 0) - top;
+    if (rw < 1 || rh < 1) return;
+    paintBitMapRgbaRect(source, rgba, width, height, left, top, rw, rh, this.palette);
+    this.ctx.putImageData(this.imageData, 0, 0, left, top, rw, rh);
   }
 }

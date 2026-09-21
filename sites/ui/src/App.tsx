@@ -1,13 +1,13 @@
 import { Show, createEffect } from "@mockintosh/ui";
 import type { JSX } from "@mockintosh/ui";
-import { DocsLayout, SiteHeader } from "./layout";
+import { DevToolsChrome } from "./devtools/Chrome";
+import { DocsLayout, SiteHeader, useCompact } from "./layout";
 import { matchRoute, pageTitle } from "./nav";
 import { COMPONENT_PAGES } from "./pages/components";
 import { DOC_PAGES } from "./pages/docs";
 import { ExamplesPage } from "./pages/examples";
 import { HomePage } from "./pages/home";
 import { MissingPage } from "./pages/missing";
-import { Morph } from "./PageMorph";
 import { RouterProvider, useRouter } from "./router";
 
 export function App(): JSX.Element {
@@ -20,6 +20,7 @@ export function App(): JSX.Element {
 
 function Shell(): JSX.Element {
   const router = useRouter();
+  const compact = useCompact();
   const route = () => matchRoute(router.path());
   const docsChrome = () => {
     const kind = route().kind;
@@ -51,18 +52,19 @@ function Shell(): JSX.Element {
   return (
     <box width="100%" height="100%" background={0} flexDirection="column">
       <SiteHeader />
-      <Morph>
+      <box width="100%" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
         <Show
           when={docsChrome()}
           fallback={
-            <box width="100%" height="100%" overflow="scroll" scrollKey={router.path()} padding={24}>
+            <box width="100%" height="100%" overflow="scroll" scrollKey={router.path()} padding={compact() ? 12 : 24}>
               {page()}
             </box>
           }
         >
           <DocsLayout>{page()}</DocsLayout>
         </Show>
-      </Morph>
+      </box>
+      <DevToolsChrome />
     </box>
   );
 }

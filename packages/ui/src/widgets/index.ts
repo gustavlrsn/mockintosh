@@ -1,7 +1,8 @@
 /**
- * Widgets — Solid functions over host elements (`box` / `text` / `image` /
- * `raster` / `bitmap`). They may hold signals or call services. They do not
- * add draw/measure cases. A new look is a new widget or a prop, not a new tag.
+ * Widgets — skins over host elements (`box` / `text` / `image` / `raster` /
+ * `bitmap`) and `../primitives`. They may hold signals or call services.
+ * They do not add draw/measure cases. A new look is a new widget or a prop,
+ * not a new tag.
  */
 export { Attachment } from "./Attachment";
 export type { AttachmentProps, AttachmentState } from "./Attachment";
@@ -21,10 +22,14 @@ export { Card } from "./Card";
 export type { CardProps } from "./Card";
 export { Checkbox } from "./Checkbox";
 export type { CheckboxProps } from "./Checkbox";
+export { Dialog, DialogTitle, DialogDescription, DialogFooter } from "./Dialog";
+export type { DialogProps } from "./Dialog";
 export { Disclosure, Accordion } from "./Disclosure";
 export type { DisclosureProps, AccordionProps, AccordionEntry } from "./Disclosure";
 export { Dithered } from "./Dithered";
 export type { DitheredProps, DitheredSrc } from "./Dithered";
+export { DitherTransition } from "./DitherTransition";
+export type { DitherTransitionProps } from "./DitherTransition";
 export { Empty } from "./Empty";
 export type { EmptyProps } from "./Empty";
 export { Field } from "./Field";

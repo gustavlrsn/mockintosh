@@ -1,9 +1,9 @@
 import { mountCanvasUI } from "@mockintosh/ui/web";
 import { App } from "./App";
 import { bindCursorHost, readCursorMode } from "./cursorHost";
+import { bindDevTools } from "./devtools/bind";
 import { bindPaletteHost, readHostPalette } from "./hostPalette";
 import { bindThemeHost, readRadiusScale } from "./hostTheme";
-import { bindMorphHost } from "./inkMorph";
 
 const host = mountCanvasUI({
   root: document.getElementById("root")!,
@@ -17,4 +17,4 @@ const host = mountCanvasUI({
 bindCursorHost((mode) => host.setCursors(mode));
 bindPaletteHost((palette) => host.setPalette(palette));
 bindThemeHost((radius) => host.setTheme({ radius }));
-bindMorphHost(host);
+bindDevTools(host);

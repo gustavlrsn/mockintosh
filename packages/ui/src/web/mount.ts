@@ -1,8 +1,9 @@
-import { CopyBits, srcCopy, type BitMap } from "@mockintosh/quickdraw";
+import { CopyBits, srcCopy, type BitMap, type Rect } from "@mockintosh/quickdraw";
 import { bitMapHeight, bitMapWidth, makeRect, newBitMap } from "@mockintosh/quickdraw/bits";
 import type { JSX } from "../jsx-runtime";
 import { cssCursor, DEFAULT_CURSOR, type CursorCSSTable } from "../cursor";
-import { blitCursorFace, type CursorFaceTable } from "../cursorFace";
+import { copyBitMapBytes, moveSoftwareCursor } from "../cursorComposite";
+import { cursorFromFaceCached, type CursorFaceTable } from "../cursorFace";
 import { resolveMacCursorFace } from "../cursors/mac";
 import type { UIServices } from "../services";
 import { createDoubleClickTracker } from "../pointer";
@@ -12,6 +13,7 @@ import { CanvasPresenter } from "./CanvasPresenter";
 import { createWebImageService } from "./decode";
 import { copyHostPalette, DEFAULT_HOST_PALETTE, type HostPalette } from "./palette";
 import { hostKeyStrokes } from "./hostKeyboard";
+import { hostPresentsCursor, pointerKind } from "./hostPointer";
 import { wheelIsPinchZoom } from "./hostWheel";
 import { createScreenCanvas, type ScreenCanvasSize } from "./screenCanvas";
 
@@ -65,9 +67,10 @@ export interface CanvasUIHost {
   /** Flush Solid, layout, and paint. Does not present. */
   paint(): void;
   /**
-   * While set, each tick frames the tree and stamps `bitmap` at `(x, y)`.
-   * `tick` runs first. Pointer events reach the live tree unless
-   * `blockPointer` is set. Pass `null` to resume.
+   * While set, each tick stamps `bitmap` at `(x, y)`. The live tree is
+   * framed only when dirty (header hover, etc.). `tick` runs first.
+   * Pointer events reach the live tree unless `blockPointer` is set.
+   * Pass `null` to resume.
    */
   setOverlay(layer: CanvasOverlay | null): void;
   dispose(): void;
@@ -126,14 +129,16 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
     },
   });
   const { canvas, toScreen } = screenEl;
-  const unsubInvalidate = screenEl.subscribeInvalidate(() => {
-    dirty = true;
-    presenter?.present();
-  });
 
   let screen = newBitMap(screenEl.width, screenEl.height);
+  let presentBits = newBitMap(screenEl.width, screenEl.height);
+  let cursorRect: Rect | null = null;
+  let framed = false;
   function applyFramebuffer(width: number, height: number): void {
     screen = newBitMap(width, height);
+    presentBits = newBitMap(width, height);
+    cursorRect = null;
+    framed = false;
     presenter = new CanvasPresenter(screen, screenEl.ctx, palette);
     overlay = null;
     if (ui) ui.resize(screen);
@@ -157,19 +162,73 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
   const unmount = ui.render(component);
 
   const doubleClick = createDoubleClickTracker();
-  let cursorMode: CursorPresentation = options.cursors ?? "css";
+  const presentableCursor = (mode: CursorPresentation): CursorPresentation =>
+    mode !== "none" && !hostPresentsCursor() ? "none" : mode;
+
+  let cursorMode: CursorPresentation = presentableCursor(options.cursors ?? "css");
   let cursorFaces = options.cursorFaces;
   let pointerX = 0;
   let pointerY = 0;
   let pointerOnCanvas = false;
 
-  const applyHostCursor = (x: number, y: number) => {
+  const usesComposite = (): boolean => cursorMode === "mac" || overlay !== null;
+
+  const macCursor = () => {
+    if (cursorMode !== "mac" || !pointerOnCanvas) return undefined;
+    const face = resolveMacCursorFace(ui!.cursorAt(pointerX, pointerY), cursorFaces);
+    return face ? cursorFromFaceCached(face) : undefined;
+  };
+
+  const presentCanvas = (): void => {
+    if (!presenter) return;
+    presenter.present(usesComposite() ? presentBits : screen);
+  };
+  const unsubInvalidate = screenEl.subscribeInvalidate(() => {
+    dirty = true;
+    presentCanvas();
+  });
+
+  const presentCursorRects = (prev: Rect | null, next: Rect | null): void => {
+    if (!presenter) return;
+    if (prev) presenter.presentRect(presentBits, prev);
+    if (next) presenter.presentRect(presentBits, next);
+  };
+
+  /** Stamp the software cursor onto the last clean frame. No tree paint. */
+  const stampMacCursor = (): void => {
+    if (!framed || cursorMode !== "mac" || overlay) return;
+    const prev = cursorRect;
+    cursorRect = moveSoftwareCursor(screen, presentBits, prev, macCursor(), pointerX, pointerY);
+    presentCursorRects(prev, cursorRect);
+  };
+
+  const compositeFrame = (): void => {
+    copyBitMapBytes(screen, presentBits);
+    if (overlay) {
+      const w = bitMapWidth(overlay.bitmap);
+      const h = bitMapHeight(overlay.bitmap);
+      CopyBits(
+        overlay.bitmap,
+        presentBits,
+        overlay.bitmap.bounds,
+        makeRect(overlay.y, overlay.x, overlay.y + h, overlay.x + w),
+        srcCopy,
+        null,
+      );
+    }
+    cursorRect = moveSoftwareCursor(screen, presentBits, null, macCursor(), pointerX, pointerY);
+    framed = true;
+    presentCanvas();
+  };
+
+  const applyHostCursor = (x: number, y: number, stamp = true) => {
     pointerX = x;
     pointerY = y;
     pointerOnCanvas = true;
     if (cursorMode === "none") return;
     if (cursorMode === "mac") {
       canvas.style.cursor = "none";
+      if (stamp) stampMacCursor();
       return;
     }
     canvas.style.cursor = cssCursor(ui!.cursorAt(x, y), options.cursorCSS);
@@ -193,47 +252,63 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
 
   const onPointerDown = (e: PointerEvent) => {
     const { x, y } = toScreen(e);
+    applyHostCursor(x, y);
     if (overlayHits(x, y)) return;
     canvas.focus({ preventScroll: true });
     canvas.setPointerCapture(e.pointerId);
-    ui!.dispatchPointer("mousedown", x, y);
+    const kind = pointerKind(e);
+    ui!.dispatchPointer("mousedown", x, y, { kind });
     if (doubleClick.down(x, y, performance.now())) {
-      ui!.dispatchPointer("dblclick", x, y);
+      ui!.dispatchPointer("dblclick", x, y, { kind });
     }
-    applyHostCursor(x, y);
-  };
-  const onPointerUp = (e: PointerEvent) => {
-    const { x, y } = toScreen(e);
-    if (overlayHits(x, y)) return;
-    ui!.dispatchPointer("mouseup", x, y);
-    applyHostCursor(x, y);
   };
   let pendingMove: PointerEvent | null = null;
+  const flushMove = () => {
+    const ev = pendingMove;
+    pendingMove = null;
+    if (!ev || disposed) return;
+    const pos = toScreen(ev);
+    applyHostCursor(pos.x, pos.y, false);
+    if (overlayHits(pos.x, pos.y)) return;
+    ui!.dispatchPointer("mousemove", pos.x, pos.y, { kind: pointerKind(ev) });
+  };
+  const finishPointer = (e: PointerEvent, cancel: boolean) => {
+    // A same-frame flick would otherwise mouseup before the rAF move.
+    flushMove();
+    const { x, y } = toScreen(e);
+    applyHostCursor(x, y);
+    const kind = pointerKind(e);
+    if (!overlayHits(x, y)) {
+      ui!.dispatchPointer("mouseup", x, y, { kind, cancel });
+    }
+    // A finger leaves no pointer. Unstamp the software cursor so it
+    // does not sit at the last tap.
+    if (kind === "touch") onPointerLeave();
+  };
+  const onPointerUp = (e: PointerEvent) => {
+    finishPointer(e, false);
+  };
+  const onPointerCancel = (e: PointerEvent) => {
+    finishPointer(e, true);
+  };
   const onPointerMove = (e: PointerEvent) => {
+    const { x, y } = toScreen(e);
+    applyHostCursor(x, y);
     if (pendingMove) {
       pendingMove = e;
       return;
     }
     pendingMove = e;
-    requestAnimationFrame(() => {
-      const ev = pendingMove;
-      pendingMove = null;
-      if (!ev || disposed) return;
-      const { x, y } = toScreen(ev);
-      if (overlayHits(x, y)) {
-        applyHostCursor(x, y);
-        return;
-      }
-      ui!.dispatchPointer("mousemove", x, y);
-      applyHostCursor(x, y);
-    });
+    requestAnimationFrame(flushMove);
   };
   const onPointerLeave = () => {
     pointerOnCanvas = false;
     if (cursorMode === "css") {
       canvas.style.cursor = cssCursor(DEFAULT_CURSOR, options.cursorCSS);
-    } else if (cursorMode === "mac") {
-      dirty = true;
+    } else if (cursorMode === "mac" && framed && !overlay) {
+      const prev = cursorRect;
+      cursorRect = moveSoftwareCursor(screen, presentBits, prev, undefined, 0, 0);
+      presentCursorRects(prev, null);
     }
   };
   const onWheel = (e: WheelEvent) => {
@@ -241,7 +316,7 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
     if (wheelIsPinchZoom(e)) {
       // Pinch can evict the GPU texture without a Solid mutation.
       dirty = true;
-      presenter?.present();
+      presentCanvas();
       return;
     }
     const { x, y } = toScreen(e);
@@ -273,6 +348,7 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
 
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerCancel);
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerleave", onPointerLeave);
   canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -284,31 +360,20 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
     if (overlay) {
       overlay.tick?.();
       if (overlay) {
-        ui!.frame();
-        const w = bitMapWidth(overlay.bitmap);
-        const h = bitMapHeight(overlay.bitmap);
-        CopyBits(
-          overlay.bitmap,
-          screen,
-          overlay.bitmap.bounds,
-          makeRect(overlay.y, overlay.x, overlay.y + h, overlay.x + w),
-          srcCopy,
-          null,
-        );
-        if (cursorMode === "mac" && pointerOnCanvas) {
-          const face = resolveMacCursorFace(ui!.cursorAt(pointerX, pointerY), cursorFaces);
-          if (face) blitCursorFace(ui!.port, face, pointerX, pointerY);
+        if (dirty) {
+          dirty = false;
+          ui!.frame();
         }
-        presenter?.present();
+        compositeFrame();
       }
     } else if (dirty) {
       dirty = false;
       ui!.frame();
-      if (cursorMode === "mac" && pointerOnCanvas) {
-        const face = resolveMacCursorFace(ui!.cursorAt(pointerX, pointerY), cursorFaces);
-        if (face) blitCursorFace(ui!.port, face, pointerX, pointerY);
+      if (usesComposite()) compositeFrame();
+      else {
+        framed = true;
+        presenter?.present(screen);
       }
-      presenter?.present();
     }
     frameId = requestAnimationFrame(tick);
   };
@@ -318,7 +383,7 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
     canvas,
     ui,
     setCursors(mode) {
-      cursorMode = mode;
+      cursorMode = presentableCursor(mode);
       syncHostCursor();
       dirty = true;
     },
@@ -335,14 +400,15 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
       ui!.setTheme(next);
     },
     snapshot() {
-      return copyBitMap(screen);
+      return copyBitMap(usesComposite() ? presentBits : screen);
     },
     snapshotRect(x, y, width, height) {
       const w = Math.max(0, width | 0);
       const h = Math.max(0, height | 0);
       const dest = newBitMap(w, h);
       if (w < 1 || h < 1) return dest;
-      CopyBits(screen, dest, makeRect(y, x, y + h, x + w), dest.bounds, srcCopy, null);
+      const src = usesComposite() ? presentBits : screen;
+      CopyBits(src, dest, makeRect(y, x, y + h, x + w), dest.bounds, srcCopy, null);
       return dest;
     },
     paint() {
@@ -359,6 +425,7 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
       unmount();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerCancel);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);

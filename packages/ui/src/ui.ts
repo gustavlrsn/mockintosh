@@ -9,6 +9,7 @@
  * `installFontManager` are module-level. One createUI() per process.
  */
 
+import { debugInspectTree, type DebugNode } from "./debugInspect";
 import { inspectTree, type InspectionNode } from "./inspection";
 import { render, _setRepaintHook } from "./renderer";
 import { createNode, markDirty } from "./nodes";
@@ -20,7 +21,7 @@ import { FocusContext } from "./focusContext";
 import { installFontBridge } from "./fonts/bridge";
 import { registerFont as registerFontInRegistry } from "./fonts/registry";
 import { measureText } from "./fonts/bridge";
-import { createPointerDispatcher, type PointerDispatcher, type PointerType } from "./pointer";
+import { createPointerDispatcher, type PointerDispatcher, type PointerExtras, type PointerType } from "./pointer";
 import { cursorAt as resolveCursorAt, type CursorName } from "./cursor";
 import type { CanvasNode, Modifiers } from "./nodes";
 import type { FocusManager } from "./focus";
@@ -30,7 +31,8 @@ import { createComponent, createSignal, flush } from "solid-js";
 import type { JSX } from "./jsx-runtime";
 import { UIServicesContext, type UIServices } from "./services";
 import { DEFAULT_THEME, ThemeContext, type UITheme } from "./theme";
-import { OverlayHost } from "./widgets/Overlay";
+import { ViewportContext, type ViewportSize } from "./viewport";
+import { OverlayHost, dismissOverlayModal } from "./widgets/Overlay";
 
 export interface UIConfig {
   /** The packed 1-bit framebuffer to draw into; the tree fills its bounds. */
@@ -50,6 +52,11 @@ export interface UIConfig {
 export interface UIInstance {
   inspect(): readonly InspectionNode[];
   /**
+   * Hierarchical host tree for catalog / DevTools. Includes Solid owners
+   * and reconstructed JSX attrs. Not the automation snapshot (`inspect`).
+   */
+  debugInspect(): DebugNode;
+  /**
    * Mount a Solid component tree. Returns a cleanup function that
    * unmounts the tree and stops reactive effects.
    */
@@ -68,7 +75,7 @@ export interface UIInstance {
     type: PointerType,
     x: number,
     y: number,
-    extras?: { deltaY?: number }
+    extras?: PointerExtras
   ): void;
 
   /**
@@ -125,6 +132,11 @@ export function createUI(config: UIConfig): UIInstance {
   const themeContextValue = { theme };
   let width = bitMapWidth(screen);
   let height = bitMapHeight(screen);
+  const [viewport, setViewport] = createSignal<ViewportSize>(
+    { width, height },
+    { ownedWrite: true },
+  );
+  const viewportContextValue = { size: viewport };
   const scheduleRender = config.scheduleRender ?? (() => {});
 
   _setRepaintHook(scheduleRender);
@@ -165,6 +177,11 @@ export function createUI(config: UIConfig): UIInstance {
       if (root._dirty) computeLayout(root, width, height, measureFunc);
       return inspectTree(root, focusManager);
     },
+    debugInspect() {
+      uiFlush();
+      if (root._dirty) computeLayout(root, width, height, measureFunc);
+      return debugInspectTree(root);
+    },
     render(component: () => JSX.Element): () => void {
       let disposed = false;
       const focusContextValue = {
@@ -177,18 +194,23 @@ export function createUI(config: UIConfig): UIInstance {
           UIServicesContext({
             value: services,
             get children() {
-              return ThemeContext({
-                value: themeContextValue,
+              return ViewportContext({
+                value: viewportContextValue,
                 get children() {
-                  return MeasureContext({
-                    value: measureApi,
+                  return ThemeContext({
+                    value: themeContextValue,
                     get children() {
-                      return FocusContext({
-                        value: focusContextValue,
+                      return MeasureContext({
+                        value: measureApi,
                         get children() {
-                          return createComponent(OverlayHost, {
+                          return FocusContext({
+                            value: focusContextValue,
                             get children() {
-                              return component();
+                              return createComponent(OverlayHost, {
+                                get children() {
+                                  return component();
+                                },
+                              });
                             },
                           });
                         },
@@ -242,6 +264,11 @@ export function createUI(config: UIConfig): UIInstance {
       const mods: Modifiers = { ...DEFAULT_MODIFIERS, ...modifiers };
       uiFlush();
       try {
+        if (type === "keydown" && key === "Escape" && dismissOverlayModal()) {
+          uiFlush();
+          scheduleRender();
+          return;
+        }
         focusManager.dispatchKeyboard(type, key, mods);
       } catch (error) {
         services.onError?.(error);
@@ -255,6 +282,9 @@ export function createUI(config: UIConfig): UIInstance {
       screen = next;
       width = bitMapWidth(next);
       height = bitMapHeight(next);
+      if (viewport().width !== width || viewport().height !== height) {
+        setViewport({ width, height });
+      }
       resizeDrawContext(drawCtx, next);
       root.style.width = width;
       root.style.height = height;

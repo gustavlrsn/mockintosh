@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newBitMap, pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
 import { createUI } from "../src/ui";
+import { useViewport } from "../src/viewport";
 import { viewportLogicalSize } from "../src/web/screenCanvas";
 
 describe("createUI.resize", () => {
@@ -24,6 +25,21 @@ describe("createUI.resize", () => {
     expect(ui.root.layout.height).toBe(40);
     expect(mounts).toBe(afterMount);
     expect(pixelsFromBitMap(large)[0]).toBe(1);
+  });
+
+  it("useViewport tracks the framebuffer after resize", () => {
+    const ui = createUI({ screen: newBitMap(40, 20) });
+    let seen = { width: 0, height: 0 };
+    ui.render(() => {
+      const vp = useViewport();
+      seen = vp();
+      return <box width="100%" height="100%" />;
+    });
+    ui.frame();
+    expect(seen).toEqual({ width: 40, height: 20 });
+    ui.resize(newBitMap(80, 40));
+    ui.frame();
+    expect(seen).toEqual({ width: 80, height: 40 });
   });
 });
 

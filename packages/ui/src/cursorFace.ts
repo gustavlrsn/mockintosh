@@ -10,6 +10,7 @@ import {
   SetPort,
   srcBic,
   srcOr,
+  type BitMap,
   type Cursor,
   type GrafPort,
   type Point,
@@ -27,8 +28,9 @@ export interface CursorFace {
 
 export type CursorFaceTable = Partial<Record<NamedCursor, CursorFace>>;
 
-const CURSOR_SIZE = 16;
+export const CURSOR_SIZE = 16;
 const CURSOR_RECT = makeRect(0, 0, CURSOR_SIZE, CURSOR_SIZE);
+const faceCursors = new WeakMap<CursorFace, Cursor>();
 
 /** Pack a sprite of at most 16×16 into a QuickDraw `Cursor`. */
 export function cursorFromFace(face: CursorFace): Cursor {
@@ -94,22 +96,41 @@ function packedCursor(cursor: Cursor) {
   return entry;
 }
 
+/** Packed QuickDraw cursor for a face. Faces are treated as immutable. */
+export function cursorFromFaceCached(face: CursorFace): Cursor {
+  let cursor = faceCursors.get(face);
+  if (!cursor) {
+    cursor = cursorFromFace(face);
+    faceCursors.set(face, cursor);
+  }
+  return cursor;
+}
+
+function stampCursorBits(dest: BitMap, cursor: Cursor, x: number, y: number): void {
+  const { data, mask } = packedCursor(cursor);
+  const top = y - cursor.hotSpot.v;
+  const left = x - cursor.hotSpot.h;
+  const dst = makeRect(top, left, top + CURSOR_SIZE, left + CURSOR_SIZE);
+  CopyBits(mask, dest, CURSOR_RECT, dst, srcBic, null);
+  CopyBits(data, dest, CURSOR_RECT, dst, srcOr, null);
+}
+
 /**
  * Paint a QuickDraw cursor into `port` with its hot spot at (`x`, `y`).
  * Mask `srcBic`, then data `srcOr` — the ROM VBL order.
  */
 export function blitQuickdrawCursor(port: GrafPort, cursor: Cursor, x: number, y: number): void {
-  const { data, mask } = packedCursor(cursor);
-  const top = y - cursor.hotSpot.v;
-  const left = x - cursor.hotSpot.h;
-  const dst = makeRect(top, left, top + CURSOR_SIZE, left + CURSOR_SIZE);
   SetPort(port);
-  CopyBits(mask, port.portBits, CURSOR_RECT, dst, srcBic, null);
-  CopyBits(data, port.portBits, CURSOR_RECT, dst, srcOr, null);
+  stampCursorBits(port.portBits, cursor, x, y);
+}
+
+/** Same stamp as {@link blitQuickdrawCursor}, onto a raw `BitMap` (no port clip). */
+export function blitQuickdrawCursorBits(dest: BitMap, cursor: Cursor, x: number, y: number): void {
+  stampCursorBits(dest, cursor, x, y);
 }
 
 export function blitCursorFace(port: GrafPort, face: CursorFace, x: number, y: number): void {
-  blitQuickdrawCursor(port, cursorFromFace(face), x, y);
+  blitQuickdrawCursor(port, cursorFromFaceCached(face), x, y);
 }
 
 function spriteToRgba(sprite: Sprite): Uint8Array {

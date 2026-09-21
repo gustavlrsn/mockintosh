@@ -1,8 +1,9 @@
 import { createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
-import { newBitMap } from "@mockintosh/quickdraw/bits";
+import { getBit, newBitMap } from "@mockintosh/quickdraw/bits";
 import { createUI } from "../src/ui";
 import { Button } from "../src/widgets/Button";
+import { Dialog } from "../src/widgets/Dialog";
 import { Menu } from "../src/widgets/Menu";
 import { Popover } from "../src/widgets/Popover";
 import { Select } from "../src/widgets/Select";
@@ -119,6 +120,81 @@ describe("Popover", () => {
     ui.dispatchPointer("mousedown", catcher.bounds.x + 2, catcher.bounds.y + 2);
     ui.frame();
     expect(ui.inspect().some((n) => n.name === "popover")).toBe(false);
+  });
+});
+
+describe("Dialog", () => {
+  it("opens centered and dismisses on Escape", () => {
+    const [open, setOpen] = createSignal(false);
+    const ui = createUI({ screen: newBitMap(240, 160) });
+    ui.render(() => (
+      <box flexDirection="column">
+        <box width={8} height={8} background={1} />
+        <Dialog
+          open={open()}
+          onDismiss={() => setOpen(false)}
+          title="Edit profile"
+          trigger={<Button name="edit" label="Edit" onClick={() => setOpen(true)} />}
+        >
+          <text font="body">Name is local.</text>
+        </Dialog>
+      </box>
+    ));
+    ui.frame();
+    click(ui, "edit");
+    const panel = ui.inspect().find((n) => n.name === "dialog")!;
+    expect(panel.role).toBe("dialog");
+    expect(panel.text.includes("Edit profile")).toBe(true);
+    expect(panel.bounds.x).toBeGreaterThan(0);
+    expect(panel.bounds.y).toBeGreaterThan(0);
+    expect(getBit(ui.port.portBits, 0, 0)).toBe(0);
+    expect(getBit(ui.port.portBits, 1, 0)).toBe(1);
+
+    ui.dispatchKeyboard("keydown", "Escape");
+    ui.frame();
+    expect(ui.inspect().some((n) => n.name === "dialog")).toBe(false);
+  });
+
+  it("dismisses when clicking the dimmed chrome", () => {
+    const [open, setOpen] = createSignal(false);
+    const ui = createUI({ screen: newBitMap(240, 160) });
+    ui.render(() => (
+      <Dialog
+        open={open()}
+        onDismiss={() => setOpen(false)}
+        title="Edit profile"
+        trigger={<Button name="edit" label="Edit" onClick={() => setOpen(true)} />}
+      >
+        <text font="body">Name is local.</text>
+      </Dialog>
+    ));
+    ui.frame();
+    click(ui, "edit");
+    ui.dispatchPointer("mousedown", 2, 2);
+    ui.dispatchPointer("mouseup", 2, 2);
+    ui.frame();
+    expect(ui.inspect().some((n) => n.name === "dialog")).toBe(false);
+  });
+
+  it("keeps the panel open when clicking inside it", () => {
+    const [open, setOpen] = createSignal(false);
+    const ui = createUI({ screen: newBitMap(240, 160) });
+    ui.render(() => (
+      <Dialog
+        open={open()}
+        onDismiss={() => setOpen(false)}
+        title="Edit profile"
+        trigger={<Button name="edit" label="Edit" onClick={() => setOpen(true)} />}
+      >
+        <text font="body">Name is local.</text>
+      </Dialog>
+    ));
+    ui.frame();
+    click(ui, "edit");
+    const panel = ui.inspect().find((n) => n.name === "dialog")!;
+    ui.dispatchPointer("mousedown", panel.bounds.x + 8, panel.bounds.y + 8);
+    ui.frame();
+    expect(ui.inspect().some((n) => n.name === "dialog")).toBe(true);
   });
 });
 

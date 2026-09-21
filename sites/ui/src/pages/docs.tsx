@@ -291,7 +291,7 @@ export function CursorsPage(): JSX.Element {
     <box flexDirection="column" gap={16}>
       <PageTitle
         title="Cursors"
-        lede="Widgets name a cursor. The host presents it — CSS keywords, 1-bit Macintosh faces, or the OS compositor."
+        lede="Widgets name a cursor. The host presents it — CSS keywords, 1-bit Macintosh faces, or the OS compositor. Phones have no pointer, so the catalog uses cursors: none."
       />
       <Button
         label={cursorMode() === "mac" ? "Using Mac faces" : "Using CSS keywords"}

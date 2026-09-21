@@ -1,7 +1,8 @@
 /**
  * Pointer dispatch — hit-tests the CanvasNode tree and delivers mouse events
  * with implicit capture: the node that received mousedown keeps receiving
- * drag / mouseup until release.
+ * drag / mouseup until release. A `kind: "touch"` press becomes overflow
+ * scroll after slop when the gesture is vertical; mouse still uses wheel.
  */
 
 import {
@@ -25,6 +26,19 @@ export type PointerType =
   | "mouseup"
   | "dblclick"
   | "scroll";
+
+/** Host pointer. `"touch"` (and coarse fingers reported as mouse) can pan overflow. */
+export type PointerKind = "mouse" | "touch" | "pen";
+
+export interface PointerExtras {
+  deltaY?: number;
+  kind?: PointerKind;
+  /** `mouseup` that must not click — `pointercancel`, or a pan that already consumed the press. */
+  cancel?: boolean;
+}
+
+/** Movement before a touch press becomes a pan or a widget drag. */
+export const TOUCH_SLOP = 8;
 
 /** Mac `DoubleTime` / `DoubleSpace` — same window the OS and the kit web host use. */
 export const DOUBLE_CLICK_MS = 500;
@@ -67,7 +81,7 @@ export interface PointerDispatcher {
     type: PointerType,
     x: number,
     y: number,
-    extras?: { deltaY?: number }
+    extras?: PointerExtras
   ): void;
 }
 
@@ -198,8 +212,10 @@ export function nodeAt(
   y: number,
   ox = 0,
   oy = 0,
-  clip: ClipRect | null = null
+  clip: ClipRect | null = null,
+  skip?: (node: CanvasNode) => boolean,
 ): CanvasNode | null {
+  if (skip?.(node)) return null;
   if (node.props["inert"] === true) return null;
   if (node.type === "_text_content") return null;
 
@@ -218,13 +234,13 @@ export function nodeAt(
     });
     if (nextClip.width > 0 && nextClip.height > 0) {
       for (let i = node.children.length - 1; i >= 0; i--) {
-        const hit = nodeAt(node.children[i], x, y, next.ox, next.oy, nextClip);
+        const hit = nodeAt(node.children[i], x, y, next.ox, next.oy, nextClip, skip);
         if (hit) return hit;
       }
     }
   } else {
     for (let i = node.children.length - 1; i >= 0; i--) {
-      const hit = nodeAt(node.children[i], x, y, next.ox, next.oy, clip);
+      const hit = nodeAt(node.children[i], x, y, next.ox, next.oy, clip, skip);
       if (hit) return hit;
     }
   }
@@ -313,6 +329,13 @@ export function createPointerDispatcher(
   let hovered: CanvasNode | null = null;
   let captured: CanvasNode | null = null;
   let dragging = false;
+  let pressKind: PointerKind = "mouse";
+  let pressX = 0;
+  let pressY = 0;
+  let lastPanY = 0;
+  let pressing = false;
+  let panning = false;
+  let touchDecided = false;
 
   function setHovered(next: CanvasNode | null): void {
     if (next === hovered) return;
@@ -331,6 +354,73 @@ export function createPointerDispatcher(
     hovered = next;
   }
 
+  function rememberPress(extras: PointerExtras | undefined, x: number, y: number): void {
+    pressKind = extras?.kind ?? "mouse";
+    pressX = x;
+    pressY = y;
+    lastPanY = y;
+    pressing = true;
+    panning = false;
+    touchDecided = pressKind !== "touch";
+  }
+
+  function endPress(): void {
+    pressing = false;
+    panning = false;
+    touchDecided = false;
+    pressKind = "mouse";
+    captured = null;
+    dragging = false;
+  }
+
+  function applyScroll(x: number, y: number, dy: number): void {
+    // Start from the box under the pointer, not only a hit-target. An
+    // overflow:scroll pane (ChatGippity's message list) has no handlers
+    // of its own; hitTest would miss it and the window would eat the wheel.
+    let node = nodeAt(root, x, y) ?? hitTest(root, x, y);
+    while (node) {
+      const canScroll = node.style.overflow === "scroll";
+      const onScroll = node._eventHandlers.onScroll;
+      if (canScroll) {
+        const moved = applyWheel(node, dy);
+        if (onScroll) {
+          onScroll(dy);
+          return;
+        }
+        if (moved) return;
+      } else if (onScroll) {
+        onScroll(dy);
+        return;
+      }
+      node = node.parent;
+    }
+  }
+
+  function canPanFrom(x: number, y: number, dy: number): boolean {
+    let node = nodeAt(root, x, y) ?? hitTest(root, x, y);
+    while (node) {
+      if (node.style.overflow === "scroll") {
+        const max = scrollOverflow(node);
+        if (max > 0) {
+          if (dy > 0 && node._scrollOffset < max) return true;
+          if (dy < 0 && node._scrollOffset > 0) return true;
+        }
+      } else if (node._eventHandlers.onScroll) {
+        return true;
+      }
+      node = node.parent;
+    }
+    return false;
+  }
+
+  function stealPressForPan(): void {
+    // Leave, not mouseup — Button/createPress treats mouseup as activate.
+    setHovered(null);
+    captured = null;
+    dragging = false;
+    panning = true;
+  }
+
   return {
     dispatch(type, x, y, extras) {
       try {
@@ -341,33 +431,38 @@ export function createPointerDispatcher(
     },
   };
 
-  function dispatchInner(type: PointerType, x: number, y: number, extras?: { deltaY?: number }) {
+  function dispatchInner(type: PointerType, x: number, y: number, extras?: PointerExtras) {
       if (type === "scroll") {
-        // Start from the box under the pointer, not only a hit-target. An
-        // overflow:scroll pane (ChatGippity's message list) has no handlers
-        // of its own; hitTest would miss it and the window would eat the wheel.
-        const dy = extras?.deltaY ?? 0;
-        let node = nodeAt(root, x, y) ?? hitTest(root, x, y);
-        while (node) {
-          const canScroll = node.style.overflow === "scroll";
-          const onScroll = node._eventHandlers.onScroll;
-          if (canScroll) {
-            const moved = applyWheel(node, dy);
-            if (onScroll) {
-              onScroll(dy);
-              return;
-            }
-            if (moved) return;
-          } else if (onScroll) {
-            onScroll(dy);
-            return;
-          }
-          node = node.parent;
-        }
+        applyScroll(x, y, extras?.deltaY ?? 0);
         return;
       }
 
       if (type === "mousemove") {
+        if (pressing && pressKind === "touch") {
+          if (panning) {
+            const dy = lastPanY - y;
+            lastPanY = y;
+            if (dy !== 0) applyScroll(x, y, dy);
+            return;
+          }
+          if (!touchDecided) {
+            const dx = x - pressX;
+            const dy = y - pressY;
+            if (dx * dx + dy * dy < TOUCH_SLOP * TOUCH_SLOP) {
+              setHovered(hitTest(root, x, y));
+              return;
+            }
+            touchDecided = true;
+            const gestureDy = pressY - y;
+            if (Math.abs(dy) >= Math.abs(dx) && canPanFrom(pressX, pressY, gestureDy)) {
+              stealPressForPan();
+              lastPanY = y;
+              if (gestureDy !== 0) applyScroll(x, y, gestureDy);
+              return;
+            }
+          }
+        }
+
         const hit = hitTest(root, x, y);
         // Hover tracks the pointer even while a press is captured, like the
         // DOM: drop targets highlight under a drag, a pressed button unpresses
@@ -385,6 +480,7 @@ export function createPointerDispatcher(
       }
 
       if (type === "mousedown") {
+        rememberPress(extras, x, y);
         const hit = hitTest(root, x, y);
         dragging = false;
         setHovered(hit);
@@ -402,6 +498,7 @@ export function createPointerDispatcher(
 
         if (runMouseDownCapture(hit, x, y)) {
           captured = null;
+          touchDecided = true;
           return;
         }
 
@@ -415,6 +512,12 @@ export function createPointerDispatcher(
       }
 
       if (type === "mouseup") {
+        const cancel = extras?.cancel === true || panning;
+        if (cancel) {
+          setHovered(null);
+          endPress();
+          return;
+        }
         const target = captured;
         const hit = hitTest(root, x, y);
         if (target) {
@@ -427,9 +530,10 @@ export function createPointerDispatcher(
             target._eventHandlers.onClick?.(lx, ly);
           }
         }
-        captured = null;
-        dragging = false;
-        setHovered(hit);
+        const kind = pressKind;
+        endPress();
+        // A finger leaves no pointer. Do not keep the last box hovered.
+        setHovered(kind === "touch" ? null : hit);
         return;
       }
 

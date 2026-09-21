@@ -14,6 +14,8 @@ export interface OverlayLayer {
   right?: number;
   modal: boolean;
   role?: string;
+  /** `center` fills the host and flex-centers the panel. Default `anchor`. */
+  placement?: "anchor" | "center";
   render: () => JSX.Element;
   onDismiss?: () => void;
   onKeyDown?: (key: string) => void;
@@ -26,6 +28,13 @@ export interface OverlayHostApi {
 }
 
 export const OverlayHostContext = createContext<OverlayHostApi | null>(null);
+
+let dismissTopModal: (() => boolean) | null = null;
+
+/** Escape on a modal overlay, even if focus is still on the trigger. */
+export function dismissOverlayModal(): boolean {
+  return dismissTopModal?.() ?? false;
+}
 
 /** Root layer after the app tree so panels paint in screen space, not inside overflow:scroll. */
 export function OverlayHost(props: { children?: JSX.Element }): JSX.Element {
@@ -54,6 +63,16 @@ export function OverlayHost(props: { children?: JSX.Element }): JSX.Element {
     return undefined;
   };
 
+  dismissTopModal = () => {
+    const top = modalTop();
+    if (!top) return false;
+    top.onDismiss?.();
+    return true;
+  };
+  onCleanup(() => {
+    if (dismissTopModal) dismissTopModal = null;
+  });
+
   return (
     <OverlayHostContext value={api}>
       <box width="100%" height="100%">
@@ -70,39 +89,57 @@ export function OverlayHost(props: { children?: JSX.Element }): JSX.Element {
           />
         </Show>
         <For each={layers()}>
-          {(layer) => (
-            <box
-              semantic={{ name: "overlay-panel", role: layer.role ?? "dialog" }}
-              position="absolute"
-              left={layer.right === undefined ? layer.x : undefined}
-              right={layer.right}
-              top={layer.y}
-              tabIndex={layer.modal ? 0 : undefined}
-              onMouseDown={() => {}}
-              onKeyDown={(key: string) => {
-                if (key === "Escape") {
-                  layer.onDismiss?.();
-                  return;
-                }
-                layer.onKeyDown?.(key);
-              }}
-              ref={(el) => {
-                if (!layer.modal) return;
-                onSettled(() => {
-                  try {
-                    getFocusManager().focus(el);
-                  } catch {
-                    /* OverlayHost used outside createUI */
-                  }
-                });
-              }}
-            >
-              {layer.render()}
-            </box>
-          )}
+          {(layer) => <OverlayLayerView layer={layer} />}
         </For>
       </box>
     </OverlayHostContext>
+  );
+}
+
+function overlayKeyDown(layer: OverlayLayer, key: string): void {
+  if (key === "Escape") {
+    layer.onDismiss?.();
+    return;
+  }
+  layer.onKeyDown?.(key);
+}
+
+function focusModal(el: CanvasNode, modal: boolean): void {
+  if (!modal) return;
+  onSettled(() => {
+    try {
+      getFocusManager().focus(el);
+    } catch {
+      /* OverlayHost used outside createUI */
+    }
+  });
+}
+
+function OverlayLayerView(props: { layer: OverlayLayer }): JSX.Element {
+  const layer = () => props.layer;
+  const centered = () => layer().placement === "center";
+  return (
+    <box
+      semantic={{ name: "overlay-panel", role: layer().role ?? "dialog" }}
+      position="absolute"
+      left={centered() ? 0 : layer().right === undefined ? layer().x : undefined}
+      right={centered() ? undefined : layer().right}
+      top={centered() ? 0 : layer().y}
+      width={centered() ? "100%" : undefined}
+      height={centered() ? "100%" : undefined}
+      justifyContent={centered() ? "center" : undefined}
+      alignItems={centered() ? "center" : undefined}
+      background={centered() ? "checker" : undefined}
+      penMode={centered() ? "bic" : undefined}
+      tabIndex={layer().modal ? 0 : undefined}
+      onClick={() => {
+        if (centered()) layer().onDismiss?.();
+      }}
+      onKeyDown={(key: string) => overlayKeyDown(layer(), key)}
+      ref={(el) => focusModal(el, layer().modal)}
+    >
+      <box onMouseDown={() => {}}>{layer().render()}</box>
+    </box>
   );
 }
 

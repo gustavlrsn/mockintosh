@@ -3,7 +3,8 @@
  *
  * Engine: host elements + createUI + layout/draw/pointer/focus/fonts.
  * Algorithms: dither, sprites, PNG (no Solid).
- * Widgets: Solid compositions of host elements (`./widgets`).
+ * Primitives: headless create* behavior (`./primitives`).
+ * Widgets: skins over host elements (`./widgets`).
  * Host adapters: `@mockintosh/ui/web`, `@mockintosh/ui/vite`.
  */
 
@@ -16,6 +17,8 @@ export { useUIServices } from "./services";
 export type { UIServices, UIClipboard, UIImageService, ImageDecodeOptions } from "./services";
 export { useTheme, useRadius, themeRadius, RADIUS_SCALES, RADIUS_PX, DEFAULT_THEME } from "./theme";
 export type { UITheme, RadiusScale, RadiusStep } from "./theme";
+export { useViewport } from "./viewport";
+export type { ViewportSize } from "./viewport";
 
 export type {
   LayoutStyle,
@@ -56,22 +59,33 @@ export {
   createPointerDispatcher,
   createDoubleClickTracker,
   hitTest,
+  nodeAt,
   DOUBLE_CLICK_MS,
   DOUBLE_CLICK_DIST,
+  TOUCH_SLOP,
 } from "./pointer";
-export type { PointerType, PointerDispatcher } from "./pointer";
+export type { PointerType, PointerKind, PointerExtras, PointerDispatcher } from "./pointer";
 export { cursorAt, cursorOf, cssCursor, isNamedCursor, DEFAULT_CURSOR } from "./cursor";
 export type { CursorName, NamedCursor, CursorCSSTable } from "./cursor";
 export {
   cursorFromFace,
+  cursorFromFaceCached,
   faceFromCursor,
   blitQuickdrawCursor,
+  blitQuickdrawCursorBits,
   blitCursorFace,
   cssCursorFromFace,
   cssTableFromFaces,
   resolveCursorFace,
+  CURSOR_SIZE,
 } from "./cursorFace";
 export type { CursorFace, CursorFaceTable } from "./cursorFace";
+export {
+  cursorStampRect,
+  copyBitMapBytes,
+  copyBitRect,
+  moveSoftwareCursor,
+} from "./cursorComposite";
 export { MAC_CURSOR_FACES, resolveMacCursorFace } from "./cursors/mac";
 export type { MacCursorName } from "./cursors/mac";
 export { encodePng1bit, encodePngRgba } from "./png";
@@ -82,6 +96,12 @@ export { useFocus, getFocusManager } from "./focusContext";
 export { useMeasure } from "./measure";
 export { registerFont, listFonts, listFontSizes, listFontFamilies, getFont, requireFont, defaultFontSize } from "./fonts/registry";
 export type { FontFamilyInfo } from "./fonts/registry";
+export { encodeDeckerFont, decodeDeckerFont } from "./fonts/codec";
+export { deckerFontFromDraft, draftFromDeckerFont } from "./fonts/draft";
+export type { FontStrikeDraft, FontStrikeGlyph } from "./fonts/draft";
+export { DROM_CHARS, deckerOrdinalForCharCode, defaultRasterCharset } from "./fonts/drom";
+export { getGlyphPixel, getGlyphWidth, getGlyphIndexForChar } from "./fonts/font";
+export type { DeckerFont } from "./fonts/font";
 export { resolveFont, fontStyleFromProps, fontFromProps, textFace } from "./fonts/style";
 export type { FontStyle } from "./fonts/style";
 export { measureText, fontLineHeight, drawString } from "./fonts/bridge";
@@ -91,6 +111,13 @@ export { COMMAND_KEY, CHECK_MARK, BULLET } from "./fonts/extraGlyphs";
 export { textSelectionOf, selectedPlainText } from "./selectable";
 export type { TextSelection } from "./selectable";
 export { inspectTree, type InspectionNode, type SemanticMetadata } from "./inspection";
+export {
+  debugInspectTree,
+  findDebugNode,
+  formatDebugJsx,
+  debugComponent,
+  type DebugNode,
+} from "./debugInspect";
 export type { JSX, HostProps } from "./jsx-runtime";
 
 // -------------------------------------------------------------------------
@@ -99,6 +126,7 @@ export type { JSX, HostProps } from "./jsx-runtime";
 export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid } from "./sprite";
 export type { Sprite } from "./sprite";
 export { toBits, createDitherer, coverFrame, rasterizeFrame, isImageFrame, isDitheredAsset } from "./dither";
+export { paintDitherDissolve, bayerThreshold } from "./ditherDissolve";
 export { rasterizeDitherGradient, gradientT, fillGradientT, gradientDegrees, gradientAt } from "./ditherGradient";
 export type { ImageFrame, DitherMode, DitherOptions, CoverFrameOptions, DitheredAsset } from "./dither";
 export {
@@ -123,6 +151,29 @@ export type { AsciiMatchMode, AsciiDitherOptions, ResolvedAsciiOptions } from ".
 export { decodeBase64 } from "./base64";
 
 // -------------------------------------------------------------------------
+// Primitives (headless behavior)
+// -------------------------------------------------------------------------
+export {
+  createPress,
+  createToggle,
+  createSlider,
+  DEFAULT_SLIDER_WIDTH,
+} from "./primitives";
+export type {
+  Press,
+  PressProps,
+  PressRootProps,
+  ToggleBehavior,
+  ToggleBehaviorProps,
+  ToggleRole,
+  ToggleRootProps,
+  SliderBehavior,
+  SliderBehaviorProps,
+  SliderMetrics,
+  SliderRootProps,
+} from "./primitives";
+
+// -------------------------------------------------------------------------
 // Widgets
 // -------------------------------------------------------------------------
 export {
@@ -136,8 +187,13 @@ export {
   ButtonGroup,
   Card,
   Checkbox,
+  Dialog,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
   Disclosure,
   Dithered,
+  DitherTransition,
   Empty,
   Field,
   InputGroup,
@@ -185,9 +241,11 @@ export type {
   ButtonGroupProps,
   CardProps,
   CheckboxProps,
+  DialogProps,
   DisclosureProps,
   DitheredProps,
   DitheredSrc,
+  DitherTransitionProps,
   EmptyProps,
   FieldProps,
   InputGroupProps,

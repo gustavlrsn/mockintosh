@@ -1,7 +1,6 @@
-import { Button, For, Popover, TextInput, createSignal } from "@mockintosh/ui";
+import { Button, For, Popover, TextInput, createSignal, useViewport } from "@mockintosh/ui";
 import type { JSX } from "@mockintosh/ui";
 import { formatRgb8, parseRgb8, type HostPalette } from "@mockintosh/ui/web";
-import { PAGE_TRANSITIONS, pageTransition, setPageTransition } from "./inkMorph";
 import { RADIUS_PRESETS, radiusScale, setRadiusScale } from "./hostTheme";
 import {
   HOST_PALETTE_PRESETS,
@@ -19,7 +18,8 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
 const paletteRows = chunk(HOST_PALETTE_PRESETS, 3);
 
 function HostSettingsPanel(): JSX.Element {
-  const selected = () => pageTransition();
+  const vp = useViewport();
+  const panelWidth = () => Math.min(268, Math.max(160, vp().width - 24));
   const radius = () => radiusScale();
   const preset = () => activePalettePreset();
   const [inkHex, setInkHex] = createSignal(formatRgb8(hostPalette().foreground));
@@ -44,7 +44,7 @@ function HostSettingsPanel(): JSX.Element {
   };
 
   return (
-    <box flexDirection="column" gap={10} width={268}>
+    <box flexDirection="column" gap={10} width={panelWidth()}>
       <box flexDirection="column" gap={6}>
         <text font="geneva" size={10} nowrap>
           Host Settings
@@ -91,27 +91,11 @@ function HostSettingsPanel(): JSX.Element {
           </For>
         </box>
       </box>
-      <box flexDirection="column" gap={6}>
-        <text font="geneva" size={10} nowrap>
-          Page transition
-        </text>
-        <box flexDirection="row" gap={6}>
-          <For each={PAGE_TRANSITIONS}>
-            {(item) => (
-              <Button
-                label={item.label}
-                shadow={selected() === item.id}
-                onClick={() => setPageTransition(item.id)}
-              />
-            )}
-          </For>
-        </box>
-      </box>
     </box>
   );
 }
 
-/** Header control. Palette and morph live here so every page can reach them. */
+/** Header control. Palette and radius live here so every page can reach them. */
 export function SettingsMenu(): JSX.Element {
   const [open, setOpen] = createSignal(false);
   return (

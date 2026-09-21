@@ -25,6 +25,7 @@ import {
 } from "@mockintosh/ui";
 import type { JSX } from "@mockintosh/ui";
 import billA from "../assets/bill-a.png";
+import { useCompact } from "../layout";
 
 function Cell(props: { children?: JSX.Element }): JSX.Element {
   return (
@@ -221,9 +222,11 @@ function FindCard(): JSX.Element {
 
 /** Live blocks of what the kit can compose. Same job as shadcn's landing grid. */
 export function HomeShowcase(): JSX.Element {
+  const compact = useCompact();
+  const dir = () => (compact() ? "column" : "row");
   return (
     <box flexDirection="column" gap={12}>
-      <box flexDirection="row" gap={12} alignItems="stretch">
+      <box flexDirection={dir()} gap={12} alignItems="stretch">
         <Cell>
           <SignInCard />
         </Cell>
@@ -231,7 +234,7 @@ export function HomeShowcase(): JSX.Element {
           <ThreadCard />
         </Cell>
       </box>
-      <box flexDirection="row" gap={12} alignItems="stretch">
+      <box flexDirection={dir()} gap={12} alignItems="stretch">
         <Cell>
           <AgentCard />
         </Cell>
@@ -239,7 +242,7 @@ export function HomeShowcase(): JSX.Element {
           <PeopleCard />
         </Cell>
       </box>
-      <box flexDirection="row" gap={12} alignItems="stretch">
+      <box flexDirection={dir()} gap={12} alignItems="stretch">
         <Cell>
           <DeskCard />
         </Cell>
@@ -247,7 +250,7 @@ export function HomeShowcase(): JSX.Element {
           <CatalogCard />
         </Cell>
       </box>
-      <box flexDirection="row" gap={12} alignItems="stretch">
+      <box flexDirection={dir()} gap={12} alignItems="stretch">
         <Cell>
           <PaneCard />
         </Cell>

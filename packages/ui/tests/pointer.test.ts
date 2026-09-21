@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createNode, setNodeProperty } from "../src/nodes";
 import { computeLayout } from "../src/layout";
-import { createDoubleClickTracker, createPointerDispatcher, hitTest } from "../src/pointer";
+import { createDoubleClickTracker, createPointerDispatcher, hitTest, nodeAt, TOUCH_SLOP } from "../src/pointer";
 import { createFocusManager } from "../src/focus";
 import type { MeasureFunc } from "../src/layout";
 
@@ -47,6 +47,14 @@ describe("hitTest", () => {
     b.props.hitMask = { data: mask, width: 50, height: 50 };
     expect(hitTest(root, 25, 25)).toBe(b);
     expect(hitTest(root, 30, 30)).toBe(null);
+  });
+});
+
+describe("nodeAt skip", () => {
+  it("looks through a covering overlay to the page underneath", () => {
+    const { root, a, b } = tree();
+    expect(nodeAt(root, 30, 30)).toBe(b);
+    expect(nodeAt(root, 30, 30, 0, 0, null, (node) => node === b)).toBe(a);
   });
 });
 
@@ -299,6 +307,104 @@ describe("scroll bubbling", () => {
     expect(pane._scrollOffset).toBe(40);
     setNodeProperty(pane, "scrollKey", "/docs");
     expect(pane._scrollOffset).toBe(0);
+  });
+});
+
+function scrollTree() {
+  const root = createNode("_root");
+  root.style = { width: 80, height: 80 };
+  const pane = createNode("box");
+  pane.style = { overflow: "scroll", width: 80, height: 40 };
+  const content = createNode("box");
+  content.style = { width: 80, height: 100 };
+  content._eventHandlers = {};
+  pane.children = [content];
+  content.parent = pane;
+  root.children = [pane];
+  pane.parent = root;
+  computeLayout(root, 80, 80, noMeasure);
+  return { root, pane, content };
+}
+
+describe("touch pan", () => {
+  it("scrolls an overflow pane after slop", () => {
+    const { root, pane } = scrollTree();
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    ptr.dispatch("mousedown", 20, 20, { kind: "touch" });
+    ptr.dispatch("mousemove", 20, 20 - (TOUCH_SLOP + 4), { kind: "touch" });
+    expect(pane._scrollOffset).toBe(TOUCH_SLOP + 4);
+  });
+
+  it("does not scroll a mouse drag", () => {
+    const { root, pane, content } = scrollTree();
+    content._eventHandlers.onMouseDown = () => {};
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    ptr.dispatch("mousedown", 20, 20);
+    ptr.dispatch("mousemove", 20, 8);
+    expect(pane._scrollOffset).toBe(0);
+  });
+
+  it("does not click after a pan", () => {
+    const { root, content } = scrollTree();
+    let clicked = 0;
+    let left = 0;
+    content._eventHandlers.onClick = () => {
+      clicked++;
+    };
+    content._eventHandlers.onMouseDown = () => {};
+    content._eventHandlers.onMouseLeave = () => {
+      left++;
+    };
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    ptr.dispatch("mousedown", 20, 20, { kind: "touch" });
+    ptr.dispatch("mousemove", 20, 6, { kind: "touch" });
+    ptr.dispatch("mouseup", 20, 6, { kind: "touch" });
+    expect(clicked).toBe(0);
+    expect(left).toBe(1);
+  });
+
+  it("still clicks a tap that stays inside slop", () => {
+    const { root, content } = scrollTree();
+    let clicked = 0;
+    content._eventHandlers.onClick = () => {
+      clicked++;
+    };
+    content._eventHandlers.onMouseDown = () => {};
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    ptr.dispatch("mousedown", 20, 20, { kind: "touch" });
+    ptr.dispatch("mousemove", 20, 18, { kind: "touch" });
+    ptr.dispatch("mouseup", 20, 18, { kind: "touch" });
+    expect(clicked).toBe(1);
+  });
+
+  it("lets a horizontal drag reach onDrag", () => {
+    const { root, pane, content } = scrollTree();
+    const drags: number[] = [];
+    content._eventHandlers.onMouseDown = () => {};
+    content._eventHandlers.onDrag = (lx) => {
+      drags.push(lx);
+    };
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    ptr.dispatch("mousedown", 20, 20, { kind: "touch" });
+    ptr.dispatch("mousemove", 20 + TOUCH_SLOP + 6, 22, { kind: "touch" });
+    expect(pane._scrollOffset).toBe(0);
+    expect(drags.length).toBeGreaterThan(0);
+  });
+
+  it("does not click a cancelled press", () => {
+    const { root, content } = scrollTree();
+    let clicked = 0;
+    content._eventHandlers.onClick = () => {
+      clicked++;
+    };
+    content._eventHandlers.onMouseDown = () => {};
+    content._eventHandlers.onMouseUp = () => {
+      clicked++;
+    };
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    ptr.dispatch("mousedown", 20, 20, { kind: "touch" });
+    ptr.dispatch("mouseup", 20, 20, { kind: "touch", cancel: true });
+    expect(clicked).toBe(0);
   });
 });
 

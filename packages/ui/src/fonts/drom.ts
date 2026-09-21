@@ -4,7 +4,7 @@
  * - other Unicode code units are looked up in `drom_chars`; if present, ordinal is 127 + index;
  * - otherwise ordinal 255 (replacement / missing).
  */
-const DROM_CHARS =
+export const DROM_CHARS =
   "…ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿĀāĂăĄąĆćĒēĘęĪīıŁłŃńŌōŐőŒœŚśŠšŪūŰűŸŹźŻżŽžȘșȚțẞ¡¿«»€°";
 
 const codeUnitToOrdinal = new Map<number, number>();
@@ -18,4 +18,11 @@ export function deckerOrdinalForCharCode(codeUnit: number): number {
     return codeUnit;
   }
   return codeUnitToOrdinal.get(codeUnit) ?? 255;
+}
+
+/** ASCII printables plus Decker extras — the charset a strike importer walks. */
+export function defaultRasterCharset(): string {
+  let chars = "";
+  for (let code = 32; code < 127; code++) chars += String.fromCharCode(code);
+  return chars + DROM_CHARS;
 }
