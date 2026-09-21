@@ -101,7 +101,6 @@ export class ProjectService {
     await e.disk.mkdir(path + "/dist");
     await e.disk.write(path + "/mockintosh.json", encoder.encode(JSON.stringify({id, title, entry: "src/index.tsx", sdkVersion: "3"}, null, 2)), 0);
     await e.disk.write(path + "/src/index.tsx", encoder.encode(sourceForTemplate(template, id, title)), 0);
-    await e.disk.write(path + "/README.md", encoder.encode("Edit src/index.tsx, build, then install. Restore switches to the previous successful build.\n"), 0);
     return e.disk.stat(path);
   }
   private async snapshot(path: string, e: Execution) {

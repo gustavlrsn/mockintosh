@@ -11,16 +11,16 @@ import { openControlPanel } from "../../../apps/finder/ControlPanel";
 export const APPLE_MENU_LABEL = "\uF8FF";
 
 /** The Finder's About item; the About box it opens is a Finder window. */
-export const ABOUT_THIS_MACINTOSH_LABEL = "About This Macintosh…";
+export const ABOUT_THIS_COMPUTER_LABEL = "About This Computer…";
 
 /**
  * The first Apple-menu item belongs to the frontmost application: "About
- * <app>…", or "About This Macintosh…" when that is the Finder. It is never
+ * <app>…", or "About This Computer…" when that is the Finder. It is never
  * disabled — an app that declares no `about` gets the standard OS box.
  */
 export function aboutMenuItem(os: OSServices): MenubarActionItem {
   const appId = getActiveAppId();
-  if (appId === FINDER_APP_ID) return { label: ABOUT_THIS_MACINTOSH_LABEL, onClick: () => openAboutBox(os) };
+  if (appId === FINDER_APP_ID) return { label: ABOUT_THIS_COMPUTER_LABEL, onClick: () => openAboutBox(os) };
   const app = getApp(appId);
   return {
     label: `About ${app?.title ?? appId}…`,

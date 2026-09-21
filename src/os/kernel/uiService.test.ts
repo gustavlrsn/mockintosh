@@ -7,7 +7,7 @@ import { FINDER_APP_ID, getActiveWindowId, getWindows } from "../state";
 import { InMemoryBackend } from "@mockintosh/fs";
 import { Cancellation } from "./cancellation";
 import type { InspectionNode } from "@mockintosh/ui";
-import { ABOUT_THIS_MACINTOSH_LABEL, APPLE_MENU_LABEL } from "./menus";
+import { ABOUT_THIS_COMPUTER_LABEL, APPLE_MENU_LABEL } from "./menus";
 import { ABOUT_BOX_TITLE } from "../../../apps/finder/AboutBox";
 import { CONTROL_PANEL_TITLE } from "../../../apps/finder/ControlPanel";
 describe("visible kernel UI operations", () => {
@@ -296,9 +296,9 @@ describe("visible kernel UI operations", () => {
   });
   it("opens Finder-owned About and Control Panel windows once from the Apple menu", async () => {
     const appleItems = async () => ((await invoke("menu")) as {label: string; items: {label?: string}[]}[]).find(m => m.label === APPLE_MENU_LABEL)!.items;
-    expect((await appleItems())[0].label).toBe(ABOUT_THIS_MACINTOSH_LABEL);
-    await invoke("menu", { menu: APPLE_MENU_LABEL, item: ABOUT_THIS_MACINTOSH_LABEL });
-    await invoke("menu", { menu: APPLE_MENU_LABEL, item: ABOUT_THIS_MACINTOSH_LABEL });
+    expect((await appleItems())[0].label).toBe(ABOUT_THIS_COMPUTER_LABEL);
+    await invoke("menu", { menu: APPLE_MENU_LABEL, item: ABOUT_THIS_COMPUTER_LABEL });
+    await invoke("menu", { menu: APPLE_MENU_LABEL, item: ABOUT_THIS_COMPUTER_LABEL });
     const aboutBoxes = getWindows().filter(w => w.title === ABOUT_BOX_TITLE);
     expect(aboutBoxes).toHaveLength(1);
     expect(aboutBoxes[0]).toMatchObject({ appId: FINDER_APP_ID, kind: "dialog", width: 343, height: 160 });
@@ -310,7 +310,7 @@ describe("visible kernel UI operations", () => {
     expect(panels[0]).toMatchObject({ appId: FINDER_APP_ID, kind: "document", scrollable: true, resizable: true });
     expect(getActiveWindowId()).toBe(panels[0].id);
     // The About box stays the Finder's while a Finder window is frontmost.
-    expect((await appleItems())[0].label).toBe(ABOUT_THIS_MACINTOSH_LABEL);
+    expect((await appleItems())[0].label).toBe(ABOUT_THIS_COMPUTER_LABEL);
   });
   it("names the Apple menu's first item after the frontmost app and opens its About box", async () => {
     const CustomAbout = () => null;
@@ -336,7 +336,7 @@ describe("visible kernel UI operations", () => {
     // Back on the Finder, the item is the Finder's again.
     for (const w of [...getWindows()]) os.services.closeWindow(w.id);
     expect(getWindows()).toHaveLength(0);
-    expect(await firstLabel()).toBe(ABOUT_THIS_MACINTOSH_LABEL);
+    expect(await firstLabel()).toBe(ABOUT_THIS_COMPUTER_LABEL);
   });
   it("captures exact white and black desktop pixels", async () => {
     for (const [value, expected] of [["white", 0], ["black", 1]] as const) {

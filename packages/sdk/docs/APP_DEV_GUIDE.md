@@ -184,7 +184,7 @@ function MyView() {
 
 ### About boxes
 
-The first Apple-menu item is always the frontmost app's: "About My App…" while your window is active, "About This Macintosh…" when the Finder is. You do not add it yourself. By default it opens a standard OS About box with your icon and title; declare `about` on `defineApp` to add a version and description, or supply your own component:
+The first Apple-menu item is always the frontmost app's: "About My App…" while your window is active, "About This Computer…" when the Finder is. You do not add it yourself. By default it opens a standard OS About box with your icon and title; declare `about` on `defineApp` to add a version and description, or supply your own component:
 
 ```tsx
 export default defineApp({
