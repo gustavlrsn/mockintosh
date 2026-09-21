@@ -1,5 +1,8 @@
 import type { JSX } from "@mockintosh/ui";
 import { Show } from "solid-js";
+import { createToggle } from "../primitives/toggle";
+
+const WELL = 12;
 
 export interface CheckboxProps {
   name?: string;
@@ -10,25 +13,17 @@ export interface CheckboxProps {
 }
 
 export function Checkbox(props: CheckboxProps): JSX.Element {
-  const toggle = () => {
-    if (!props.disabled) props.onChange(!props.checked);
-  };
+  const toggle = createToggle(props);
 
   return (
     <box
-      semantic={{ name: props.name, role: "checkbox", value: String(props.checked), enabled: !props.disabled }}
+      {...toggle.rootProps()}
       flexDirection="row"
       gap={4}
       alignItems="center"
       alignSelf="flex-start"
-      tabIndex={props.disabled ? undefined : 0}
-      cursor={props.disabled ? "default" : "pointer"}
-      onClick={toggle}
-      onKeyDown={(key: string) => {
-        if (key === " " || key === "Enter") toggle();
-      }}
     >
-      <box width={12} height={12} borderColor={1} borderWidth={1} background={0}>
+      <box width={WELL} height={WELL} borderColor={1} borderWidth={1} background={0}>
         <Show when={props.checked}>
           <text font="body" color={1} align="center" verticalAlign="middle" nowrap>
             {"\u2713"}
