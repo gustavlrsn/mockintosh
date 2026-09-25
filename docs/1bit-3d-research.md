@@ -138,9 +138,9 @@ The engine does **not** own: windowing, menubar, filesystem, audio (until a game
 
 Write `@mockintosh/qd3d` in **TypeScript**. Not a second language, not WASM, not a PlayDators C port.
 
-PlayDators is C because the Playdate *is* a C machine (180 MHz, no JS). Mockintosh’s hosts today are a JS realm: Vite apps, the in-OS builder (TS/TSX only — [buildPolicy](../src/shared/buildPolicy.ts)), Node headless tests, and the planned embedded path is “validate an embedded JS engine” with native reserved for camera/scan/print. [physical-product-plan.md](physical-product-plan.md). The engine has to live in that realm or games cannot import it.
+PlayDators is C because the Playdate *is* a C machine (180 MHz, no JS). Mockintosh’s hosts are a JS realm: Vite apps, the in-OS builder (TS/TSX only — [buildPolicy](../src/shared/buildPolicy.ts)), and Node headless tests. The engine has to live in that realm or games cannot import it.
 
-A few hundred lit tris into a ~400×250 raster is a desktop-JS budget if the inner loop is a scanline stamp on a `Uint8Array`, not `setPixel`. Playdate needed C to hit 45 fps on a microcontroller; we need C only if we *measure* a miss, or if a future ESP32 platform wants the same rasterizer as firmware.
+A few hundred lit tris into a ~400×250 raster is a desktop-JS budget if the inner loop is a scanline stamp on a `Uint8Array`, not `setPixel`. Playdate needed C to hit 45 fps on a microcontroller; we need C only if we *measure* a miss.
 
 Keep the rasterizer C-shaped so that rewrite is possible: `drawTriangle(buffer, rowstride, p0, p1, p2, pattern)` — PlayDators’ `draw_tri_pattern` signature, no Solid, no classes. Scene/camera/game stay TypeScript forever.
 
@@ -150,7 +150,7 @@ Keep the rasterizer C-shaped so that rewrite is possible: `drawTriangle(buffer, 
 | C → WASM (Emscripten / PlayDators) | later, inner loop only | possible (they already ship a web build); second toolchain; copy-out to `RasterSurface` every frame; SDK builder cannot compile C |
 | Rust / Zig → WASM | no | same WASM tax, no in-repo culture |
 | AssemblyScript | no | looks like TS, is not; still WASM |
-| C as the whole engine + TS glue | only if ESP32 firmware *is* the engine | Mini3D+ Lua shape; fights “the OS is JS” until that product exists |
+| C as the whole engine + TS glue | no | Mini3D+ Lua shape; fights “the OS is JS” |
 
 Do not start in C “for speed.” Start in TS, measure slice 1 at 30 Hz, extract the scanline to WASM/native if it fails. That is the same rule as QuickDraw: the hot blit is allowed to be ugly; the package boundary is not.
 
@@ -417,7 +417,7 @@ C++ middleware. The GL wrapper is optional; official docs show using Magnum math
 
 It is not a 1-bit engine. Colour is **RGB565 only** (native to ST7796 / ILI9488). A 320×240 colour + Z pair is already ~300 KB; a 512×342 RGB565 screen is ~350 KB before depth — sixteen times our packed `BitMap`. Shading is Saturn-class (Gouraud, Phong, affine textures, bloom, water). Dither is screen-door / noise for *transparency in colour*, not a lighting ramp into black and white. Using Jet and then Atkinson-ing the 565 buffer is Approach 3 in C: a photograph of Wipeout in a Macintosh window.
 
-The library shape is exactly `libmockbits` ([c-firmware-ts-os.md](c-firmware-ts-os.md)). The scene/material API is Mini3D+-sized and lives in C++, which fights a TS `qd3d` and a C ABI for XS/WASM.
+The library shape is a C buffer you fill and a host that presents it. The scene/material API is Mini3D+-sized and lives in C++, which fights a TS `qd3d`.
 
 License is **AGPL-3.0-or-later** plus a paid commercial grant. Linking Jet into firmware or a WASM module means the linking application (the OS image) is AGPL unless CubeCoders sells a license. [Jet README](https://github.com/CubeCoders/Jet). PlayDators’ own code is Unlicense. Do not vendor Jet. Steal the *host contract* (you own present; we fill bits) and the S3 budget numbers; keep PlayDators as the 1-bit look.
 
@@ -431,9 +431,9 @@ That is better *measurement* than Jet, and a better *license* than Jet. It is st
 
 Steal three facts, not the library:
 
-1. **FPU is load-bearing.** A float rasterizer is dead on C6. We already dropped the Waveshare C6 as the OS host for SRAM ([stackchan-firmware-plan.md](stackchan-firmware-plan.md)); a3d independently kills it as a 3D coprocessor unless the fill is integer (Jet / PlayDators), not float (a3d).
+1. **FPU is load-bearing.** A float rasterizer is dead on C6. a3d kills it as a 3D coprocessor unless the fill is integer (Jet / PlayDators), not float (a3d).
 2. **Viewport beats triangle count.** Cost is per covered pixel. 512×342 is ~2.3× 240×320; a Spectre window that covers a third of the screen is cheaper than a character that fills it. Budget games by ink, not by mesh size.
-3. **Tile present.** a3d’s strip buffers are the same idea as CoreS3 `present.c` (packed 1-bit → RGB565 row expander, no full 565 frame). If Path B ever rasterizes natively, write packed bits (or 1-bit strips) into the existing 22 KB `BitMap`. Do not allocate a colour screen “just this once.”
+3. **Tile present.** a3d’s strip buffers avoid a full colour frame. If a rasterizer ever leaves JavaScript, write packed bits (or 1-bit strips) into the existing 22 KB `BitMap`. Do not allocate a colour screen “just this once.”
 
 Do not vendor a3d. Apache-2.0 would let us; the look and the ABI would not.
 

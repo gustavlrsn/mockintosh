@@ -10,7 +10,7 @@ An app is **SDK-clean** when its source compiles under the in-OS project compile
 - No banned host globals: `alert`, `confirm`, `prompt`, `document`, `localStorage`, `sessionStorage`, `indexedDB`, `XMLHttpRequest`.
 - Typechecks against `lib.es2022` only — no DOM library. So `window`, `navigator`, `Image`, `OffscreenCanvas`, `HTMLVideoElement`, `ImageData`, `URL.createObjectURL`, `requestAnimationFrame`, `performance` and `crypto.subtle` fail the typecheck even though only some of them are on the banned list. Timers (`setTimeout`, `setInterval`) are host globals the core assumes (`core-env.d.ts`) and are fine.
 
-This is the same bar the embedded build will impose: a microcontroller with an e-paper panel has no DOM. "SDK-clean" and "runs on the device" are the same property, which is why the fixes below are SDK services rather than compiler exemptions.
+The in-OS compiler has no DOM. That is why the fixes below are SDK services rather than compiler exemptions.
 
 Two distribution paths exist today and only one enforces this bar. Apps installed from the App Store are built externally with Vite and can use the DOM freely at runtime (that is what the `browser` capability is for). Apps built inside the OS (Source Editor, Terminal, ChatGippity) go through `validateSources` + `typecheck` and cannot. The audit below uses the stricter bar because it is the one that matters for the agent, for the source volume, and for portability.
 
@@ -111,7 +111,7 @@ export interface AppContext {
 }
 ```
 
-On the web platform these wrap `createImageBitmap`/`OffscreenCanvas`, `<video>`, and `getUserMedia` respectively, in `src/platform/web/`. The headless platform omits them, so tests that need them use a fixture platform. An embedded platform supplies a hardware decoder or nothing.
+On the web platform these wrap `createImageBitmap`/`OffscreenCanvas`, `<video>`, and `getUserMedia` respectively, in `src/platform/web/`. The headless platform omits them, so tests that need them use a fixture platform.
 
 Pixel conversion moves into the SDK as pure functions (either `packages/sdk/src/raster.ts` or `@mockintosh/ui`, which already owns `Sprite` and `Ink`):
 

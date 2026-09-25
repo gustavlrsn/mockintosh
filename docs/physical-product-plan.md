@@ -6,7 +6,7 @@ Latest commissioning package: [Prototype review and budgetary estimate](prototyp
 
 Detailed follow-up: [Custom Caster-derived controller](custom-epaper-controller.md). At the proposed logical resolution, packed SPI is sufficient on paper; a new FPGA framebuffer input and independent panel scan generator are required. Retain external pixel-state memory for the first prototype.
 
-### Follow-up: six-inch panel and ESP32 host
+### Follow-up: six-inch panel
 
 Latest preference: 4–6 inches, native resolution ideally close to 512×346, and about 30 fps responsiveness is sufficient. Treat 30 fps as an incoming-content/motion target, distinct from a 33 ms fully settled optical transition. A 512×346 1bpp frame is 22,144 bytes; 30 fps is 664,320 bytes/s before overhead. Existing repo examples use 512×342; final logical height remains to be chosen.
 
@@ -14,7 +14,7 @@ Search found a close resolution match, Waveshare 4.37-inch 512×368, but it is a
 
 Retain raw parallel candidates: 4.7-inch 960×540, or a qualified 6-inch 1024×758 panel. The latter could display 512×346 at exact 2× scaling, occupying 1024×692 with 66 physical rows remaining. This is a layout advantage, not verified 30 fps performance or guaranteed Modos compatibility. No panel near native 512×346 with demonstrated 30 fps was verified in this search.
 
-The user considers a 6-inch panel attractive. Treat the Modos 6-inch kit as the preferred reference size. Investigate ESP32-P4 as the application processor for an integrated FPGA design: its camera/display peripherals and greater processing capacity make it a stronger candidate than S3 for this workload. This is a feasibility proposal, not verified Modos compatibility. [ESP32-P4 datasheet](https://documentation.espressif.com/esp32-p4_datasheet_en.html)
+The user considers a 6-inch panel attractive. Treat the Modos 6-inch kit as the preferred reference size. Mockintosh stays in the browser; an ESP32 is not the application processor for the shell.
 
 At the kit's 1448×1072 resolution, a packed 1bpp frame is 194,032 bytes. Full-image payload is 5.82 MB/s at 30 fps, 11.64 MB/s at 60 fps and 14.55 MB/s at 75 fps, before overhead. These rates are for a custom packed transport; the stock video connection does not carry this compact format. Lower-resolution rendering scaled in the FPGA could reduce host bandwidth, but requires additional controller implementation. Camera/application cadence can differ from the controller's ongoing scan cadence.
 
@@ -24,7 +24,7 @@ The existing Glider video inputs are not a plug-and-play ESP32 connection. Candi
 
 Build a self-contained monochrome computer with a camera and thermal printer. Smooth camera preview and animation are the priority; user-provided selling-price range is USD 100–999. Batch size, dimensions, battery requirements, input method and sales markets remain open.
 
-Recommendation: benchmark a Modos 6-inch display kit with the existing browser version of Mockintosh first. Develop a lower-cost ESP32-S3/parallel-display prototype as a comparison, not as an assumed equivalent. Commit to a custom PCB after measuring the desired experience and receiving production quotes. The printer, paper path and power system must be included in this early prototype.
+Recommendation: benchmark a Modos 6-inch display kit with the existing browser version of Mockintosh first. Commit to a custom PCB after measuring the desired experience and receiving production quotes. The printer, paper path and power system must be included in this early prototype.
 
 The initial baseline uses a Linux HDMI host because this is a straightforward interface to the existing Modos kit and existing browser camera code. This is a prototype choice, not a commitment to Linux or HDMI in production.
 
@@ -33,12 +33,12 @@ The initial baseline uses a Linux HDMI host because this is a straightforward in
 Inspected current source, not only README (which describes an older React implementation):
 
 - `src/platform/types.ts` separates display, input, timing, storage and printer transport. Display exposes `present(screen): void` and optional host-owned bitmap memory.
-- `src/platform/web/` and `src/platform/headless/` exist. No ESP32 platform implementation was found in this checkout. This does not rule out working code elsewhere.
+- `src/platform/web/` and `src/platform/headless/` exist. There is no microcontroller platform, and the shell is not built for one.
 - `src/os/boot.ts` redraws dirty frames and has cursor and zoom-animation paths. E-paper scheduling must cover all presentation paths.
 - `packages/print/src/escpos.ts` encodes packed raster images, paper feed and cut commands. It bands raster commands but assembles the encoded job in memory. Actual printer command support still needs verification.
 - `packages/print/src/transport.ts` provides a suitable boundary for native UART/USB transport.
 - `apps/photobooth/dither.ts` uses HTMLVideoElement, OffscreenCanvas and browser scaling. The native camera path is not implemented by merely declaring a camera capability.
-- `src/platform/core-env.d.ts` describes host globals needed by an embedded JS engine. Compatibility, heap consumption, garbage collection and frame timing require on-device validation.
+- `src/platform/core-env.d.ts` lists the host globals the DOM-free core assumes in the browser and in Node. The OS itself is not a microcontroller image.
 
 At 1bpp, 400×300 needs 15,000 bytes and 960×540 needs 64,800 bytes before additional buffers. Small framebuffer size does not establish the memory budget of the JS runtime, applications, camera capture and display controller.
 
@@ -47,8 +47,8 @@ At 1bpp, 400×300 needs 15,000 bytes and 960×540 needs 64,800 bytes before addi
 | Path | Components | Purpose | Decision condition |
 |---|---|---|---|
 | A — baseline | Linux HDMI host, Modos 6-inch kit, compatible camera, printer controller module | Fastest way to evaluate the intended experience with existing browser software | Proceed if measured e-paper motion and contrast satisfy the user |
-| B — cost reduction | ESP32-S3 module with PSRAM, raw parallel e-paper and power circuit, FastEPD/EPDiy, DVP camera, serial printer | Compact MCU product with fewer costly display components | Choose only if full workload meets the same agreed acceptance test |
-| C — integrated fast display | Application processor or ESP32-S3, FPGA running adapted Caster, memory, panel power circuit, qualified parallel panel | Preserve Modos-style update scheduling while removing unnecessary monitor features | Commission after A works and quotes justify engineering expense |
+| B — closed | ESP32-S3 as the computer that runs the shell | Compact MCU product | Closed. The full OS does not run on an ESP32. |
+| C — integrated fast display | Host computer, FPGA running adapted Caster, memory, panel power circuit, qualified parallel panel | Preserve Modos-style update scheduling while removing unnecessary monitor features | Commission after A works and quotes justify engineering expense |
 
 An integrated display board is not simply an ESP32 board with a different connector. Modos uses per-pixel transition state and timers; FastEPD's ordinary differential-update loop completes a sequence of passes. A high scan/input rate does not mean black/white optical transitions settle at that rate. [S1–S3]
 
@@ -101,7 +101,7 @@ The roll diameter, roll door, paper exit, tear edge, printer mounting and heat c
 2. Add a native camera service boundary for start/stop/capture/frame delivery. Keep device-specific capture and scaling out of Photo Booth's UI.
 3. Make display scheduling consume the newest available image instead of building a queue of stale frames. Define buffer ownership while hardware reads it; never mutate a buffer being scanned without an explicit synchronization design.
 4. Add display-mode/capability information and optional changed-region hints at the platform boundary. UI drawing remains independent of panel waveforms.
-5. For the ESP32 path, validate an embedded JS engine and bundle with the complete shell, fonts, file system and target apps. Keep time-critical scanning, camera transfer and printer transport in native drivers. Measure heap high-water mark and garbage-collection pauses under combined load.
+5. Keep the shell in the browser. An ESP32 is a peripheral (display, camera, or printer transport), not a host that boots Mockintosh.
 6. Make printer output bounded in memory, handle error/status feedback, and test the selected module's command dialect.
 7. Provide recoverable firmware updates, a recovery boot path, versioned settings, factory test mode and serial-number provisioning before pilot assembly.
 

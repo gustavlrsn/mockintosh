@@ -1,7 +1,7 @@
 /**
  * The host globals the OS core assumes beyond ECMAScript itself.
  *
- * Every JavaScript engine we target (browsers, Node, Moddable XS) provides
+ * Every JavaScript engine we target (browsers and Node) provides
  * these; an engine that lacks one (QuickJS has no timers or text codecs of
  * its own) must polyfill it before `bootOS()`. Anything not listed here
  * must come through the `Platform` interface — this file is the whole

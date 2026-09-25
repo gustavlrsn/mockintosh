@@ -122,8 +122,8 @@ export interface Platform {
   browser?: BrowserService;
   /**
    * Load a JavaScript module by URL, for installing third-party apps. Absent
-   * on hosts that only run code linked into the firmware (an embedded build),
-   * where the App Store then cannot install anything.
+   * when the host cannot load modules at runtime, where the App Store then
+   * cannot install anything.
    */
   loadModule?: ModuleLoader;
   /** Load persisted bundled ESM through this host's shared runtime. */
@@ -132,9 +132,8 @@ export interface Platform {
   /** Read-only OS source volume (`/system/source`). Absent = no source volume. */
   source?: SourceProvider;
   /**
-   * Reboot this machine. The web host reloads the page; a firmware host
-   * would jump to ROM. Absent on headless tests — `eraseDisk` then
-   * re-bootstraps in place.
+   * Reboot this machine. The web host reloads the page. Absent on headless
+   * tests — `eraseDisk` then re-bootstraps in place.
    */
   reload?(): void;
 }

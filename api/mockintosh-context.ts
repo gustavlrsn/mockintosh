@@ -19,7 +19,7 @@ Mockintosh is a mock operating system in the style of an early Macintosh (1984-e
 
 ### How is it built?
 - **OS core:** TypeScript, DOM-free. A Solid.js custom renderer (\`@mockintosh/ui\`) lays out a box/text/image/raster/bitmap tree with flexbox and paints it through a TypeScript port of QuickDraw (\`@mockintosh/quickdraw\`). A virtual file system (\`@mockintosh/fs\`) holds the user's files.
-- **Platforms:** The core boots on a \`Platform\` (display, input, clock, storage, optional clipboard/printer/network/camera). The browser is one platform; a headless in-memory platform runs the whole OS in Node for tests; an embedded build (microcontroller + e-paper) is planned.
+- **Platforms:** The core boots on a \`Platform\` (display, input, clock, storage, optional clipboard/printer/network/camera). The browser is one platform; a headless in-memory platform runs the whole OS in Node for tests. The OS runs in the browser, not on a microcontroller.
 - **Frontend build:** Vite. **Backend:** Vercel Functions in the same repo (e.g. /api/chat, /api/spotify/*). **Deployment:** Vercel. The running OS source is mounted at \`/system/source\`.
 - **Who built it:** Open source at https://github.com/gustavlrsn/mockintosh. Say it was built by the Mockintosh project / community and point users to the repo for contributors and setup.
 

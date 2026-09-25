@@ -52,11 +52,11 @@ Spartan-6 LX16 + existing DDR3 is the reference baseline and reduces porting unc
 
 ## First engineering contract
 
-Proposed partition: camera → ESP32-P4 (Mockintosh, image conversion) → packed SPI → FPGA (framebuffer reader, scaling, Caster) → raw parallel panel. The FPGA has external state memory and a sequenced panel power supply. P4 also controls the thermal printer through its own data connection; provide a power branch sized for printer current peaks.
+Proposed partition: camera and the browser build of Mockintosh stay on the host computer; a later board may receive packed frames. The FPGA (framebuffer reader, scaling, Caster) drives the raw parallel panel. The FPGA has external state memory and a sequenced panel power supply.
 
 Start with a P4 development board and separate controller board with a replaceable panel adapter. Combine the boards after display qualification. The [P4 datasheet](https://documentation.espressif.com/esp32-p4_datasheet_en.html) documents general-purpose SPI and camera/image-processing peripherals. A dedicated SPI bus plus ready/interrupt and reset is a reasonable proposed interface; match electrical levels to the selected FPGA bank.
 
-The inspected Mockintosh checkout has a bitmap `present` boundary suitable for a native adapter, but its inspected implementations are web/headless. Photo-booth conversion uses browser video/canvas APIs. Native camera acquisition, monochrome conversion and DMA transport need implementation and measurement with the selected runtime. Define framebuffer ownership so rendering cannot overwrite an in-flight transfer. Printer byte transport exists, but production firmware needs fault/status handling appropriate to the chosen module.
+The inspected Mockintosh checkout has a bitmap `present` boundary in the browser and headless hosts. Photo-booth conversion uses browser video and canvas APIs. The shell stays there. Printer byte transport exists, but a production module still needs fault and status handling.
 
 Commission the packet input, framebuffer/scaler wrapper, baseline FPGA integration and measured panel demonstration before final combined PCB design. Acceptance: repeated 512×346 packed frames at 30 fps under concurrent camera and print load; no tearing or underrun; quantified camera-to-visible latency and ink settling/ghosting; safe power sequencing and host reset behavior; measured rail peaks, sustained memory bandwidth and power; exact reproducible source/toolchain and synthesis/timing reports. Only then compare a cheaper FPGA/memory port against the known working baseline.
 
