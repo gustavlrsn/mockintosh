@@ -48,11 +48,47 @@ export function patternBytes(hex: string): Uint8Array {
   return out;
 }
 
+const SOLID_HEX = {
+  white: "0000000000000000",
+  black: "ffffffffffffffff",
+  checker: "aa55aa55aa55aa55",
+} as const;
+
+export function patternHex(bytes: Uint8Array): string {
+  let hex = "";
+  for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
+  return hex;
+}
+
+/** 8 bytes painted for a persisted desktop preference. Unknown values are the checker. */
+export function desktopPatternBytes(value: string): Uint8Array {
+  if (value === "white" || value === "black" || value === "checker") return patternBytes(SOLID_HEX[value]);
+  const custom = /^pat:([0-9a-f]{16})$/.exec(value);
+  if (custom) return patternBytes(custom[1]);
+  const match = /^ppat:(-?\d+)$/.exec(value);
+  if (match) {
+    const rec = desktopPatternRecord(Number(match[1]));
+    if (rec) return patternBytes(rec.pat);
+  }
+  return patternBytes(SOLID_HEX.checker);
+}
+
+/** Named solid when the tile is one of those; otherwise `pat:<16 hex>`. */
+export function desktopPatternToken(bytes: Uint8Array): string {
+  const hex = patternHex(bytes);
+  if (hex === SOLID_HEX.checker) return "checker";
+  if (hex === SOLID_HEX.white) return "white";
+  if (hex === SOLID_HEX.black) return "black";
+  return `pat:${hex}`;
+}
+
 /** Ink or 8-byte pat for a persisted desktop preference. Unknown ids fall back to checker. */
 export function desktopFill(value: string): Fill {
   if (value === "white") return 0;
   if (value === "black") return 1;
   if (value === "checker") return "checker";
+  const custom = /^pat:([0-9a-f]{16})$/.exec(value);
+  if (custom) return patternBytes(custom[1]);
   const match = /^ppat:(-?\d+)$/.exec(value);
   if (!match) return "checker";
   const rec = desktopPatternRecord(Number(match[1]));

@@ -615,6 +615,35 @@ describe("bootOS on the headless platform", () => {
   });
 });
 
+describe("host display resize", () => {
+  it("adopts a new framebuffer when the host reports a new logical size", async () => {
+    vi.useFakeTimers();
+    const platform = createHeadlessPlatform({ width: 80, height: 40 });
+    const listeners = new Set<(width: number, height: number) => void>();
+    platform.hostDisplay = {
+      resolutions: [{ id: "classic", label: "80 × 40", width: 80, height: 40 }],
+      state: () => ({ resolution: "classic", width: 80, height: 40, scale: "auto", maxScale: 1 }),
+      setResolution() {},
+      setScale() {},
+      onResize(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      subscribe: () => () => {},
+    };
+    const os = await bootOS(platform);
+    vi.advanceTimersByTime(1000);
+    platform.tick();
+    for (const listener of listeners) listener(120, 50);
+    platform.tick();
+    expect(os.services.resolution.width).toBe(120);
+    expect(os.services.resolution.height).toBe(50);
+    expect(platform.lastFrame()).toHaveLength(120 * 50);
+    os.shutdown();
+    vi.useRealTimers();
+  });
+});
+
 /** Layout constants mirrored from Finder.solid — desktop icons without a stored position. */
 const DESKTOP_ICON_CELL_W = 64;
 const DESKTOP_ICON_CELL_H = 64;

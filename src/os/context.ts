@@ -19,7 +19,7 @@ import type {
   VideoService,
   WindowSpec,
 } from "@mockintosh/sdk";
-import type { PlatformEnv, PlatformScheduler } from "../platform/types";
+import type { HostDisplay, PlatformEnv, PlatformScheduler } from "../platform/types";
 import type { CapabilitySet } from "./capabilities";
 import type { SystemPrinters } from "./printers/manager";
 
@@ -44,6 +44,8 @@ export interface OSServices {
   sprites: SpriteRegistry;
   fs: FileSystem;
   resolution: { width: number; height: number };
+  /** Screen size and zoom, when this machine can change them after boot. */
+  hostDisplay?: HostDisplay;
   menubarHeight: number;
   env: PlatformEnv;
   scheduler: PlatformScheduler;

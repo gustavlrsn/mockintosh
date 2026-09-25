@@ -62,12 +62,12 @@ try {
     const nodes = await call("inspect", {
       window: panel.id
     });
-    assert(nodes.some((n: any) => n.name === "desktop-pattern-black"));
+    assert(nodes.some((n: any) => n.name === "desktop-pattern-prev"));
     await call("activate", {
       window: panel.id
     });
-    await call("click", {
-      name: "desktop-pattern-black",
+    for (let i = 0; i < 3; i++) await call("click", {
+      name: "desktop-pattern-prev",
       window: panel.id
     });
     assert.equal((await call("desktop_pattern")).pattern, "black");

@@ -61,9 +61,10 @@ describe("visible kernel UI operations", () => {
     await openControlPanel();
     const window = controlPanelWindow();
     const nodes = await invoke("inspect", {window: window.id}) as InspectionNode[];
-    expect(nodes.some(node => node.name === "desktop-pattern-white")).toBe(true);
-    expect(nodes.some(node => node.name === "desktop-pattern-ppat-132")).toBe(true);
-    await invoke("click", {name: "desktop-pattern-white", window: window.id});
+    expect(nodes.some(node => node.name === "desktop-pattern-next")).toBe(true);
+    expect(nodes.some(node => node.name === "control-panel-time")).toBe(true);
+    // Black is PAT# index 0; white is index 19.
+    for (let i = 0; i < 19; i++) await invoke("click", {name: "desktop-pattern-next", window: window.id});
     os.shutdown();
     await reboot();
     expect(await invoke("desktop_pattern")).toMatchObject({pattern: "white", diagnostic: ""});
@@ -122,7 +123,7 @@ describe("visible kernel UI operations", () => {
   it("provides readable UI shell output while retaining direct and JSON snapshots", async () => {
     expect(await invoke("run_shell", { command: `menu ${APPLE_MENU_LABEL} 'Control Panel'; render` })).toMatchObject({ stdout: "", exitCode: 0 });
     expect(await invoke("run_shell", { command: "apps; windows; inspect; menu" })).toMatchObject({
-      stdout: expect.stringContaining("desktop-pattern-black"), exitCode: 0,
+      stdout: expect.stringContaining("desktop-pattern-next"), exitCode: 0,
     });
     const listing = await invoke("run_shell", { command: "windows" }) as { stdout: string };
     expect(listing.stdout).toContain("WINDOW");
@@ -137,23 +138,17 @@ describe("visible kernel UI operations", () => {
   it("operates a named Control Panel setting and captures an idle frame", async () => {
     await openControlPanel();
     const nodes = (await invoke("inspect")) as InspectionNode[];
-    expect(nodes.some(n => n.name === "desktop-pattern-black")).toBe(true);
-    expect(nodes.some(n => n.name === "desktop-pattern-ppat-132")).toBe(true);
-    await invoke("click", {
-      name: "desktop-pattern-black"
-    });
+    expect(nodes.some(n => n.name === "desktop-pattern-prev")).toBe(true);
+    expect(nodes.some(n => n.name === "desktop-pattern-cell-0-0")).toBe(true);
+    for (let i = 0; i < 3; i++) await invoke("click", { name: "desktop-pattern-prev" });
     await os.services.fs.flush();
     expect(await invoke("desktop_pattern")).toMatchObject({pattern: "black"});
-    await invoke("click", {
-      name: "desktop-pattern-ppat-132"
-    });
+    await invoke("click", { name: "desktop-pattern-cell-0-0" });
     await os.services.fs.flush();
-    expect(await invoke("desktop_pattern")).toMatchObject({pattern: "ppat:132"});
-    await invoke("click", {
-      name: "desktop-pattern-black"
-    });
+    expect(await invoke("desktop_pattern")).toMatchObject({pattern: "pat:7fffffffffffffff"});
+    await invoke("click", { name: "desktop-pattern-next" });
     await os.services.fs.flush();
-    expect(await invoke("desktop_pattern")).toMatchObject({pattern: "black"});
+    expect(await invoke("desktop_pattern")).toMatchObject({pattern: "pat:ddff77ffddff77ff"});
     const frame = (await invoke("screenshot")) as {
       bytes: number[];
       width: number;
@@ -194,7 +189,7 @@ describe("visible kernel UI operations", () => {
     backend.delay = true;
     let completed = false;
     const click = invoke("click", {
-      name: "desktop-pattern-black"
+      name: "desktop-pattern-prev"
     }).then(() => {
       completed = true;
     });
@@ -203,7 +198,7 @@ describe("visible kernel UI operations", () => {
     release?.();
     await click;
     expect(acknowledgedBeforeWrite).toBe(false);
-    expect(os.services.desktopSettings!.pattern()).toBe("black");
+    expect(os.services.desktopSettings!.pattern()).toBe("pat:dd77dd77dd77dd77");
   });
   it("keeps the Terminal command field visible and accepts named typing", async () => {
     await invoke("open", {
@@ -226,7 +221,7 @@ describe("visible kernel UI operations", () => {
   it("rejects inactive and stale controls", async () => {
     await openControlPanel();
     const first = controlPanelWindow();
-    const node = ((await invoke("inspect")) as InspectionNode[]).find(n => n.name === "desktop-pattern-black")!;
+    const node = ((await invoke("inspect")) as InspectionNode[]).find(n => n.name === "desktop-pattern-next")!;
     await invoke("open", {
       app: "terminal"
     });
@@ -289,7 +284,7 @@ describe("visible kernel UI operations", () => {
       code: "permission"
     });
     await expect(invoke("click", {
-      name: "desktop-pattern-black"
+      name: "desktop-pattern-next"
     })).rejects.toMatchObject({
       code: "permission"
     });

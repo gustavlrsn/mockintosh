@@ -1,4 +1,4 @@
-import {createRoot} from "solid-js";
+import {createRoot, createStore, flush} from "solid-js";
 import SourceEditor from "../../apps/SourceEditor";
 import { registerProjects } from "./projects";
 import { AppInstances } from "./instances";
@@ -106,12 +106,12 @@ function bootTrace(message: string): void {
 export async function bootOS(platform: Platform, options?: BootOptions): Promise<BootedOS> {
   let stopped = false;
   const { display, scheduler } = platform;
-  const resolution = { width: display.width, height: display.height };
+  const [resolution, setResolutionSize] = createStore({ width: display.width, height: display.height });
 
   // --- QuickDraw framebuffer ---
   bootTrace("qd");
   InitGraf(display.framebuffer ?? newBitMap(display.width, display.height));
-  const screen = qd.screenBits;
+  let screen = qd.screenBits;
   const present = () => { if (!stopped) display.present(screen); };
 
   InitCursor();
@@ -197,6 +197,7 @@ export async function bootOS(platform: Platform, options?: BootOptions): Promise
     sprites,
     fs,
     resolution,
+    hostDisplay: platform.hostDisplay,
     menubarHeight: MENUBAR_HEIGHT,
     env: platform.env,
     scheduler: platform.scheduler,
@@ -398,6 +399,21 @@ export async function bootOS(platform: Platform, options?: BootOptions): Promise
   // --- Cursor position (plain vars — not signals, cursor drawn directly) ---
   let cursorX = Math.floor(resolution.width / 2);
   let cursorY = Math.floor(resolution.height / 2);
+  platform.hostDisplay?.onResize((width, height) => {
+    if (stopped || (width === resolution.width && height === resolution.height)) return;
+    const next = newBitMap(width, height);
+    qd.screenBits = next;
+    screen = next;
+    ui.resize(next);
+    setResolutionSize((size) => {
+      size.width = width;
+      size.height = height;
+    });
+    flush();
+    cursorX = Math.min(cursorX, Math.max(0, width - 1));
+    cursorY = Math.min(cursorY, Math.max(0, height - 1));
+    scheduleRepaint();
+  });
 
   // --- Frame loop ---
   function renderFrame() {

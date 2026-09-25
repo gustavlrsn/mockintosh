@@ -31,6 +31,7 @@ describe("System 7.5.3 pattern and cursor catalogs", () => {
     expect(desktopFill("checker")).toBe("checker");
     expect(desktopFill("ppat:136")).toEqual(patternBytes("aa55aa55aa55aa55"));
     expect(desktopFill("ppat:99999")).toBe("checker");
+    expect(desktopFill("pat:1122448811224488")).toEqual(patternBytes("1122448811224488"));
   });
 
   it("ships System cursors 1–4 as iBeam / cross / plus / watch", () => {

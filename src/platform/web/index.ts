@@ -22,6 +22,8 @@ import type {
 } from "../types";
 import { browserBuilder } from "./builder";
 import { CanvasPresenter, createScreenCanvas, wheelIsPinchZoom } from "@mockintosh/ui/web";
+import { bitMapHeight, bitMapWidth } from "@mockintosh/quickdraw/bits";
+import { createHostDisplay, initialScreenSize } from "./hostDisplay";
 import { createWebDownloadService } from "./download";
 import { createWebImageService } from "./media/images";
 import { createWebVideoService } from "./media/video";
@@ -43,17 +45,35 @@ export const DEFAULT_SCREEN = { width: 512, height: 342 } as const;
 export function createWebPlatform(options: WebPlatformOptions): Platform {
   const { root, width, height } = options;
 
-  const screenEl = createScreenCanvas(root, width, height);
+  const resizeListeners = new Set<(width: number, height: number) => void>();
+  const screenEl = createScreenCanvas(root, initialScreenSize({ width, height }), {
+    onLogicalSize: (nextWidth, nextHeight) => {
+      resizeListeners.forEach((listener) => listener(nextWidth, nextHeight));
+    },
+  });
   const { canvas, ctx } = screenEl;
+  const hostDisplay = createHostDisplay(screenEl, { width, height }, resizeListeners);
 
   let presenter: CanvasPresenter | null = null;
+  let presenterW = 0;
+  let presenterH = 0;
   let lastScreen: BitMap | null = null;
   const display: PlatformDisplay = {
-    width,
-    height,
+    get width() {
+      return screenEl.width;
+    },
+    get height() {
+      return screenEl.height;
+    },
     present(screen) {
       lastScreen = screen;
-      presenter ??= new CanvasPresenter(screen, ctx);
+      const w = bitMapWidth(screen);
+      const h = bitMapHeight(screen);
+      if (!presenter || presenterW !== w || presenterH !== h) {
+        presenter = new CanvasPresenter(screen, ctx);
+        presenterW = w;
+        presenterH = h;
+      }
       presenter.present(screen);
     },
   };
@@ -113,6 +133,7 @@ export function createWebPlatform(options: WebPlatformOptions): Platform {
     video: createWebVideoService(),
     camera: createWebCameraService(),
     builder: browserBuilder,
+    hostDisplay,
     source: createWebSourceProvider(),
     async loadArtifact(code) {
       const url = URL.createObjectURL(new Blob([code], {type: "text/javascript"}));

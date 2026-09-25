@@ -4,6 +4,8 @@ export interface ScreenCanvas {
   readonly width: number;
   readonly height: number;
   zoom(): number;
+  /** Switch fixed resolution or viewport mode. Logical-size changes fire `onLogicalSize`. */
+  setLayout(size: ScreenCanvasSize): void;
   toScreen(e: MouseEvent): { x: number; y: number };
   /**
    * The browser discarded the on-screen bitmap (pinch, DPR, tab restore)
@@ -71,9 +73,8 @@ export function createScreenCanvas(
   let logicalWidth = 1;
   let logicalHeight = 1;
   let zoom = 1;
-  const viewport = "mode" in size ? size : null;
-  const fixed = "mode" in size ? null : size;
-  const viewportScale = viewport?.scale ?? 1;
+  let viewport: { mode: "viewport"; scale?: number } | null = "mode" in size ? size : null;
+  let fixed: { width: number; height: number; scale?: number } | null = "mode" in size ? null : size;
   const invalidators = new Set<() => void>();
 
   function invalidate(): void {
@@ -130,12 +131,34 @@ export function createScreenCanvas(
    */
   function onWindowResize(): void {
     if (viewport) {
-      if (fitViewport(viewportScale)) {
+      if (fitViewport(viewport.scale ?? 1)) {
         hooks?.onLogicalSize?.(logicalWidth, logicalHeight);
         return;
       }
     } else if (fixed) {
       fitFixed(fixed.width, fixed.height, fixed.scale);
+    }
+    invalidate();
+  }
+
+  function applyLayout(next: ScreenCanvasSize): void {
+    const prevW = logicalWidth;
+    const prevH = logicalHeight;
+    if ("mode" in next) {
+      viewport = next;
+      fixed = null;
+      if (fitViewport(next.scale ?? 1) || logicalWidth !== prevW || logicalHeight !== prevH) {
+        hooks?.onLogicalSize?.(logicalWidth, logicalHeight);
+        return;
+      }
+    } else {
+      viewport = null;
+      fixed = next;
+      fitFixed(next.width, next.height, next.scale);
+      if (logicalWidth !== prevW || logicalHeight !== prevH) {
+        hooks?.onLogicalSize?.(logicalWidth, logicalHeight);
+        return;
+      }
     }
     invalidate();
   }
@@ -161,7 +184,7 @@ export function createScreenCanvas(
   };
 
   if (viewport) {
-    fitViewport(viewportScale);
+    fitViewport(viewport.scale ?? 1);
   } else if (fixed) {
     fitFixed(fixed.width, fixed.height, fixed.scale);
   }
@@ -189,6 +212,7 @@ export function createScreenCanvas(
       return logicalHeight;
     },
     zoom: () => zoom,
+    setLayout: applyLayout,
     toScreen(e: MouseEvent) {
       const rect = canvas.getBoundingClientRect();
       return {

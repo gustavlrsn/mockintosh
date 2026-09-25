@@ -144,6 +144,43 @@ export interface Platform {
    * tests — `eraseDisk` then re-bootstraps in place.
    */
   reload?(): void;
+  /**
+   * The machine's screen size and how many host pixels show one screen pixel.
+   * Absent when the display is fixed for the life of the boot (headless tests).
+   */
+  hostDisplay?: HostDisplay;
+}
+
+/** One logical framebuffer the Host panel can select. */
+export interface HostResolution {
+  id: string;
+  label: string;
+  /** Absent when the framebuffer follows the host window. */
+  width?: number;
+  height?: number;
+}
+
+/** `"auto"` is the largest whole zoom that fits, or native pixels in viewport mode. */
+export type HostScale = number | "auto";
+
+export interface HostDisplayState {
+  resolution: string;
+  width: number;
+  height: number;
+  scale: HostScale;
+  /** Highest whole zoom the window can show for a fixed resolution. At least 1. */
+  maxScale: number;
+}
+
+export interface HostDisplay {
+  readonly resolutions: readonly HostResolution[];
+  state(): HostDisplayState;
+  setResolution(id: string): void;
+  setScale(scale: HostScale): void;
+  /** Logical framebuffer size changed. Scale-only changes do not call this. */
+  onResize(listener: (width: number, height: number) => void): () => void;
+  /** Resolution, scale, or the room available for zoom changed. */
+  subscribe(listener: () => void): () => void;
 }
 
 export interface SourceFile {

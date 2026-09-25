@@ -6,16 +6,18 @@ import * as s from "./schema";
 import { desktopPatternRecord } from "../resourceCatalog/catalog";
 export const desktopPatternName = "desktop-pattern";
 export type NamedDesktopPattern = "checker" | "white" | "black";
-/** Named 1-bit solids, or a System 7.5 Desktop Patterns `ppat` id. */
-export type DesktopPattern = NamedDesktopPattern | `ppat:${number}`;
+/** Named 1-bit solids, a custom 8×8 `pat:<hex>`, or a System 7.5 Desktop Patterns `ppat` id. */
+export type DesktopPattern = NamedDesktopPattern | `pat:${string}` | `ppat:${number}`;
 const NAMED_PATTERNS = new Set<string>(["checker", "white", "black"]);
 
 export function parseDesktopPattern(body: string): DesktopPattern {
   const value = body.replace(/\r?\n$/, "");
   if (NAMED_PATTERNS.has(value)) return value as NamedDesktopPattern;
+  const custom = /^pat:([0-9a-fA-F]{16})$/.exec(value);
+  if (custom) return `pat:${custom[1].toLowerCase()}` as DesktopPattern;
   const match = /^ppat:(-?\d+)$/.exec(value);
   if (match && desktopPatternRecord(Number(match[1]))) return value as DesktopPattern;
-  throw new ServiceError("invalid-argument", "Expected checker, white, black, or ppat:<id>");
+  throw new ServiceError("invalid-argument", "Expected checker, white, black, pat:<16 hex>, or ppat:<id>");
 }
 export async function createDesktopSettings(fs: FileSystem) {
   const preferences = fs.locate("preferences");
@@ -87,7 +89,7 @@ export type DesktopSettings = Awaited<ReturnType<typeof createDesktopSettings>>;
 export function registerDesktopSettings(kernel: Kernel, settings: DesktopSettings) {
   kernel.register(defineOperation(
     "desktop_pattern",
-    "Read or set the persistent desktop pattern (checker, white, black, or ppat:<id>)",
+    "Read or set the persistent desktop pattern (checker, white, black, pat:<16 hex>, or ppat:<id>)",
     { value: s.string },
     [],
     s.object({ pattern: s.string, diagnostic: s.string }),

@@ -49,7 +49,7 @@ Use an absolute script path and set the client's working directory to this repos
 
 Call `sessions`, then `select_session` with the chosen session string. The tool list changes to include that boot's registered operations and input/result schemas. `MOCKINTOSH_SESSION` can make the initial selection explicit in configuration. `run_shell` is available alongside direct tools. `screenshot` returns PNG image content; the companion converts the browser's packed monochrome pixels.
 
-A typical direct sequence is `open(app="control_panel")`, `windows`, `inspect(window=...)`, `activate(window=...)`, `click(name="desktop-pattern-black", window=...)`, and `screenshot`. An inactive window requires a separate activation. Duplicate names require a window scope or numeric node id. UI ids belong to a node lifetime and boot; reacquire them after replacement, closing, or reload.
+A typical direct sequence is `open(app="control_panel")`, `windows`, `inspect(window=...)`, `activate(window=...)`, `click(name="desktop-pattern-prev", window=...)`, and `screenshot`. An inactive window requires a separate activation. Duplicate names require a window scope or numeric node id. UI ids belong to a node lifetime and boot; reacquire them after replacement, closing, or reload.
 
 ## Terminal and S1 syntax
 
@@ -77,7 +77,7 @@ Control Panel and "About This Macintosh…" are Finder windows, not apps, so the
 desktop_pattern white
 menu  "Control Panel"
 inspect
-click desktop-pattern-black <window-id>
+click desktop-pattern-prev <window-id>
 screenshot /disk/desktop.pbm
 ```
 
