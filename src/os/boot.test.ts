@@ -11,7 +11,7 @@ import { bootOS, type BootedOS } from "./boot";
 import { createHeadlessPlatform, type HeadlessPlatform } from "../platform/headless";
 import { registerApp } from "./apps";
 import { MIME } from "@mockintosh/fs";
-import { getWindows } from "./state";
+import { getWindows, setWindowFullScreen } from "./state";
 import { TITLE_BAR_H } from "./windowGeometry";
 
 const WIDTH = 512;
@@ -380,6 +380,62 @@ describe("bootOS on the headless platform", () => {
     expect(restored.kind).toBe("document");
     expect({ x: restored.x, y: restored.y, width: restored.width, height: restored.height }).toEqual(windowed);
     expect(inkCoverage(platform.lastFrame()!, 0, 0, WIDTH, MENUBAR_HEIGHT - 1)).toBeLessThan(0.2);
+  });
+
+
+  it("slides the menubar down from a touch on the top edge, then back up", () => {
+    let presses = 0;
+    registerApp({
+      id: "test-reveal",
+      title: "Show",
+      icon: "icon/computer",
+      defaultSize: { width: 120, height: 80 },
+      Component: () => {
+        const node = blackBox();
+        setProp(node, "onMouseDown", () => {
+          presses++;
+        });
+        return node;
+      },
+    });
+
+    os.services.openApp("test-reveal");
+    platform.tick();
+    const win = getWindows().find((w) => w.appId === "test-reveal")!;
+    setWindowFullScreen(win.id, true, { width: WIDTH, height: HEIGHT });
+    platform.tick();
+    expect(inkCoverage(platform.lastFrame()!, 8, 0, WIDTH - 16, MENUBAR_HEIGHT)).toBe(1);
+
+    platform.pointer({ type: "down", x: 40, y: 1, button: 0 });
+    platform.pointer({ type: "up", x: 40, y: 1, button: 0 });
+    expect(presses).toBe(0);
+    for (let i = 0; i < MENUBAR_HEIGHT; i++) platform.tick();
+    expect(inkCoverage(platform.lastFrame()!, 0, 0, WIDTH, MENUBAR_HEIGHT - 1)).toBeLessThan(0.2);
+    expect(inkCoverage(platform.lastFrame()!, 0, MENUBAR_HEIGHT - 1, WIDTH, 1)).toBe(1);
+
+    platform.click(40, 80);
+    expect(presses).toBe(1);
+    for (let i = 0; i < MENUBAR_HEIGHT; i++) platform.tick();
+    expect(inkCoverage(platform.lastFrame()!, 200, 0, 80, MENUBAR_HEIGHT)).toBe(1);
+  });
+
+  it("slides the menubar down when the pointer passes above the screen", () => {
+    registerApp({
+      id: "test-pass",
+      title: "Show",
+      icon: "icon/computer",
+      defaultSize: { width: 120, height: 80 },
+      Component: () => blackBox(),
+    });
+    os.services.openApp("test-pass");
+    platform.tick();
+    const win = getWindows().find((w) => w.appId === "test-pass")!;
+    setWindowFullScreen(win.id, true, { width: WIDTH, height: HEIGHT });
+    platform.tick();
+
+    platform.pointer({ type: "move", x: 40, y: -4 });
+    for (let i = 0; i < MENUBAR_HEIGHT; i++) platform.tick();
+    expect(inkCoverage(platform.lastFrame()!, 200, 0, 80, MENUBAR_HEIGHT - 1)).toBe(0);
   });
 
   it("writes a dropped host image onto the desktop", async () => {

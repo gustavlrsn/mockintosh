@@ -26,6 +26,8 @@ const CHECK_COL_W   = 14;       // fixed column for the radio-group check mark s
 
 interface MenubarProps {
   height: number;
+  /** Screen y of the bar. Negative while it is sliding in from above a full-screen window. */
+  top: number;
   menus: MenubarDefinition[];
 }
 
@@ -117,7 +119,7 @@ export function Menubar(props: MenubarProps): JSX.Element {
     <box
       position="absolute"
       left={0}
-      top={0}
+      top={props.top}
       width={os.resolution.width}
       height={MENUBAR_H}
       background={0}

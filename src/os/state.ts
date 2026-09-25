@@ -26,6 +26,7 @@ function runHostWrite(write: () => void): void {
 }
 import type { JSX } from "@mockintosh/ui";
 import { isModalKind, sortWindowsForPaint, windowLayer } from "./layering";
+import { tuckMenubar } from "./menubarReveal";
 import { windowDefinition, type OSWindowKind } from "./windowKinds";
 import type { MenubarDefinition } from "@mockintosh/sdk";
 
@@ -207,6 +208,7 @@ export const [getWindowOutline, setWindowOutline] = createSignal<{
 // ---------------------------------------------------------------------------
 
 export function openOSWindow(win: OSWindow): void {
+  if (windowDefinition(win.kind).coversScreen) tuckMenubar();
   _setWindowStore((s) => {
     // Remove any duplicate with the same id before adding
     const idx = s.list.findIndex((w) => w.id === win.id);
@@ -302,6 +304,7 @@ export function setWindowFullScreen(
   if (!win) return;
   const isFullScreen = windowDefinition(win.kind).coversScreen;
   if (on && !isFullScreen) {
+    tuckMenubar();
     updateOSWindow(id, {
       windowed: { kind: win.kind, x: win.x, y: win.y, width: win.width, height: win.height },
       kind: "fullscreen",

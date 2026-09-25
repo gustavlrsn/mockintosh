@@ -5,7 +5,6 @@ import type { OSServices } from "./context";
 import {
   getMenubarMenus,
   getSplashVisible,
-  isMenubarHidden,
   setSplashVisible,
   getWindowOutline,
 } from "./state";
@@ -13,6 +12,7 @@ import { Splash } from "./components/Splash.solid";
 import { Desktop } from "./components/Desktop.solid";
 import { WindowStack } from "./components/WindowStack.solid";
 import { Menubar } from "./components/Menubar.solid";
+import { menubarTop } from "./menubarReveal";
 import { ScreenCorners } from "./components/ScreenCorners.solid";
 import { FinderDragGhost } from "../../apps/Finder.solid";
 
@@ -48,10 +48,8 @@ export function OSRoot(props: OSRootProps): JSX.Element {
               />
             )}
           </Show>
-          {/* A full-screen window owns the whole screen; its menus stay live for ⌘ shortcuts. */}
-          <Show when={!isMenubarHidden()}>
-            <Menubar height={props.menubarHeight} menus={getMenubarMenus()} />
-          </Show>
+          {/* Tucked above a full-screen window until the top edge brings it down. */}
+          <Menubar height={props.menubarHeight} top={menubarTop()} menus={getMenubarMenus()} />
         </Show>
         <ScreenCorners />
       </box>

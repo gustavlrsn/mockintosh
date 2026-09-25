@@ -4,23 +4,9 @@
 
 Full screen (the Macintosh "special presentation mode") and `onOpen` are in: an app decides what opening it does, and may open no window. What is *not* modelled yet is an app that keeps running with no window — on the Macintosh an application whose last window closed stays frontmost with its menubar until File → Quit. Here the active app is still derived from the active window, so a windowless launch has no menubar of its own and nothing to quit. The [kernel plan](docs/kernel-plan.md) introduces app-instance ownership in M2 and process accounting in M3 / shell stage S3; `onOpen` is the existing entry-point seam. Keeping a windowless GUI app frontmost until Quit still needs an explicit active-app and lifetime policy.
 
-## Revealing the menubar in full screen (hover at the top edge)
+## Revealing the menubar in full screen
 
-**Status: potential todo — undecided whether this belongs in the OS.** Today a full-screen app is responsible for the way back, as the Macintosh HIG required: ⌘ shortcuts keep working with the menubar hidden, and Photo Booth adds an on-screen "Menu Bar" button. The idea is to make the way back an OS gesture instead: move the pointer to the top edge, pause, and the menubar slides down over the full-screen content (Mac OS X Lion introduced this for full-screen apps; Yosemite made it a general auto-hide preference).
-
-**How classic Mac apps handled it**, for reference: there was no system gesture. HyperCard hid the bar with `hide menubar` and brought it back with ⌘-Space; slide-show tools (More, Persuasion) left the show on Escape / ⌘-period; kiosk stacks put a "Menu Bar" button on screen, which is what the HIG literally suggests; games (Dark Castle, Shufflepuck Café) zeroed `MBarHeight`, drew everywhere, and you left by quitting.
-
-**Why it might belong in the OS:** "the user must always be able to get back" is a system concern, and every full-screen app reinventing a "Menu Bar" button is per-app duplication. **Why it might not:** it is a modern gesture the original never had; the classic Mac had no hidden-bar reveal and no animation beyond the Finder's zoom rects; on hosts without hover (e-paper, touch) it needs a second trigger anyway; and an app-level affordance is at least *visible*, which a hover gesture is not.
-
-**Sketch, if we do it:**
-
-- `state.ts`: the menubar's hidden state becomes three-valued — `shown | hidden | revealing(px)` — replacing the boolean `isMenubarHidden()`; a `reveal` signal (0…20) drives the bar's `top = -MENUBAR_HEIGHT + reveal`.
-- `boot.ts` `onPointer`: OS policy next to double-click detection — pointer on row 0 for ~250 ms (dwell, so grazing the edge does not flicker) sets the target to shown; pointer below the bar's rows with no menu open sets it back to hidden. A `down` on the top two rows reveals too, for hosts without hover, and is consumed rather than delivered to the app.
-- Frame loop: step `reveal` 1 px per frame toward its target (20 frames ≈ 330 ms at 60 Hz) and `scheduleRepaint` only while it is moving; same speed back up.
-- Stay revealed while a dropdown is open. Hit-testing is the node tree, so a half-revealed bar is already clickable and dropdowns hang from its current position (`MenuDropdown` is a child of the Menubar box) — worth a test.
-- ⌘ shortcuts fire without revealing, as now, and remain the guaranteed path documented in the SDK.
-- Headless test: open a full-screen window, move the pointer to row 0, tick 20 frames, assert the menubar rows are painted; move away, tick, assert they are gone.
-- Photo Booth then drops its "Menu Bar" button (or keeps it as a discoverable hint — decide then).
+**Status: done.** A full-screen window tucks the menubar above the screen. Passing the pointer over the top edge — including the page above the canvas — or pressing there slides it down over the picture (four pixels per frame) and back up when the pointer leaves, unless a menu is open. The pass is captured. ⌘ shortcuts still fire without revealing the bar. See `src/os/menubarReveal.ts`.
 
 ## Window definition details
 

@@ -29,6 +29,7 @@ import { animateZoomRect, type AnimRect } from "./zoomAnimation";
 import { buildFolderWindow, windowOuterRect } from "../../apps/Finder.solid";
 import { bootstrapFileSystem } from "./fsBootstrap";
 import { resolveOpenAction } from "./openers";
+import { claimMenubarEdge, stepMenubarReveal } from "./menubarReveal";
 import { makeOSRoot } from "./OSRoot.solid";
 import {
   setSplashVisible,
@@ -40,6 +41,7 @@ import {
   setWindowOutline,
   bringToFront,
   getMenubarMenus,
+  isMenubarHidden,
   setOpenMenuIndex,
 } from "./state";
 import type { OSServices } from "./context";
@@ -401,6 +403,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   function frameLoop() {
     if (stopped) return;
     scheduler.requestFrame(frameLoop);
+    if (stepMenubarReveal(scheduler.now())) scheduleRepaint();
     if (!screenDirty || animating) return;
     screenDirty = false;
     renderFrame();
@@ -412,6 +415,19 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
 
   function onPointer(e: PlatformPointerEvent): void {
     if (stopped) throw new ServiceError("disconnect", "Boot has ended");
+    if (claimMenubarEdge(e, scheduler.now())) {
+      // y < 0 is the page above the canvas. Don't park the cursor there;
+      // only a full-screen pass needs a repaint so the bar can slide.
+      if (e.y >= 0 && e.type !== "scroll") {
+        cursorX = e.x;
+        cursorY = e.y;
+        cursorState.obscured = false;
+        scheduleRepaint();
+      } else if (isMenubarHidden()) {
+        scheduleRepaint();
+      }
+      return;
+    }
     switch (e.type) {
       case "move":
         cursorX = e.x;
