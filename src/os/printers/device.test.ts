@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { PaintRect } from "@mockintosh/quickdraw";
+import { makeRect } from "@mockintosh/quickdraw/bits";
 import { PROFILE_ESCPOS_80MM, PrinterCancelledError, type PrinterTransport } from "@mockintosh/print";
 import { createPrinterDevice, type PrinterDeviceOptions, type PrinterSetup } from "./device";
 
@@ -182,6 +184,30 @@ describe("createPrinterDevice", () => {
       ink = Math.max(ink, row);
     }
     expect(ink).toBe(wide);
+  });
+
+  it("prints a scaled page at scale × scale dots per pixel", async () => {
+    const paper = PROFILE_ESCPOS_80MM.dots;
+    const transport = fakeTransport(() => Promise.resolve("POS-80"));
+    const print = createPrintService(transport);
+    let drawn = { width: 0, height: 0 };
+
+    await print.printPage(
+      4,
+      (_port, size) => {
+        drawn = size;
+        PaintRect(makeRect(0, 0, 4, 1));
+      },
+      { scale: 2 },
+    );
+
+    expect(drawn).toEqual({ width: paper / 2, height: 4 });
+    const pixels = rasterPixels(transport.writes[0]!, paper);
+    const rowInk = Array.from({ length: pixels.length / paper }, (_, y) =>
+      pixels.subarray(y * paper, (y + 1) * paper).join(""),
+    ).filter((row) => row.includes("1"));
+    expect(rowInk).toHaveLength(8);
+    expect(rowInk.every((row) => row.startsWith("110") && !row.slice(2).includes("1"))).toBe(true);
   });
 
   it("forgets the printer", async () => {

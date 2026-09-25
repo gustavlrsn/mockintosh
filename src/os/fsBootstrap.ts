@@ -26,6 +26,7 @@ const DESKTOP_SHORTCUTS: readonly DesktopShortcut[] = [
   { name: "Icon Gallery",   appId: "icon_gallery", icon: "icon-gallery/icon" },
   { name: "MacPaint",       appId: "macpaint",    icon: "macpaint/icon" },
   { name: "Canvas",         appId: "canvas",      icon: "canvas/icon" },
+  { name: "Surface",        appId: "surface",     icon: "surface/icon" },
 ];
 
 /** Create the startup volume and its standard folders on a fresh disk; repair them otherwise. */
@@ -51,6 +52,7 @@ export async function bootstrapFileSystem(fs: FileSystem): Promise<void> {
     await ensureDesktopShortcut(fs, desktop, "dither");
     await ensureDesktopShortcut(fs, desktop, "trace");
     await ensureDesktopShortcut(fs, desktop, "github");
+    await ensureDesktopShortcut(fs, desktop, "surface");
   }
   await fs.flush();
 }

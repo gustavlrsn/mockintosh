@@ -9,7 +9,7 @@ import Testing from "@/apps/Testing";
 import FileViewer from "@/apps/FileViewer";
 import Dither from "@/apps/Dither";
 import Trace from "@/apps/Trace";
-import Picture from "@/apps/Picture";
+import Preview from "@/apps/Preview";
 import VideoPlayer from "@/apps/VideoPlayer";
 import PhotoBooth from "@/apps/PhotoBooth";
 import AppStore from "@/apps/AppStore";
@@ -20,13 +20,14 @@ import SpotifyPlayer from "@/apps/SpotifyPlayer";
 import IconGallery from "@/apps/IconGallery";
 import MacPaint from "@/apps/MacPaint";
 import Canvas from "@/apps/Canvas";
+import Surface from "@/apps/Surface";
 
 for (const app of [
   Testing,
   FileViewer,
   Dither,
   Trace,
-  Picture,
+  Preview,
   VideoPlayer,
   PhotoBooth,
   AppStore,
@@ -39,6 +40,7 @@ for (const app of [
   IconGallery,
   MacPaint,
   Canvas,
+  Surface,
 ]) {
   registerApp(app);
 }

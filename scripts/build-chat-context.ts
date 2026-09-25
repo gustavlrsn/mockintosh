@@ -55,7 +55,7 @@ function sourceMap(): string {
           ? "bitmap engine, tools palette, undo, patterns, sprite files"
           : row.source === "PhotoBooth.tsx"
             ? "camera + scheduler + dither"
-            : row.source === "Picture.tsx"
+            : row.source === "Preview.tsx"
               ? "images.decode + toBits"
               : APP_TITLES[row.source as keyof typeof APP_TITLES] ?? row.title;
       return `- ${row.title} → /system/source/apps/${row.source} (${extra})`;

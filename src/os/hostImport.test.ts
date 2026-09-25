@@ -5,7 +5,6 @@ import {
   importHostFile,
   isImportableImage,
   resolveImportTarget,
-  uniqueChildName,
 } from "./hostImport";
 import type { OSWindow } from "./state";
 
@@ -36,15 +35,6 @@ function folderWindow(directoryId: string): OSWindow {
 }
 
 describe("hostImport", () => {
-  it("uniqueChildName adds a numeric suffix before the extension", async () => {
-    const fs = await bootedFS();
-    const desktop = fs.locate("desktop")!;
-    await fs.writeFile(desktop.id, "face.png", new Uint8Array([1]));
-    expect(uniqueChildName(fs, desktop.id, "face.png")).toBe("face 2.png");
-    await fs.writeFile(desktop.id, "face 2.png", new Uint8Array([1]));
-    expect(uniqueChildName(fs, desktop.id, "face.png")).toBe("face 3.png");
-  });
-
   it("isImportableImage accepts host MIME or a known extension", () => {
     expect(isImportableImage({ name: "a", type: "image/png", bytes: new Uint8Array() })).toBe(true);
     expect(isImportableImage({ name: "shot.JPEG", type: "", bytes: new Uint8Array() })).toBe(true);

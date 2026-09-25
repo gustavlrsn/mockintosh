@@ -31,7 +31,7 @@ import {
   type PrinterSpeed,
   type PrinterTransport,
 } from "@mockintosh/print";
-import type { PrintPictureOptions, PrintService, PrintableImage } from "@mockintosh/sdk";
+import type { PrintPageOptions, PrintPictureOptions, PrintService, PrintableImage } from "@mockintosh/sdk";
 import { createPrinterDevice, type PrinterDevice, type PrinterDeviceOptions, type PrinterSetup } from "./device";
 import { layoutPrintable } from "./pictureLayout";
 import { createPrinterDriverCatalog, type PrinterDriverCatalog } from "./drivers";
@@ -497,8 +497,12 @@ export async function createSystemPrinters(options: SystemPrintersOptions): Prom
     layoutPicture(image: PrintableImage, opts?: PrintPictureOptions) {
       return layoutPrintable(image, opts ?? {}, this.paperWidth);
     },
-    async printPage(height: number, draw: (port: GrafPort, size: { width: number; height: number }) => void) {
-      await (await target())?.printPage(height, draw);
+    async printPage(
+      height: number,
+      draw: (port: GrafPort, size: { width: number; height: number }) => void,
+      opts?: PrintPageOptions,
+    ) {
+      await (await target())?.printPage(height, draw, opts);
     },
     list,
     get,

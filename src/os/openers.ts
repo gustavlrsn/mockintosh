@@ -2,12 +2,13 @@ import {diskPath} from "./projects/paths";
 /**
  * Openers — which app opens which file.
  *
- * Apps declare the MIME types they handle (`SolidApp.fileTypes`); the Finder
- * asks `resolveOpenAction` what a double-click should do. Directories and
- * app shortcuts are handled by the OS itself.
+ * Apps declare the MIME types they handle (`SolidApp.fileTypes`), each as a
+ * default or an alternate; the Finder asks `resolveOpenAction` what a
+ * double-click should do. Directories and app shortcuts are handled by the
+ * OS itself.
  */
 import { MIME, type FSNode, type FileSystem } from "@mockintosh/fs";
-import type { Capability, FileDocumentProps } from "@mockintosh/sdk";
+import type { Capability, FileDocumentProps, FileOpener, FileTypeClaim, FileTypeRank, SolidApp } from "@mockintosh/sdk";
 import { getAllApps, getApp, getUnavailableApp } from "./apps";
 
 export type OpenAction =
@@ -19,12 +20,29 @@ export type OpenAction =
   /** The app is installed but needs capabilities this platform lacks. */
   | { kind: "none"; reason: "unavailable"; appId: string; title: string; missing: Capability[] };
 
-/** The app registered for a MIME type, if any. */
-export function appForFileType(type: string): string | undefined {
-  for (const app of getAllApps()) {
-    if (app.fileTypes?.includes(type)) return app.id;
+function rankFor(fileTypes: SolidApp["fileTypes"], type: string): FileTypeRank | undefined {
+  for (const entry of fileTypes ?? []) {
+    const claim: FileTypeClaim = typeof entry === "string" ? { type: entry, rank: "default" } : entry;
+    if (claim.type === type) return claim.rank;
   }
   return undefined;
+}
+
+/** Every app that opens `type`: defaults first, then alternates, each in registration order. */
+export function openersForFileType(type: string): FileOpener[] {
+  const defaults: FileOpener[] = [];
+  const alternates: FileOpener[] = [];
+  for (const app of getAllApps()) {
+    const rank = rankFor(app.fileTypes, type);
+    if (!rank) continue;
+    (rank === "default" ? defaults : alternates).push({ appId: app.id, title: app.title, rank });
+  }
+  return [...defaults, ...alternates];
+}
+
+/** The app a double-click opens `type` in, if any. */
+export function appForFileType(type: string): string | undefined {
+  return openersForFileType(type)[0]?.appId;
 }
 
 export async function resolveOpenAction(fs: FileSystem, nodeId: string): Promise<OpenAction> {

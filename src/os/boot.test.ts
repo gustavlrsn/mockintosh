@@ -314,6 +314,31 @@ describe("bootOS on the headless platform", () => {
     expect(context.fs).toBe(os.services.fs);
   });
 
+  it("opens a window after an await only while onOpen holds keepAlive", async () => {
+    for (const hold of [false, true]) {
+      let ready!: () => void;
+      const loaded = new Promise<void>((resolve) => { ready = resolve; });
+      const id = `test-late-${hold}`;
+      registerApp({
+        id,
+        title: id,
+        icon: "icon/computer",
+        defaultSize: { width: 100, height: 60 },
+        Component: () => whiteBox(),
+        onOpen(app, props) {
+          const release = hold ? app.keepAlive?.() : undefined;
+          void loaded.then(() => app.openWindow({ props })).finally(() => release?.());
+        },
+      });
+      os.services.openApp(id, { fileId: "f1", title: "Doc" });
+      ready();
+      await loaded;
+      await Promise.resolve();
+      platform.tick();
+      expect(getWindows().some((w) => w.appId === id)).toBe(hold);
+    }
+  });
+
   it("opens windows of the kind an app asks for: a `plain` box has a frame but no title bar", () => {
     registerApp({
       id: "test-kinds",

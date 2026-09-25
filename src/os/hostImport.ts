@@ -3,7 +3,7 @@
  * Mockintosh screen becomes an ordinary FS node. Dropping it on Dither or
  * Trace opens that app; anything else lands in the folder under the pointer.
  */
-import { inferMimeType, isImageType, type FileSystem, type FSFile } from "@mockintosh/fs";
+import { inferMimeType, isImageType, uniqueChildName, type FileSystem, type FSFile } from "@mockintosh/fs";
 import type { HostFileDrop } from "../platform/types";
 import type { OSWindow } from "./state";
 import { windowContentRect, windowTotalHeight } from "./windowGeometry";
@@ -17,19 +17,6 @@ export interface ImportTarget {
   position: { x: number; y: number };
   /** When the drop landed on this app's window, open the new file there. */
   openIn?: string;
-}
-
-/** A unique name in `parentId`: `photo.png`, then `photo 2.png`, … */
-export function uniqueChildName(fs: FileSystem, parentId: string, name: string): string {
-  const cleaned = name.trim() || "untitled";
-  if (!fs.child(parentId, cleaned)) return cleaned;
-  const dot = cleaned.lastIndexOf(".");
-  const stem = dot > 0 ? cleaned.slice(0, dot) : cleaned;
-  const ext = dot > 0 ? cleaned.slice(dot) : "";
-  for (let n = 2; ; n++) {
-    const candidate = `${stem} ${n}${ext}`;
-    if (!fs.child(parentId, candidate)) return candidate;
-  }
 }
 
 export function isImportableImage(file: HostFileDrop): boolean {

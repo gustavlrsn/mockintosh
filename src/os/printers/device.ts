@@ -42,7 +42,8 @@ import {
   type PrinterStatusReport,
   type PrinterTransport,
 } from "@mockintosh/print";
-import type { PrintPictureOptions, PrintService, PrintableImage } from "@mockintosh/sdk";
+import { pixelsFromBitMap } from "@mockintosh/quickdraw/bits";
+import type { PrintPageOptions, PrintPictureOptions, PrintService, PrintableImage } from "@mockintosh/sdk";
 import { FEED_BEFORE_CUT, layoutPicture, layoutPrintable } from "./pictureLayout";
 
 /** What the device needs from its driver, read at each job so driver changes apply at once. */
@@ -252,13 +253,25 @@ export function createPrinterDevice(
 
   async function printPage(
     height: number,
-    draw: (port: GrafPort, size: { width: number; height: number }) => void
+    draw: (port: GrafPort, size: { width: number; height: number }) => void,
+    opts: PrintPageOptions = {},
   ): Promise<void> {
     const { profile, hasCutter } = setup();
-    const page = createPrintPage(profile.dots, height);
+    const scale = Math.max(1, Math.floor(opts.scale ?? 1));
+    const page = createPrintPage(Math.floor(profile.dots / scale), height);
     try {
       drawOnPage(page, (port) => draw(port, { width: page.width, height: page.height }));
-      const encoder = encoderForProfile(profile).begin().raster(page.bits).feed(FEED_BEFORE_CUT);
+      // Enlarging is picture layout at a fixed whole-number scale, so pages
+      // and pictures meet the paper the same way.
+      const bits =
+        scale === 1
+          ? page.bits
+          : layoutPicture(
+              { width: page.width, height: page.height, data: pixelsFromBitMap(page.bits) },
+              { scale, orientation: "portrait" },
+              profile.dots,
+            ).page;
+      const encoder = encoderForProfile(profile).begin().raster(bits).feed(FEED_BEFORE_CUT);
       await send((hasCutter ? encoder.cut() : encoder).end());
     } finally {
       disposePrintPage(page);

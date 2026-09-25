@@ -17,4 +17,5 @@ export { FileSystem, type FileSystemOptions, type MkdirOptions } from "./fileSys
 export { FSError, isFSError, type FSErrorCode } from "./errors";
 export { InMemoryBackend, type FSBackend } from "./backend";
 export { inferMimeType, isTextType, isImageType, extensionOf, IMAGE_TYPES } from "./mime";
+export { uniqueChildName } from "./names";
 export { CURRENT_CATALOG_VERSION, parseCatalog, type CatalogDocument } from "./catalogDocument";

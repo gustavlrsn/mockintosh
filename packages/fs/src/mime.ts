@@ -19,7 +19,7 @@ const BY_EXTENSION: Readonly<Record<string, string>> = {
   mp3: "audio/mpeg",
 };
 
-/** Browser stills the Picture / Dither apps open. */
+/** Browser stills Preview (and, as alternates, Dither / Trace) open. */
 export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
 
 export function isImageType(type: string): boolean {

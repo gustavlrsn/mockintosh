@@ -107,6 +107,7 @@ export type { DeckerFont } from "./fonts/font";
 export { resolveFont, fontStyleFromProps, fontFromProps, textFace } from "./fonts/style";
 export type { FontStyle } from "./fonts/style";
 export { measureText, fontLineHeight, drawString } from "./fonts/bridge";
+export { drawPixels } from "./portDraw";
 export { faceMetrics, faceMetricsByName, alignmentHeight, cdefBaseline, middleCellTop } from "./fonts/metrics";
 export type { FontFaceMetrics, FontInfo } from "./fonts/metrics";
 export { COMMAND_KEY, CHECK_MARK, BULLET } from "./fonts/extraGlyphs";

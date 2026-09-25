@@ -196,6 +196,15 @@ export interface PrintPictureOptions {
   orientation?: "auto" | PrintOrientation;
 }
 
+export interface PrintPageOptions {
+  /**
+   * Whole-number enlargement from drawing pixels to printer dots (default 1).
+   * One-dot lines and screen fonts print faint on thermal paper; 2 makes a
+   * page look like a picture printed from Preview.
+   */
+  scale?: number;
+}
+
 /** What {@link PrintService.layoutPicture} decided, without sending it to the printer. */
 export interface PrintPictureLayout {
   /** The page as it will print, paper-width wide. */
@@ -249,11 +258,16 @@ export interface PrintService {
    */
   layoutPicture(image: PrintableImage, options?: PrintPictureOptions): PrintPictureLayout;
   /**
-   * Draw a page `height` dots tall with QuickDraw and print it. `port` is the
-   * current port while `draw` runs and is `paperWidth` wide. Like
-   * `printPicture`, resolves without printing if the user cancels.
+   * Draw a page with QuickDraw and print it. `port` is the current port while
+   * `draw` runs; `size` is the page in drawing pixels — `paperWidth / scale`
+   * wide and `height` tall. Like `printPicture`, resolves without printing if
+   * the user cancels.
    */
-  printPage(height: number, draw: (port: GrafPort, size: { width: number; height: number }) => void): Promise<void>;
+  printPage(
+    height: number,
+    draw: (port: GrafPort, size: { width: number; height: number }) => void,
+    options?: PrintPageOptions,
+  ): Promise<void>;
 }
 
 /**
@@ -496,6 +510,9 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
    * dialog first, or open no window at all — supplies this and opens whatever
    * it wants through `app.openWindow`. It runs outside any component, so it
    * is a place for opening windows, not for creating effects.
+   *
+   * The launch ends if no window is open when `onOpen` returns. To open one
+   * after an `await`, hold `app.keepAlive()` until it is open.
    */
   onOpen?(app: AppContext, props: P): void;
 }
@@ -598,6 +615,9 @@ export function useApp(): AppServices {
 
 export {
   measureText,
+  fontLineHeight,
+  drawString,
+  drawPixels,
   useTheme,
   useRadius,
   themeRadius,

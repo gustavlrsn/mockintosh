@@ -1,8 +1,8 @@
 /**
  * Sprite files — `image/x-mockintosh-sprite` — are how apps keep 1-bit
  * pictures in the file system: a JSON body with the sprite's size and its
- * base64 2 bpp pixels (`encodeSprite`). PhotoBooth and Dither write them;
- * Dither reopens them (Picture if Dither is absent); the Finder shows them
+ * base64 2 bpp pixels (`encodeSprite`). PhotoBooth, Dither, MacPaint and
+ * Surface write them; Preview opens them by default; the Finder shows them
  * with a picture icon.
  */
 import { MIME, type FSFile, type NodeAttributes } from "@mockintosh/fs";
