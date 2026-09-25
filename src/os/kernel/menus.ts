@@ -6,6 +6,7 @@ import { getApp } from "../apps";
 import { openAppAboutBox } from "../components/AppAboutBox.solid";
 import { openAboutBox } from "../../../apps/finder/AboutBox";
 import { openControlPanel } from "../../../apps/finder/ControlPanel";
+import { CHOOSER_TITLE, openChooser } from "../../../apps/finder/Chooser";
 
 /** The Apple menu's title: the Apple logo glyph. */
 export const APPLE_MENU_LABEL = "\uF8FF";
@@ -46,8 +47,8 @@ export function appleMenu(os: OSServices): MenubarDefinition {
       label: "Terminal",
       onClick: () => os.openApp("terminal")
     }, {
-      label: "Chooser",
-      disabled: true
+      label: CHOOSER_TITLE,
+      onClick: () => openChooser(os)
     }, {
       label: "Find File",
       disabled: true

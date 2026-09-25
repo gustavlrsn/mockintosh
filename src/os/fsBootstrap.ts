@@ -34,8 +34,11 @@ export async function bootstrapFileSystem(fs: FileSystem): Promise<void> {
   ensureRoleFolder(fs, hd, "desktop", "Desktop Folder");
   ensureRoleFolder(fs, hd, "trash", "Trash");
   ensureRoleFolder(fs, hd, "applications", "Applications");
+  ensureRoleFolder(fs, hd, "pictures", "Pictures");
   const system = ensureRoleFolder(fs, hd, "system", "System Folder");
   ensureRoleFolder(fs, system, "preferences", "Preferences");
+  const extensions = ensureRoleFolder(fs, system, "extensions", "Extensions");
+  ensureRoleFolder(fs, extensions, "printer-drivers", "Printer Drivers");
 
   const desktop = fs.locate("desktop", hd.id)!;
   if (fresh) {
