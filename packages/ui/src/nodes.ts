@@ -329,7 +329,11 @@ export interface BoxProps extends LayoutStyle, EventHandlers, SemanticProps {
   inert?: boolean;
   /** Treat this node as a Tab-cycle / last-focus scope. */
   focusScope?: boolean;
-  /** Vertical scroll offset in pixels (requires overflow="scroll") */
+  /**
+   * Vertical scroll offset in pixels (requires overflow="scroll"). Together
+   * with `onScroll` the owner drives the offset: the wheel and touch pans
+   * only call `onScroll` and never move the pane themselves.
+   */
   scrollOffset?: number;
   /**
    * When this value changes, `_scrollOffset` returns to 0.
@@ -339,8 +343,21 @@ export interface BoxProps extends LayoutStyle, EventHandlers, SemanticProps {
   scrollKey?: string | number;
   /** Per-pixel hit mask — limits clickable area to non-zero mask pixels. */
   hitMask?: HitMask;
+  /**
+   * Called after layout whenever this box's measured size changes (and once
+   * for its first layout). Runs in a microtask, so it may write signals.
+   */
+  onLayout?: LayoutChangeFn;
   children?: unknown;
 }
+
+/** A node's laid-out size, as reported to `<box onLayout>`. */
+export interface LayoutSize {
+  width: number;
+  height: number;
+}
+
+export type LayoutChangeFn = (size: LayoutSize) => void;
 
 export type TextAlign = "left" | "center" | "right";
 export type TextVerticalAlign = "top" | "middle" | "bottom";
@@ -608,6 +625,7 @@ export const EVENT_PROP_NAMES = new Set<string>([
 
 export function setNodeProperty(node: CanvasNode, name: string, value: unknown): void {
   if (name === "scrollOffset") {
+    node.props["scrollOffset"] = value;
     node._scrollOffset = Math.round((value as number) || 0);
     return;
   }

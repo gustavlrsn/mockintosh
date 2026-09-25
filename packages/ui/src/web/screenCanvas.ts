@@ -14,7 +14,7 @@ export interface ScreenCanvas {
 }
 
 export type ScreenCanvasSize =
-  | { width: number; height: number }
+  | { width: number; height: number; scale?: number }
   | { mode: "viewport"; scale?: number };
 
 export interface CreateScreenCanvasOptions {
@@ -90,11 +90,14 @@ export function createScreenCanvas(
     logicalHeight = height;
   }
 
-  function fitFixed(width: number, height: number): void {
-    zoom = Math.max(
-      1,
-      Math.min(Math.floor(window.innerWidth / width), Math.floor(window.innerHeight / height)),
+  function fitFixed(width: number, height: number, scale?: number): void {
+    const fit = Math.min(
+      Math.floor(window.innerWidth / width),
+      Math.floor(window.innerHeight / height),
     );
+    const room = Math.max(1, fit);
+    const wanted = scale != null ? Math.max(1, Math.round(scale)) : room;
+    zoom = Math.min(wanted, room);
     applyBackingStore(width, height);
     canvas.style.width = `${width * zoom}px`;
     canvas.style.height = `${height * zoom}px`;
@@ -132,7 +135,7 @@ export function createScreenCanvas(
         return;
       }
     } else if (fixed) {
-      fitFixed(fixed.width, fixed.height);
+      fitFixed(fixed.width, fixed.height, fixed.scale);
     }
     invalidate();
   }
@@ -160,7 +163,7 @@ export function createScreenCanvas(
   if (viewport) {
     fitViewport(viewportScale);
   } else if (fixed) {
-    fitFixed(fixed.width, fixed.height);
+    fitFixed(fixed.width, fixed.height, fixed.scale);
   }
   window.addEventListener("resize", onWindowResize);
   window.addEventListener("pageshow", invalidate);

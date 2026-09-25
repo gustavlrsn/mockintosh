@@ -312,16 +312,21 @@ export function mountCanvasUI(options: CanvasUIOptions): CanvasUIHost {
     }
   };
   const onWheel = (e: WheelEvent) => {
-    e.preventDefault();
     if (wheelIsPinchZoom(e)) {
+      e.preventDefault();
       // Pinch can evict the GPU texture without a Solid mutation.
       dirty = true;
       presentCanvas();
       return;
     }
     const { x, y } = toScreen(e);
-    if (overlayHits(x, y)) return;
-    ui!.dispatchPointer("scroll", x, y, { deltaY: e.deltaY });
+    if (overlayHits(x, y)) {
+      e.preventDefault();
+      return;
+    }
+    if (ui!.dispatchPointer("scroll", x, y, { deltaY: e.deltaY })) {
+      e.preventDefault();
+    }
   };
   const onKeyDown = (e: KeyboardEvent) => {
     const mods = {

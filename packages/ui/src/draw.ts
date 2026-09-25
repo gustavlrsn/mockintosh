@@ -316,13 +316,6 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
-function hasAbsoluteChild(node: CanvasNode): boolean {
-  for (const child of node.children) {
-    if (child.style.position === "absolute") return true;
-  }
-  return false;
-}
-
 function drawNode(
   node: CanvasNode,
   ctx: DrawContext,
@@ -353,12 +346,10 @@ function drawNode(
   );
 
   if (!inView) {
-    if (clips || !hasAbsoluteChild(node)) return;
-    for (const child of node.children) {
-      if (child.style.position === "absolute") {
-        drawNode(child, ctx, zIndex + 1, childOx, childOy);
-      }
-    }
+    // Without a clip, children (absolute or overflowing) can paint outside
+    // this box, so each decides its own visibility.
+    if (clips) return;
+    for (const child of node.children) drawNode(child, ctx, zIndex + 1, childOx, childOy);
     return;
   }
 

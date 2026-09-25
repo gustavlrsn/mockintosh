@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineSprite, fromGrid } from "../src/sprite";
+import { defineSprite, fromGrid, smallIcon } from "../src/sprite";
 
 describe("defineSprite", () => {
   it("decodes 2 bpp base64 into pixels and mask", () => {
@@ -18,6 +18,21 @@ describe("defineSprite", () => {
     for (const b of bytes)
       for (let sh = 6; sh >= 0; sh -= 2) expected.push(((b >> sh) & 3) === 2 ? 1 : 0);
     expect([...s.data]).toEqual(expected);
+  });
+});
+
+describe("smallIcon", () => {
+  it("keeps a 16×16 sprite and reduces a 32×32 one by majority, ties to black", () => {
+    const already = fromGrid(16, 16, Array.from({ length: 16 }, () => "#".repeat(16)));
+    expect(smallIcon(already)).toBe(already);
+
+    const row = "# ".repeat(16);
+    const big = fromGrid(32, 32, Array.from({ length: 32 }, () => row));
+    const reduced = smallIcon(big);
+    expect(reduced.width).toBe(16);
+    expect(reduced.height).toBe(16);
+    expect(reduced.data.every((px) => px === 1)).toBe(true);
+    expect(smallIcon(big)).toBe(reduced);
   });
 });
 

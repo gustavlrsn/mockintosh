@@ -259,6 +259,31 @@ describe("drawTree — overflow scroll track", () => {
     return { screen, pane };
   }
 
+  it("draws content that overflows a wrapper scrolled fully out of view", () => {
+    const { screen, ctx, root } = makeTestContext();
+    const pane = createNode("box");
+    pane.style = { overflow: "scroll", width: 16, height: 16 };
+    const wrapper = createNode("box");
+    wrapper.style = { width: 16, height: 16 };
+    const content = createNode("box");
+    content.style = { width: 16, height: 64 };
+    const mark = createNode("box");
+    mark.style = { position: "absolute", left: 0, top: 40, width: 4, height: 4 };
+    mark.props = { background: 1 };
+    content.children = [mark];
+    mark.parent = content;
+    wrapper.children = [content];
+    content.parent = wrapper;
+    pane.children = [wrapper];
+    wrapper.parent = pane;
+    root.children = [pane];
+    pane.parent = root;
+    computeLayout(root, W, H, noMeasure);
+    pane._scrollOffset = 36;
+    drawTree(root, ctx);
+    expect(px(screen, 1, 5)).toBe(1);
+  });
+
   it("paints nothing on the right edge when content fits", () => {
     const { screen } = scrollPane(16);
     for (let y = 0; y < 16; y++) expect(px(screen, 15, y)).toBe(0);

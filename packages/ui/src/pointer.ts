@@ -17,7 +17,7 @@ import {
 } from "./nodes";
 import type { FocusManager } from "./focus";
 import { scheduleRepaint } from "./renderer";
-import { scrollOverflow, scrollPaintOffset } from "./scroll";
+import { isScrollOwned, scrollOverflow, scrollPaintOffset } from "./scroll";
 import { createPanVelocity, stepFlick } from "./scrollInertia";
 
 export { scrollOverflow } from "./scroll";
@@ -79,12 +79,16 @@ export function createDoubleClickTracker(options?: {
 }
 
 export interface PointerDispatcher {
+  /**
+   * Deliver a pointer event. `"scroll"` returns whether an overflow pane
+   * moved or an `onScroll` handler claimed the delta. Other types return false.
+   */
   dispatch(
     type: PointerType,
     x: number,
     y: number,
     extras?: PointerExtras
-  ): void;
+  ): boolean;
   /** Cancel a running flick. Safe when idle. */
   stopFlick(): void;
 }
@@ -450,6 +454,10 @@ export function createPointerDispatcher(
     while (node) {
       const canScroll = node.style.overflow === "scroll";
       const onScroll = node._eventHandlers.onScroll;
+      if (canScroll && onScroll && isScrollOwned(node)) {
+        onScroll(dy);
+        return true;
+      }
       if (canScroll) {
         const moved = applyWheel(node, dy);
         if (onScroll) {
@@ -475,6 +483,7 @@ export function createPointerDispatcher(
   function canPanFrom(x: number, y: number, dy: number): boolean {
     let node = nodeAt(root, x, y) ?? hitTest(root, x, y);
     while (node) {
+      if (isScrollOwned(node)) return true;
       if (node.style.overflow === "scroll") {
         const max = scrollOverflow(node);
         if (max > 0) {
@@ -500,19 +509,19 @@ export function createPointerDispatcher(
   return {
     dispatch(type, x, y, extras) {
       try {
-        dispatchInner(type, x, y, extras);
+        return dispatchInner(type, x, y, extras);
       } catch (error) {
         onError?.(error);
+        return false;
       }
     },
     stopFlick,
   };
 
-  function dispatchInner(type: PointerType, x: number, y: number, extras?: PointerExtras) {
+  function dispatchInner(type: PointerType, x: number, y: number, extras?: PointerExtras): boolean {
       if (type === "scroll") {
         stopFlick();
-        applyScroll(x, y, extras?.deltaY ?? 0);
-        return;
+        return applyScroll(x, y, extras?.deltaY ?? 0);
       }
 
       if (type === "mousemove") {
@@ -521,14 +530,14 @@ export function createPointerDispatcher(
             const dy = lastPanY - y;
             lastPanY = y;
             panBy(x, y, dy);
-            return;
+            return false;
           }
           if (!touchDecided) {
             const dx = x - pressX;
             const dy = y - pressY;
             if (dx * dx + dy * dy < TOUCH_SLOP * TOUCH_SLOP) {
               setHovered(hitTest(root, x, y));
-              return;
+              return false;
             }
             touchDecided = true;
             const gestureDy = pressY - y;
@@ -536,7 +545,7 @@ export function createPointerDispatcher(
               stealPressForPan();
               lastPanY = y;
               panBy(x, y, gestureDy);
-              return;
+              return false;
             }
           }
         }
@@ -554,7 +563,7 @@ export function createPointerDispatcher(
           }
           captured._eventHandlers.onDrag?.(lx, ly, x, y);
         }
-        return;
+        return false;
       }
 
       if (type === "mousedown") {
@@ -565,7 +574,7 @@ export function createPointerDispatcher(
         if (!hit) {
           captured = null;
           focusManager.blur();
-          return;
+          return false;
         }
 
         // A press inside a focus scope activates that scope (restoring its
@@ -577,7 +586,7 @@ export function createPointerDispatcher(
         if (runMouseDownCapture(hit, x, y)) {
           captured = null;
           touchDecided = true;
-          return;
+          return false;
         }
 
         captured = hit;
@@ -586,7 +595,7 @@ export function createPointerDispatcher(
         const focusable = nearestFocusable(hit);
         if (focusable) focusManager.focus(focusable);
         else focusManager.blur();
-        return;
+        return false;
       }
 
       if (type === "mouseup") {
@@ -596,7 +605,7 @@ export function createPointerDispatcher(
           setHovered(null);
           endPress();
           if (flick !== 0) startFlick(flick, x, y);
-          return;
+          return false;
         }
         const target = captured;
         const hit = hitTest(root, x, y);
@@ -614,7 +623,7 @@ export function createPointerDispatcher(
         endPress();
         // A finger leaves no pointer. Do not keep the last box hovered.
         setHovered(kind === "touch" ? null : hit);
-        return;
+        return false;
       }
 
       if (type === "dblclick") {
@@ -624,6 +633,7 @@ export function createPointerDispatcher(
           hit._eventHandlers.onDoubleClick?.(lx, ly);
         }
       }
+      return false;
   }
 }
 

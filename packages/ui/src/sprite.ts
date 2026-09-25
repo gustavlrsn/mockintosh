@@ -78,3 +78,45 @@ export function fromGrid(width: number, height: number, rows: string[]): Sprite 
   }
   return { width, height, data, mask };
 }
+
+const smallIcons = new WeakMap<Sprite, Sprite>();
+
+/**
+ * The 16×16 icon the menu bar shows. A sprite that is already 16×16 is
+ * returned as-is; a larger one (the usual 32×32 `ICN#`) is reduced by
+ * majority vote of each block, ties going to black so a one-pixel stroke
+ * survives. This is the stand-in for a hand-drawn `ics#`.
+ */
+export function smallIcon(sprite: Sprite, size = 16): Sprite {
+  if (sprite.width === size && sprite.height === size) return sprite;
+  const cached = smallIcons.get(sprite);
+  if (cached && cached.width === size && cached.height === size) return cached;
+  const data = new Uint8Array(size * size);
+  const mask = sprite.mask ? new Uint8Array(size * size) : undefined;
+  for (let y = 0; y < size; y++) {
+    const y0 = Math.floor((y * sprite.height) / size);
+    const y1 = Math.max(y0 + 1, Math.floor(((y + 1) * sprite.height) / size));
+    for (let x = 0; x < size; x++) {
+      const x0 = Math.floor((x * sprite.width) / size);
+      const x1 = Math.max(x0 + 1, Math.floor(((x + 1) * sprite.width) / size));
+      let opaque = 0;
+      let black = 0;
+      let total = 0;
+      for (let sy = y0; sy < y1; sy++) {
+        for (let sx = x0; sx < x1; sx++) {
+          const i = sy * sprite.width + sx;
+          total++;
+          if (sprite.mask && sprite.mask[i] === 0) continue;
+          opaque++;
+          if (sprite.data[i] === BLACK) black++;
+        }
+      }
+      const out = y * size + x;
+      data[out] = opaque > 0 && black * 2 >= opaque ? BLACK : WHITE;
+      if (mask) mask[out] = opaque * 2 >= total ? 1 : 0;
+    }
+  }
+  const reduced: Sprite = mask ? { width: size, height: size, data, mask } : { width: size, height: size, data };
+  smallIcons.set(sprite, reduced);
+  return reduced;
+}

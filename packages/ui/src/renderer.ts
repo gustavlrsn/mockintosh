@@ -134,12 +134,25 @@ export const {
   ref,
 } = renderer;
 
+function hostTrace(message: string): void {
+  const write = (globalThis as { trace?: (s: string) => void }).trace;
+  if (typeof write === "function") write(`${message}\n`);
+}
+
 /** Push the component name so host leaves created inside it record `debugOwner`. */
 export function createComponent<T>(Comp: (props: T) => CanvasNode, props: T): CanvasNode {
-  const label = typeof Comp === "function" ? Comp.name : "";
+  const label = typeof Comp === "function" ? Comp.name || "?" : String(Comp);
+  if (typeof Comp !== "function") {
+    hostTrace(`cc:not-fn ${label}`);
+    throw new TypeError(`createComponent: ${label} is not a function`);
+  }
   if (label) ownerStack.push(label);
   try {
     return renderer.createComponent(Comp, props);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    hostTrace(`cc:${label}: ${message}`);
+    throw error;
   } finally {
     if (label) ownerStack.pop();
   }

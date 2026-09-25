@@ -258,7 +258,7 @@ describe("scroll bubbling", () => {
     inner._eventHandlers.onClick = () => {};
     outer._eventHandlers.onScroll = (dy) => deltas.push(dy);
     const ptr = createPointerDispatcher(root, createFocusManager(root));
-    ptr.dispatch("scroll", 30, 30, { deltaY: 16 });
+    expect(ptr.dispatch("scroll", 30, 30, { deltaY: 16 })).toBe(true);
     expect(deltas).toEqual([16]);
   });
 
@@ -276,9 +276,11 @@ describe("scroll bubbling", () => {
     computeLayout(root, 80, 80, noMeasure);
 
     const ptr = createPointerDispatcher(root, createFocusManager(root));
-    ptr.dispatch("scroll", 20, 20, { deltaY: 16 });
+    expect(ptr.dispatch("scroll", 20, 20, { deltaY: 16 })).toBe(true);
     expect(pane._scrollOffset).toBe(16);
-    ptr.dispatch("scroll", 20, 20, { deltaY: 200 });
+    expect(ptr.dispatch("scroll", 20, 20, { deltaY: 200 })).toBe(true);
+    expect(pane._scrollOffset).toBe(60);
+    expect(ptr.dispatch("scroll", 20, 20, { deltaY: 16 })).toBe(false);
     expect(pane._scrollOffset).toBe(60);
   });
 
@@ -301,6 +303,77 @@ describe("scroll bubbling", () => {
     expect(pane._scrollOffset).toBe(16);
     expect(root._dirty).toBe(false);
     expect(content.layout.y).toBe(0);
+  });
+
+  it("returns false when nothing claims the wheel", () => {
+    const root = createNode("_root");
+    root.style = { width: 80, height: 80 };
+    computeLayout(root, 80, 80, noMeasure);
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    expect(ptr.dispatch("scroll", 10, 10, { deltaY: 16 })).toBe(false);
+    expect(ptr.dispatch("mousemove", 10, 10)).toBe(false);
+    expect(ptr.dispatch("mousedown", 10, 10)).toBe(false);
+  });
+
+  it("walks to an ancestor that can still move", () => {
+    const root = createNode("_root");
+    root.style = { width: 80, height: 80 };
+    const outer = createNode("box");
+    outer.style = { overflow: "scroll", width: 80, height: 40 };
+    const inner = createNode("box");
+    inner.style = { overflow: "scroll", width: 80, height: 80 };
+    const content = createNode("box");
+    content.style = { width: 80, height: 160 };
+    inner.children = [content];
+    content.parent = inner;
+    outer.children = [inner];
+    inner.parent = outer;
+    root.children = [outer];
+    outer.parent = root;
+    computeLayout(root, 80, 80, noMeasure);
+
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    expect(ptr.dispatch("scroll", 20, 10, { deltaY: 200 })).toBe(true);
+    expect(inner._scrollOffset).toBeGreaterThan(0);
+    const innerMax = inner._scrollOffset;
+    expect(ptr.dispatch("scroll", 20, 10, { deltaY: 16 })).toBe(true);
+    expect(inner._scrollOffset).toBe(innerMax);
+    expect(outer._scrollOffset).toBeGreaterThan(0);
+  });
+
+  it("returns false when a scroll handler throws", () => {
+    const { root, outer } = nestedTree();
+    const errors: unknown[] = [];
+    outer._eventHandlers.onScroll = () => {
+      throw new Error("boom");
+    };
+    const ptr = createPointerDispatcher(root, createFocusManager(root), (error) => {
+      errors.push(error);
+    });
+    expect(ptr.dispatch("scroll", 30, 30, { deltaY: 16 })).toBe(false);
+    expect(errors).toHaveLength(1);
+  });
+
+  it("leaves an owned pane's offset to its owner", () => {
+    const root = createNode("_root");
+    root.style = { width: 80, height: 80 };
+    const pane = createNode("box");
+    pane.style = { overflow: "scroll", width: 80, height: 40 };
+    const wrapper = createNode("box");
+    wrapper.style = { width: 80, height: 40 };
+    pane.children = [wrapper];
+    wrapper.parent = pane;
+    root.children = [pane];
+    pane.parent = root;
+    computeLayout(root, 80, 80, noMeasure);
+    const deltas: number[] = [];
+    pane._eventHandlers.onScroll = (dy: number) => deltas.push(dy);
+    setNodeProperty(pane, "scrollOffset", 30);
+
+    const ptr = createPointerDispatcher(root, createFocusManager(root));
+    expect(ptr.dispatch("scroll", 20, 20, { deltaY: 16 })).toBe(true);
+    expect(deltas).toEqual([16]);
+    expect(pane._scrollOffset).toBe(30);
   });
 
   it("resets overflow scroll when scrollKey changes", () => {

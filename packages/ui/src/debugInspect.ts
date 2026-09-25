@@ -8,6 +8,7 @@ const OMIT_PROPS = new Set([
   "semantic",
   "hitMask",
   "onPaint",
+  "onLayout",
   "pixels",
   "scrollOffset",
 ]);

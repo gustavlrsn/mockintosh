@@ -10,17 +10,42 @@ import {
   type FontFamilyInfo,
 } from "./families";
 
-const strikes = new Map<string, Map<number, DeckerFont>>();
-const aliases = new Map<string, { family: string; size: number }>(Object.entries(ROLE_ALIASES));
-const defaults = new Map<string, number>(Object.entries(FAMILY_DEFAULTS));
+let strikes: Map<string, Map<number, DeckerFont>> | undefined;
+let pendingStrikes: Map<string, Map<number, string>> | undefined;
+let pendingBaked: Map<string, { family: string; size: number; data: string }> | undefined;
+let aliases: Map<string, { family: string; size: number }> | undefined;
+let defaults: Map<string, number> | undefined;
+let infoByKey: Map<string, RegisteredFontInfo> | undefined;
+let bakedByName: Map<string, DeckerFont> | undefined;
+
+function strikeMap(): Map<string, Map<number, DeckerFont>> {
+  return (strikes ??= new Map());
+}
+function pendingStrikeMap(): Map<string, Map<number, string>> {
+  return (pendingStrikes ??= new Map());
+}
+function pendingBakedMap(): Map<string, { family: string; size: number; data: string }> {
+  return (pendingBaked ??= new Map());
+}
+function aliasMap(): Map<string, { family: string; size: number }> {
+  return (aliases ??= new Map(Object.entries(ROLE_ALIASES)));
+}
+function defaultMap(): Map<string, number> {
+  return (defaults ??= new Map(Object.entries(FAMILY_DEFAULTS)));
+}
+function infoMap(): Map<string, RegisteredFontInfo> {
+  return (infoByKey ??= new Map());
+}
+function bakedMap(): Map<string, DeckerFont> {
+  return (bakedByName ??= new Map());
+}
+
 export interface RegisteredFontInfo {
   ascent: number;
   descent: number;
   leading: number;
 }
 
-const infoByKey = new Map<string, RegisteredFontInfo>();
-const bakedByName = new Map<string, DeckerFont>();
 let builtInsInitialized = false;
 
 export function fontInfoKey(family: string, size: number): string {
@@ -29,15 +54,15 @@ export function fontInfoKey(family: string, size: number): string {
 
 export function lookupFontInfo(font: DeckerFont): RegisteredFontInfo | undefined {
   if (font.size != null) {
-    const sized = infoByKey.get(fontInfoKey(font.name, font.size));
+    const sized = infoMap().get(fontInfoKey(font.name, font.size));
     if (sized) return sized;
   }
-  return infoByKey.get(font.name);
+  return infoMap().get(font.name);
 }
 
 function rememberInfo(family: string, size: number, info: RegisteredFontInfo | undefined): void {
   if (!info) return;
-  infoByKey.set(fontInfoKey(family, size), info);
+  infoMap().set(fontInfoKey(family, size), info);
 }
 
 function loadStrike(family: string, size: number, data: string): DeckerFont {
@@ -47,13 +72,13 @@ function loadStrike(family: string, size: number, data: string): DeckerFont {
 }
 
 function putStrike(family: string, size: number, font: DeckerFont): void {
-  let bySize = strikes.get(family);
+  let bySize = strikeMap().get(family);
   if (!bySize) {
     bySize = new Map();
-    strikes.set(family, bySize);
+    strikeMap().set(family, bySize);
   }
   bySize.set(size, font);
-  if (!defaults.has(family)) defaults.set(family, size);
+  if (!defaultMap().has(family)) defaultMap().set(family, size);
 }
 
 function nearestSize(sizes: Iterable<number>, requested: number): number {
@@ -70,20 +95,52 @@ function nearestSize(sizes: Iterable<number>, requested: number): number {
   return best;
 }
 
+function knownSizes(family: string): number[] {
+  const decoded = strikeMap().get(family);
+  const pending = pendingStrikeMap().get(family);
+  const sizes = new Set<number>();
+  if (decoded) for (const size of decoded.keys()) sizes.add(size);
+  if (pending) for (const size of pending.keys()) sizes.add(size);
+  return [...sizes];
+}
+
+function ensureStrike(family: string, size: number): DeckerFont | null {
+  const have = strikeMap().get(family)?.get(size);
+  if (have) return have;
+  const data = pendingStrikeMap().get(family)?.get(size);
+  if (!data) return null;
+  const font = loadStrike(family, size, data);
+  putStrike(family, size, font);
+  pendingStrikeMap().get(family)?.delete(size);
+  return font;
+}
+
+function ensureBaked(name: string): DeckerFont | null {
+  const have = bakedMap().get(name);
+  if (have) return have;
+  const pending = pendingBakedMap().get(name);
+  if (!pending) return null;
+  const font = loadFont(name, pending.data);
+  font.size = pending.size;
+  bakedMap().set(name, font);
+  pendingBakedMap().delete(name);
+  return font;
+}
+
 export function resolveFaceRef(name: string = "body", size?: number): { family: string; size: number } {
   initBuiltinFonts();
-  if (bakedByName.has(name)) {
-    const baked = bakedByName.get(name)!;
-    return { family: name, size: baked.size ?? size ?? 0 };
+  if (bakedMap().has(name) || pendingBakedMap().has(name)) {
+    const baked = ensureBaked(name);
+    return { family: name, size: baked?.size ?? size ?? 0 };
   }
-  const alias = aliases.get(name);
+  const alias = aliasMap().get(name);
   const family = alias?.family ?? name;
-  const bySize = strikes.get(family);
-  if (!bySize || bySize.size === 0) {
-    return { family, size: size ?? alias?.size ?? defaults.get(family) ?? 12 };
+  const sizes = knownSizes(family);
+  if (sizes.length === 0) {
+    return { family, size: size ?? alias?.size ?? defaultMap().get(family) ?? 12 };
   }
-  const requested = size ?? alias?.size ?? defaults.get(family) ?? [...bySize.keys()][0]!;
-  return { family, size: nearestSize(bySize.keys(), requested) };
+  const requested = size ?? alias?.size ?? defaultMap().get(family) ?? sizes[0]!;
+  return { family, size: nearestSize(sizes, requested) };
 }
 
 /** Decode a Decker font record and patch in Mockintosh's extra symbol glyphs for that name. */
@@ -94,16 +151,18 @@ function loadFont(name: string, data: string): DeckerFont {
 export function initBuiltinFonts(): void {
   if (builtInsInitialized) return;
   for (const strike of BUILTIN_STRIKES) {
-    const font = loadStrike(strike.family, strike.size, strike.data);
-    putStrike(strike.family, strike.size, font);
+    let bySize = pendingStrikeMap().get(strike.family);
+    if (!bySize) {
+      bySize = new Map();
+      pendingStrikeMap().set(strike.family, bySize);
+    }
+    bySize.set(strike.size, strike.data);
     rememberInfo(strike.family, strike.size, strike.info);
   }
   for (const [name, alias] of Object.entries(BAKED_STYLE_ALIASES)) {
-    const font = loadFont(name, alias.data);
-    font.size = alias.size;
-    bakedByName.set(name, font);
-    rememberInfo(name, alias.size, infoByKey.get(fontInfoKey(alias.family, alias.size)));
-    infoByKey.set(name, infoByKey.get(fontInfoKey(alias.family, alias.size)) ?? { ascent: 10, descent: 2, leading: 0 });
+    pendingBakedMap().set(name, alias);
+    rememberInfo(name, alias.size, infoMap().get(fontInfoKey(alias.family, alias.size)));
+    infoMap().set(name, infoMap().get(fontInfoKey(alias.family, alias.size)) ?? { ascent: 10, descent: 2, leading: 0 });
   }
   builtInsInitialized = true;
 }
@@ -115,22 +174,25 @@ export function initBuiltinFonts(): void {
  */
 export function registerFont(name: string, data: string, size?: number): DeckerFont {
   initBuiltinFonts();
-  const alias = aliases.get(name);
+  const alias = aliasMap().get(name);
   const family = alias?.family ?? name;
-  const point = size ?? alias?.size ?? defaults.get(family) ?? 12;
+  const point = size ?? alias?.size ?? defaultMap().get(family) ?? 12;
   const font = loadStrike(family, point, data);
   putStrike(family, point, font);
-  defaults.set(family, point);
+  defaultMap().set(family, point);
   return font;
 }
 
 export function getFont(name: string = "body", size?: number): DeckerFont | null {
   initBuiltinFonts();
-  const baked = bakedByName.get(name);
-  if (baked && size === undefined) return baked;
+  if (size === undefined && (bakedMap().has(name) || pendingBakedMap().has(name))) {
+    return ensureBaked(name);
+  }
   const ref = resolveFaceRef(name, size);
-  if (bakedByName.has(ref.family)) return bakedByName.get(ref.family) ?? null;
-  return strikes.get(ref.family)?.get(ref.size) ?? null;
+  if (bakedMap().has(ref.family) || pendingBakedMap().has(ref.family)) {
+    return ensureBaked(ref.family);
+  }
+  return ensureStrike(ref.family, ref.size);
 }
 
 export function requireFont(name: string = "body", size?: number): DeckerFont {
@@ -141,17 +203,19 @@ export function requireFont(name: string = "body", size?: number): DeckerFont {
 
 export function listFonts(): string[] {
   initBuiltinFonts();
-  const extra = [...strikes.keys()].filter((name) => !LISTED_FONT_NAMES.includes(name));
-  extra.sort();
-  return [...LISTED_FONT_NAMES, ...extra];
+  const extra = new Set<string>();
+  for (const name of strikeMap().keys()) extra.add(name);
+  for (const name of pendingStrikeMap().keys()) extra.add(name);
+  const listed = LISTED_FONT_NAMES as readonly string[];
+  const extras = [...extra].filter((name) => !listed.includes(name));
+  extras.sort();
+  return [...listed, ...extras];
 }
 
 export function listFontSizes(name: string): number[] {
   initBuiltinFonts();
   const { family } = resolveFaceRef(name);
-  const bySize = strikes.get(family);
-  if (!bySize) return [];
-  return [...bySize.keys()].sort((a, b) => a - b);
+  return knownSizes(family).sort((a, b) => a - b);
 }
 
 export function listFontFamilies(): FontFamilyInfo[] {
@@ -162,7 +226,7 @@ export function listFontFamilies(): FontFamilyInfo[] {
       const sizes = listFontSizes(name);
       return {
         name,
-        defaultSize: defaults.get(name) ?? sizes[0] ?? 12,
+        defaultSize: defaultMap().get(name) ?? sizes[0] ?? 12,
         sizes,
       };
     });

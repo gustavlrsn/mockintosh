@@ -14,6 +14,7 @@ import { inspectTree, type InspectionNode } from "./inspection";
 import { render, _setRepaintHook } from "./renderer";
 import { createNode, markDirty } from "./nodes";
 import { computeLayout } from "./layout";
+import { notifyLayoutChanges } from "./layoutObserver";
 import { createMeasureFunc, MeasureContext } from "./measure";
 import { createDrawContext, drawTree, resizeDrawContext } from "./draw";
 import { createFocusManager, applyAutoFocus } from "./focus";
@@ -70,13 +71,15 @@ export interface UIInstance {
 
   /**
    * Dispatch a pointer event. Hit-tests the live node tree with capture.
+   * `"scroll"` returns whether a scroll view or `onScroll` handler consumed
+   * the delta. Other pointer types return false.
    */
   dispatchPointer(
     type: PointerType,
     x: number,
     y: number,
     extras?: PointerExtras
-  ): void;
+  ): boolean;
 
   /**
    * Dispatch a keyboard event to the currently focused element.
@@ -122,9 +125,15 @@ const DEFAULT_MODIFIERS: Modifiers = {
   meta: false,
 };
 
+function hostTrace(message: string): void {
+  const write = (globalThis as { trace?: (s: string) => void }).trace;
+  if (typeof write === "function") write(`${message}\n`);
+}
+
 export function createUI(config: UIConfig): UIInstance {
   let screen = config.screen;
   const services: UIServices = config.services ?? {};
+  hostTrace("ui:signals");
   const [theme, setThemeSignal] = createSignal<UITheme>(
     { ...DEFAULT_THEME, ...config.theme },
     { ownedWrite: true },
@@ -141,8 +150,10 @@ export function createUI(config: UIConfig): UIInstance {
 
   _setRepaintHook(scheduleRender);
 
+  hostTrace("ui:fonts");
   installFontBridge();
 
+  hostTrace("ui:draw");
   const drawCtx = createDrawContext(screen);
 
   const root = createNode("_root");
@@ -160,6 +171,12 @@ export function createUI(config: UIConfig): UIInstance {
 
   let autoFocusApplied = false;
 
+  function layoutIfDirty(): void {
+    if (!root._dirty) return;
+    computeLayout(root, width, height, measureFunc);
+    notifyLayoutChanges(root);
+  }
+
   let flushing = false;
   function uiFlush(): void {
     if (flushing) return;
@@ -174,12 +191,12 @@ export function createUI(config: UIConfig): UIInstance {
   const instance: UIInstance = {
     inspect() {
       uiFlush();
-      if (root._dirty) computeLayout(root, width, height, measureFunc);
+      layoutIfDirty();
       return inspectTree(root, focusManager);
     },
     debugInspect() {
       uiFlush();
-      if (root._dirty) computeLayout(root, width, height, measureFunc);
+      layoutIfDirty();
       return debugInspectTree(root);
     },
     render(component: () => JSX.Element): () => void {
@@ -241,22 +258,21 @@ export function createUI(config: UIConfig): UIInstance {
 
     frame(): void {
       uiFlush();
-      if (root._dirty) {
-        computeLayout(root, width, height, measureFunc);
-      }
+      layoutIfDirty();
       drawTree(root, drawCtx);
     },
 
     dispatchPointer(type, x, y, extras) {
-      pointer.dispatch(type, x, y, extras);
+      const consumed = pointer.dispatch(type, x, y, extras);
       uiFlush();
       // Selection, hover, and focus paint without mutating the Solid tree.
       scheduleRender();
+      return consumed;
     },
 
     cursorAt(x, y) {
       uiFlush();
-      if (root._dirty) computeLayout(root, width, height, measureFunc);
+      layoutIfDirty();
       return resolveCursorAt(root, x, y);
     },
 
@@ -324,5 +340,6 @@ export function createUI(config: UIConfig): UIInstance {
     },
   };
 
+  hostTrace("ui:done");
   return instance;
 }

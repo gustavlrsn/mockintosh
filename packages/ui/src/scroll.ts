@@ -17,6 +17,11 @@ export function scrollPaintOffset(node: CanvasNode): number {
   return Math.round(node._scrollOffset);
 }
 
+/** A pane whose owner sets `scrollOffset` and moves it from `onScroll`. */
+export function isScrollOwned(node: CanvasNode): boolean {
+  return node.props["scrollOffset"] !== undefined && node._eventHandlers.onScroll !== undefined;
+}
+
 /** How far `overflow: scroll` can move, from laid-out children. */
 export function scrollOverflow(node: CanvasNode): number {
   const bw = resolveBorderWidth(node);

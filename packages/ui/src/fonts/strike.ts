@@ -36,8 +36,11 @@ export const UI_FONT_FAMILY = {
 } as const;
 
 const FAMILY_NAMES = ["body", "menu", "mono"] as const;
-const extraFamilies = new Map<string, number>();
+let extraFamilies: Map<string, number> | undefined;
 let nextFamilyId = 3;
+function extraFamilyMap(): Map<string, number> {
+  return (extraFamilies ??= new Map());
+}
 
 /** Extra scanlines below the baseline so `DrText` underline (descent ≥ 2) can paint. */
 export const STRIKE_DESCENT = 2;
@@ -70,17 +73,17 @@ export function fontFamilyId(name: string): number {
   if (name === "menu") return UI_FONT_FAMILY.menu;
   if (name === "mono") return UI_FONT_FAMILY.mono;
   if (name === "body" || !name) return UI_FONT_FAMILY.body;
-  let id = extraFamilies.get(name);
+  let id = extraFamilyMap().get(name);
   if (id === undefined) {
     id = nextFamilyId++;
-    extraFamilies.set(name, id);
+    extraFamilyMap().set(name, id);
   }
   return id;
 }
 
 export function fontFamilyName(id: number): string {
   if (id >= 0 && id < FAMILY_NAMES.length) return FAMILY_NAMES[id]!;
-  for (const [name, fid] of extraFamilies) if (fid === id) return name;
+  for (const [name, fid] of extraFamilyMap()) if (fid === id) return name;
   return "body";
 }
 

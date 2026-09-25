@@ -34,6 +34,8 @@ export type {
   GradientAt,
   Ink,
   BoxProps,
+  LayoutSize,
+  LayoutChangeFn,
   TextProps,
   TextAlign,
   TextVerticalAlign,
@@ -123,7 +125,7 @@ export type { JSX, HostProps } from "./jsx-runtime";
 // -------------------------------------------------------------------------
 // Algorithms
 // -------------------------------------------------------------------------
-export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid } from "./sprite";
+export { BLACK, WHITE, defineSprite, encodeSprite, fromGrid, smallIcon } from "./sprite";
 export type { Sprite } from "./sprite";
 export { toBits, createDitherer, coverFrame, rasterizeFrame, isImageFrame, isDitheredAsset } from "./dither";
 export { paintDitherDissolve, bayerThreshold } from "./ditherDissolve";
@@ -316,5 +318,7 @@ export {
   createOptimistic,
   createOptimisticStore,
 } from "solid-js";
-export { Show, For, Match } from "solid-js";
+export { Show } from "./show";
+export type { ShowProps } from "./show";
+export { For, Match } from "solid-js";
 /** Solid control-flow `Switch` is `import { Switch } from "solid-js"`. The kit `Switch` is the on/off widget. */

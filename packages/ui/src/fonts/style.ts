@@ -28,7 +28,10 @@ const STYLE_ITALIC = 2;
 const STYLE_OUTLINE = 4;
 const STYLE_SHADOW = 8;
 
-const styleCache = new WeakMap<DeckerFont, Map<number, DeckerFont>>();
+let styleCache: WeakMap<DeckerFont, Map<number, DeckerFont>> | undefined;
+function styleCacheMap(): WeakMap<DeckerFont, Map<number, DeckerFont>> {
+  return (styleCache ??= new WeakMap());
+}
 
 export function fontStyleFromProps(props: Record<string, unknown> | undefined): FontStyle {
   return {
@@ -82,10 +85,10 @@ export function resolveFont(name: string = "body", style: FontStyle = {}, size?:
   const bits = styleBits(style);
   if (bits === 0) return base;
 
-  let byStyle = styleCache.get(base);
+  let byStyle = styleCacheMap().get(base);
   if (!byStyle) {
     byStyle = new Map();
-    styleCache.set(base, byStyle);
+    styleCacheMap().set(base, byStyle);
   }
   const cached = byStyle.get(bits);
   if (cached) return cached;
