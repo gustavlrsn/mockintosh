@@ -1,6 +1,6 @@
 import { createDitherer, type AsciiDitherOptions, type ImageFrame } from "@mockintosh/sdk";
 
-export type PhotoDither = "atkinson" | "bayer" | "ascii";
+export type PhotoDither = "atkinson" | "bayer" | "thermal" | "ascii";
 
 /** One constructor for the Photo Booth / Dither viewfinder modes. */
 export function createPhotoDitherer(

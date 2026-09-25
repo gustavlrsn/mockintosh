@@ -1,7 +1,7 @@
 /**
  * RGBA → 1-byte-per-pixel (`0` = white, `1` = black) — the `<bitmap>` /
- * `blitPixels` contract. Atkinson, Bayer, and ASCII are the Photo Booth
- * converters; threshold is the simple luminance cut Picture and Video Player used.
+ * `blitPixels` contract. Atkinson, Bayer, Thermal, and ASCII are the Photo
+ * Booth converters; threshold is the simple luminance cut Picture and Video Player used.
  */
 
 import { asciiToBits, createAsciiDitherer, type AsciiDitherOptions } from "./asciiDither.ts";
@@ -13,7 +13,8 @@ export interface ImageFrame {
   rgba: Uint8ClampedArray;
 }
 
-export type DitherMode = "threshold" | "atkinson" | "bayer" | "ascii";
+/** `thermal` is a clustered-dot halftone for thermal printers (see `CLUSTER_MAP`). */
+export type DitherMode = "threshold" | "atkinson" | "bayer" | "thermal" | "ascii";
 
 export interface DitherOptions extends AsciiDitherOptions {
   /** Luminance cut for `threshold` and Bayer (default 128). */
@@ -70,6 +71,31 @@ function bayerTo1bit(rgba: Uint8ClampedArray, w: number, h: number, out: Uint8Ar
   }
 }
 
+/**
+ * Clustered-dot halftone order for a 4×4 cell: ink grows outward from the
+ * centre as a solid clump instead of scattering single dots. Thermal heads
+ * barely mark an isolated dot, but a clump heats itself and prints, so more
+ * grey levels survive on receipt paper.
+ */
+const CLUSTER_MAP = [
+  [12, 5, 6, 13],
+  [4, 0, 1, 7],
+  [11, 3, 2, 8],
+  [15, 10, 9, 14],
+];
+
+function thermalTo1bit(rgba: Uint8ClampedArray, w: number, h: number, out: Uint8Array): void {
+  for (let y = 0; y < h; y++) {
+    const row = CLUSTER_MAP[y & 3];
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const ri = i << 2;
+      const ink = 255 - luminance(rgba[ri], rgba[ri + 1], rgba[ri + 2]);
+      out[i] = ink > (row[x & 3] + 0.5) * 16 ? 1 : 0;
+    }
+  }
+}
+
 function apply(
   frame: ImageFrame,
   mode: Exclude<DitherMode, "ascii">,
@@ -81,6 +107,7 @@ function apply(
   const len = frame.width * frame.height;
   if (mode === "atkinson") atkinsonTo1bit(frame.rgba, frame.width, frame.height, out, lum!);
   else if (mode === "bayer") bayerTo1bit(frame.rgba, frame.width, frame.height, out, cut);
+  else if (mode === "thermal") thermalTo1bit(frame.rgba, frame.width, frame.height, out);
   else thresholdTo1bit(frame.rgba, len, out, cut);
 }
 

@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import type { Plugin } from "vite";
 import { rasterizeFrame, type DitherMode, type ImageFrame } from "../dither.ts";
 
-const MODES = new Set<DitherMode>(["threshold", "atkinson", "bayer", "ascii"]);
+const MODES = new Set<DitherMode>(["threshold", "atkinson", "bayer", "thermal", "ascii"]);
 
 function parseDitherId(id: string): { path: string; params: URLSearchParams } | null {
   const clean = id.split("\0")[0];

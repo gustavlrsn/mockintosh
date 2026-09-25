@@ -38,6 +38,19 @@ describe("toBits", () => {
     expect([...out]).toEqual([1, 0, 1, 0]);
   });
 
+  it("thermal mode grows ink as one clump from the cell centre", () => {
+    const flat = (v: number) => frame(Array.from({ length: 4 }, () => Array(4).fill(v)));
+    // 4 of 16 dots: the 2×2 centre, not four scattered dots.
+    expect([...toBits(flat(255 - 64), "thermal")]).toEqual([
+      0, 0, 0, 0,
+      0, 1, 1, 0,
+      0, 1, 1, 0,
+      0, 0, 0, 0,
+    ]);
+    expect([...toBits(flat(255), "thermal")]).toEqual(Array(16).fill(0));
+    expect([...toBits(flat(0), "thermal")]).toEqual(Array(16).fill(1));
+  });
+
   it("ascii mode stamps a solid dark 8×8 tile black", () => {
     const src = frame(Array.from({ length: 8 }, () => Array(8).fill(0)));
     const bits = toBits(src, "ascii");
