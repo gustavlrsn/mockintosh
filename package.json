@@ -24,6 +24,7 @@
     "test:watch": "vitest",
     "knip": "knip",
     "companion": "tsx scripts/companion/main.ts",
+    "mockintosh": "tsx scripts/cli/main.ts",
     "mockintosh-sh": "tsx scripts/mockintosh-sh.ts",
     "mcp": "tsx scripts/companion/mcp.ts",
     "test:m1": "tsx scripts/companion/demo.ts",

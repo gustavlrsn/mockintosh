@@ -48,7 +48,7 @@ Traps are grouped as managers in documentation only:
 
 Finder and `useApp().fs` keep talking **node ids and roles**. File traps resolve a path through `Disk`: `/disk` is a shell prefix for the volume root, not a mount. Catalog v3 revisions and compare-and-swap writes make two writers (human + agent) safe.
 
-`@mockintosh/ui` exposes detached immutable inspection snapshots. Automation validates live targets and routes gestures through the same boot input handlers as human events. The S1 shell is an adapter over traps; `help` comes from the command table. The browser's opt-in companion, CLI, and MCP select an explicit boot and invoke traps. Disconnect never causes a headless fallback or automatic mutation replay.
+`@mockintosh/ui` exposes detached immutable inspection snapshots. Automation validates live targets and routes gestures through the same boot input handlers as human events. The S1 shell is an adapter over traps; `help` comes from the command table. The browser's opt-in companion, CLI, and MCP select an explicit boot and invoke traps. `npm run mockintosh` (`scripts/cli`) turns that boot's operation table into commands: flags are the trap's property names, and `pair` / `sessions` are the only hand-written ones. Disconnect never causes a headless fallback or automatic mutation replay.
 
 Handlers receive an `Execution` with the caller, cancellation, streams, the boot `Disk`, and nested `invoke`. See [toolbox-cut.md](docs/toolbox-cut.md) and [M1 operation](docs/m1-operation.md).
 
