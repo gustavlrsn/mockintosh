@@ -1,34 +1,64 @@
-import { createSignal } from "solid-js";
+import { Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
 import { Button, TextInput } from "@mockintosh/ui";
-import { useApp, defineApp } from "@mockintosh/sdk";
+import { Markdown, useApp, defineApp } from "@mockintosh/sdk";
 
-type Mode = "markdown" | "stream" | "textweb";
+interface Page {
+  title: string;
+  markdown: string;
+}
+
+function normalizeUrl(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^[^\s]+\.[^\s]+$/.test(s)) return `https://${s}`;
+  return null;
+}
 
 function Safari(props: Record<string, unknown>): JSX.Element {
-  const win = useApp().window;
-  const fetch = useApp().fetch!; // present: the app requires "network"
+  const app = useApp();
+  const win = app.window;
+  const fetch = app.fetch!; // present: the app requires "network"
+  createEffect(() => true, () => {
+    app.setMenus([
+      { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] },
+    ]);
+  });
   const [url, setUrl] = createSignal((props.url as string) ?? "https://example.com");
-  const [body, setBody] = createSignal("Enter a URL and press Go.");
-  const [mode, setMode] = createSignal<Mode>((props.mode as Mode) || "markdown");
+  const [page, setPage] = createSignal<Page | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
   const [busy, setBusy] = createSignal(false);
 
-  async function go(): Promise<void> {
-    const target = url().trim();
-    if (!target) return;
+  async function go(next?: string): Promise<void> {
+    const target = normalizeUrl(next ?? url());
+    if (!target) {
+      setError("Enter a web address.");
+      return;
+    }
+    setUrl(target);
     setBusy(true);
+    setError(null);
     try {
       const resp = await fetch("/api/browse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: target, mode: mode() }),
+        body: JSON.stringify({ url: target }),
       });
-      const text = await resp.text();
-      setBody(text.slice(0, 8000) || "(empty)");
+      const data = (await resp.json()) as Page & { error?: string };
+      if (!resp.ok || data.error || !data.markdown) {
+        setPage(null);
+        setError(data.error || `Could not load page (${resp.status})`);
+        return;
+      }
+      setPage({ title: data.title || target, markdown: data.markdown });
+      win.setTitle(data.title || "Safari");
     } catch {
-      setBody("Failed to load page.");
+      setPage(null);
+      setError("Failed to load page.");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   return (
@@ -37,16 +67,24 @@ function Safari(props: Record<string, unknown>): JSX.Element {
         <TextInput value={url()} onChange={setUrl} onSubmit={() => void go()} width={win.width() - 80} />
         <Button label={busy() ? "…" : "Go"} onClick={() => void go()} disabled={busy()} />
       </box>
-      <box height={16} flexDirection="row" gap={4} padding={2}>
-        <Button label="MD" onClick={() => setMode("markdown")} />
-        <Button label="Stream" onClick={() => setMode("stream")} />
-        <Button label="Textweb" onClick={() => setMode("textweb")} />
-        <text font="body">{mode()}</text>
-      </box>
       <box overflow="scroll" flexGrow={1} padding={6}>
-        <text font="body" wrap>
-          {body()}
-        </text>
+        <Show when={error()}>
+          <text font="body" wrap>{error()}</text>
+        </Show>
+        <Show when={!page() && !error() && !busy()}>
+          <text font="body" wrap>Enter a URL and press Go.</text>
+        </Show>
+        <Show when={busy() && !page()}>
+          <text font="body">Loading…</text>
+        </Show>
+        <Show when={page()}>
+          {(loaded) => (
+            <box flexDirection="column" gap={6} width="100%">
+              <text font="menu" wrap>{loaded().title}</text>
+              <Markdown text={loaded().markdown} />
+            </box>
+          )}
+        </Show>
       </box>
     </box>
   );
@@ -68,7 +106,7 @@ export const SafariStream = defineApp({
   title: "Safari Stream",
   icon: "icon/safari",
   defaultSize: { width: 400, height: 240 },
-  Component: (p) => <Safari {...p} mode="stream" />,
+  Component: Safari,
 });
 
 export const SafariTextweb = defineApp({
@@ -77,5 +115,5 @@ export const SafariTextweb = defineApp({
   title: "Safari Textweb",
   icon: "icon/safari",
   defaultSize: { width: 400, height: 240 },
-  Component: (p) => <Safari {...p} mode="textweb" />,
+  Component: Safari,
 });

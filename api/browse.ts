@@ -19,6 +19,23 @@ function normalizeUrl(raw: string): string {
   return `https://${raw}`;
 }
 
+/**
+ * linkedom has no `getComputedStyle`. Defuddle's HTML-string entry polyfills
+ * it; a raw `Document` does not, and extraction then keeps the whole page
+ * (navigation and all) after `standardizeContent` throws.
+ */
+export function documentFromHtml(html: string, url: string): Document {
+  const { document } = parseHTML(html);
+  const view = document.defaultView as (Window & { getComputedStyle?: unknown }) | null;
+  if (view && typeof view.getComputedStyle !== "function") {
+    view.getComputedStyle = (() => ({ display: "" })) as typeof getComputedStyle;
+  }
+  const doc = document as Document & { styleSheets?: StyleSheetList; URL: string };
+  if (!doc.styleSheets) doc.styleSheets = [] as unknown as StyleSheetList;
+  doc.URL = url;
+  return document;
+}
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
@@ -98,7 +115,7 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    const { document } = parseHTML(htmlText);
+    const document = documentFromHtml(htmlText, normalizedUrl);
     const result = await Defuddle(document, normalizedUrl, {
       markdown: true,
       useAsync: false,
