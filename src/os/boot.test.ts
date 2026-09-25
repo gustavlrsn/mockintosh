@@ -398,6 +398,70 @@ describe("bootOS on the headless platform", () => {
     expect(titleBarStripeLines(platform.lastFrame()!, even.x, even.y)).toBe(6);
   });
 
+  it("opens submenus on hover, runs their items, and binds their shortcuts", () => {
+    const ran: string[] = [];
+    registerApp({
+      id: "test-submenus",
+      title: "Subs",
+      icon: "icon/computer",
+      defaultSize: { width: 80, height: 60 },
+      Component: () => whiteBox(),
+      menus: [
+        {
+          label: "Things",
+          items: [
+            { label: "A", onClick: () => ran.push("A") },
+            {
+              type: "submenu",
+              label: "B",
+              items: [
+                { label: "C", onClick: () => ran.push("C") },
+                { type: "submenu", label: "D", items: [{ label: "E", shortcut: "J", onClick: () => ran.push("E") }] },
+              ],
+            },
+            { type: "submenu", label: "F", disabled: true, items: [{ label: "G", shortcut: "K", onClick: () => ran.push("G") }] },
+          ],
+        },
+      ],
+    });
+    os.services.openApp("test-submenus");
+    platform.tick();
+
+    const meta = { shift: false, ctrl: false, alt: false, meta: true };
+    for (const key of ["j", "k"]) {
+      platform.key({ type: "down", key, modifiers: meta });
+      platform.key({ type: "up", key, modifiers: meta });
+    }
+    expect(ran).toEqual(["E"]);
+
+    // Short labels keep every panel at the 80px minimum width; rows are 16px
+    // below a 4px pad, and a submenu's first row lines up with its item.
+    const hover = (x: number, y: number) => {
+      platform.pointer({ type: "move", x, y });
+      platform.tick();
+    };
+    const openThings = () => {
+      platform.click(34, 10);
+      platform.tick();
+    };
+
+    openThings();
+    hover(50, 47); // B
+    hover(130, 47); // C, in B's submenu beside the first panel
+    platform.click(130, 47);
+    platform.tick();
+    expect(ran).toEqual(["E", "C"]);
+
+    openThings();
+    hover(50, 47);
+    hover(130, 47);
+    hover(130, 63); // D
+    hover(200, 63); // E, a level deeper
+    platform.click(200, 63);
+    platform.tick();
+    expect(ran).toEqual(["E", "C", "E"]);
+  });
+
   it("a window can go full screen — covering the menubar — and come back, by menu shortcut too", () => {
     let services: AppServices | undefined;
     registerApp({

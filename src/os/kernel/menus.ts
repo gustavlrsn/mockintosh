@@ -1,5 +1,5 @@
 import { ServiceError } from "./errors";
-import type { MenubarActionItem, MenubarDefinition, MenubarRadioGroupDef } from "@mockintosh/sdk";
+import type { MenubarActionItem, MenubarDefinition, MenubarItemDef, MenubarRadioGroupDef } from "@mockintosh/sdk";
 import type { OSServices } from "../context";
 import { FINDER_APP_ID, getActiveAppId, getMenubarMenus, setOpenMenuIndex, setHighlightedMenuItem } from "../state";
 import { getApp } from "../apps";
@@ -66,6 +66,24 @@ export function appleMenu(os: OSServices): MenubarDefinition {
     }]
   };
 }
+/** An item that does something when chosen. */
+export type MenuCommand = MenubarActionItem | MenubarRadioGroupDef;
+
+/**
+ * Every command in `items`, depth-first, including those inside submenus —
+ * except under a disabled submenu, which can't be opened.
+ */
+export function* menuCommands(items: readonly MenubarItemDef[]): Generator<MenuCommand> {
+  for (const item of items) {
+    if (item.type === "separator") continue;
+    if (item.type === "submenu") {
+      if (!item.disabled) yield* menuCommands(item.items);
+      continue;
+    }
+    yield item;
+  }
+}
+
 export function runMenuItem(item: MenubarActionItem) {
   if (item.disabled || !item.onClick) throw new ServiceError("permission", "Menu item is unavailable");
   setOpenMenuIndex(null);
@@ -86,9 +104,12 @@ export function runNamedMenu(os: OSServices, menu: string, label: string) {
   const matches = menus(os).filter(m => m.label === menu);
   if (matches.length !== 1) throw new ServiceError(matches.length ? "ambiguity" : "missing-resource", "Menu must match exactly once");
   const actions: (() => void)[] = [];
-  for (const item of matches[0].items) {
-    if ("label" in item && item.label === label) actions.push(() => runMenuItem(item as MenubarActionItem));
-    if ("type" in item && item.type === "radiogroup") for (const option of item.items) if (option.label === label) actions.push(() => runRadioItem(item, option.value));
+  for (const item of menuCommands(matches[0].items)) {
+    if (item.type === "radiogroup") {
+      for (const option of item.items) if (option.label === label) actions.push(() => runRadioItem(item, option.value));
+    } else if (item.label === label) {
+      actions.push(() => runMenuItem(item));
+    }
   }
   if (actions.length !== 1) throw new ServiceError(actions.length ? "ambiguity" : "missing-resource", "Menu item must match exactly once");
   actions[0]();

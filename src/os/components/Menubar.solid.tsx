@@ -1,5 +1,5 @@
 import { appleMenu, runMenuItem, runRadioItem } from "../kernel/menus";
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
 import { measureText, COMMAND_KEY, CHECK_MARK, smallIcon, type Sprite } from "@mockintosh/ui";
 import { getApp } from "../apps";
@@ -15,7 +15,13 @@ import {
   setHighlightedMenuItem,
   setOpenMenuIndex,
 } from "../state";
-import type { MenubarDefinition, MenubarItemDef, MenubarActionItem, MenubarRadioGroupDef } from "@mockintosh/sdk";
+import type {
+  MenubarDefinition,
+  MenubarItemDef,
+  MenubarActionItem,
+  MenubarRadioGroupDef,
+  MenubarSubmenuDef,
+} from "@mockintosh/sdk";
 
 /** The application menu, on the right. Distinct from the Apple menu (−1). */
 const APP_MENU = -2;
@@ -49,13 +55,14 @@ function menuTitleWidth(label: string): number {
   return measureText(label, MENU_FONT) + LABEL_PAD * 2;
 }
 
-function menuDropdownWidth(menu: MenubarDefinition): number {
+function menuDropdownWidth(items: MenubarItemDef[]): number {
   let max = 80;
-  for (const item of menu.items) {
+  for (const item of items) {
     if ("label" in item && item.label) {
       const w = measureText(item.label, MENU_FONT);
       const shortcut = "shortcut" in item ? (item as MenubarActionItem).shortcut : undefined;
-      const sw = shortcut ? measureText(`${COMMAND_KEY}${shortcut}`, MENU_FONT) + 16 : 0;
+      const sw = shortcut ? measureText(`${COMMAND_KEY}${shortcut}`, MENU_FONT) + 16
+        : item.type === "submenu" ? SUBMENU_ARROW.width + 16 : 0;
       max = Math.max(max, w + sw + 32);
     } else if ((item as MenubarRadioGroupDef).type === "radiogroup") {
       for (const ri of (item as MenubarRadioGroupDef).items) {
@@ -272,6 +279,7 @@ export function Menubar(props: MenubarProps): JSX.Element {
           onClose={closeMenu}
           onRun={runItem}
           screenWidth={os.resolution.width}
+          screenBottom={os.resolution.height - props.top}
         />
       </Show>
     </box>
@@ -286,28 +294,141 @@ interface MenuDropdownProps {
   menu: MenubarDefinition;
   x: number;
   screenWidth: number;
+  /** Bottom of the screen in menubar coordinates. */
+  screenBottom: number;
   onClose: () => void;
   onRun: (item: MenubarActionItem) => void;
 }
 
 function MenuDropdown(props: MenuDropdownProps): JSX.Element {
-  const w = menuDropdownWidth(props.menu);
-  const h = menuDropdownHeight(props.menu.items);
-
   // Prevent dropdown from going off the right edge
-  const left = Math.min(props.x, props.screenWidth - w - 4);
+  const left = () => Math.min(props.x, props.screenWidth - menuDropdownWidth(props.menu.items) - 4);
 
-  const highlighted = getHighlightedMenuItem;
+  return (
+    <>
+      {/* Background overlay to capture clicks outside the menu and close it */}
+      <box
+        position="absolute"
+        left={0}
+        top={0}
+        width={10000}
+        height={10000}
+        onClick={() => props.onClose()}
+      />
+      <Show when={props.menu} keyed>
+        {(menu) => (
+          <MenuPanel
+            items={menu.items}
+            left={left()}
+            top={MENUBAR_H - 1}
+            screenWidth={props.screenWidth}
+            screenBottom={props.screenBottom}
+            highlighted={getHighlightedMenuItem}
+            setHighlighted={setHighlightedMenuItem}
+            onClose={props.onClose}
+            onRun={props.onRun}
+          />
+        )}
+      </Show>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MenuPanel — one box of items; submenus open another panel beside it
+// ---------------------------------------------------------------------------
+
+interface MenuPanelProps {
+  items: MenubarItemDef[];
+  left: number;
+  top: number;
+  screenWidth: number;
+  screenBottom: number;
+  /** Index of the highlighted row among the panel's selectable rows. */
+  highlighted: () => number | null;
+  setHighlighted: (index: number | null) => void;
+  onClose: () => void;
+  onRun: (item: MenubarActionItem) => void;
+}
+
+interface OpenSubmenu {
+  row: number;
+  item: MenubarSubmenuDef;
+  left: number;
+  top: number;
+}
+
+function MenuPanel(props: MenuPanelProps): JSX.Element {
+  const w = menuDropdownWidth(props.items);
+  const h = menuDropdownHeight(props.items);
+  // A panel that would run off the bottom slides up, but never over the menubar.
+  const top = Math.max(MENUBAR_H - 1, Math.min(props.top, props.screenBottom - h));
+  const left = props.left;
+
+  const highlighted = props.highlighted;
+  const [submenu, setSubmenu] = createSignal<OpenSubmenu | null>(null);
+  const [subHighlight, setSubHighlight] = createSignal<number | null>(null);
+
+  function openSubmenu(row: number, item: MenubarSubmenuDef, rowTop: number): void {
+    if (submenu()?.row === row) return;
+    const subW = menuDropdownWidth(item.items);
+    // Beside the item, overlapping the border; flipped left when there's no room.
+    const right = left + w - 1;
+    setSubHighlight(null);
+    setSubmenu({
+      row,
+      item,
+      left: right + subW <= props.screenWidth ? right : Math.max(0, left - subW + 1),
+      top: top + rowTop - MENU_PADDING,
+    });
+  }
+
+  function enterRow(row: number): void {
+    if (submenu()?.row !== row) setSubmenu(null);
+    props.setHighlighted(row);
+  }
 
   let itemIndex = 0;
   const itemNodes: JSX.Element[] = [];
 
   let yOffset = MENU_PADDING;
-  for (let i = 0; i < props.menu.items.length; i++) {
-    const item = props.menu.items[i];
-    const iSelf = i;
+  for (let i = 0; i < props.items.length; i++) {
+    const item = props.items[i];
 
-    if ((item as any).type === "separator") {
+    if (item.type === "submenu") {
+      const sub = item;
+      const yTop = yOffset;
+      const idxSelf = itemIndex++;
+      // Stays lit while its submenu is open, even with the pointer inside that.
+      const isHighlighted = () => !sub.disabled && (highlighted() === idxSelf || submenu()?.row === idxSelf);
+      const ink = () => (isHighlighted() ? 0 : 1);
+      itemNodes.push(
+        <box
+          position="absolute"
+          left={0}
+          top={yTop}
+          width={w}
+          height={ITEM_H}
+          background={isHighlighted() ? 1 : 0}
+          semantic={{ name: sub.label, role: "menu" }}
+          onMouseEnter={() => {
+            if (sub.disabled) return;
+            enterRow(idxSelf);
+            openSubmenu(idxSelf, sub, yTop);
+          }}
+          onMouseLeave={() => props.setHighlighted(null)}
+          onClick={() => { if (!sub.disabled) openSubmenu(idxSelf, sub, yTop); }}
+        >
+          <box position="absolute" left={8} top={0} width={w - 16} height={ITEM_H} justifyContent="center">
+            <text font={MENU_FONT} nowrap color={ink()} stipple={sub.disabled} verticalAlign="middle">
+              {sub.label}
+            </text>
+          </box>
+          <SubmenuArrow left={w - 8 - SUBMENU_ARROW.width} ink={ink()} />
+        </box>
+      );
+      yOffset += ITEM_H;
+    } else if (item.type === "separator") {
       itemNodes.push(
         <box
           position="absolute"
@@ -334,8 +455,8 @@ function MenuDropdown(props: MenuDropdownProps): JSX.Element {
             width={w}
             height={ITEM_H}
             background={isHighlighted() ? 1 : 0}
-            onMouseEnter={() => setHighlightedMenuItem(idxSelf)}
-            onMouseLeave={() => setHighlightedMenuItem(null)}
+            onMouseEnter={() => enterRow(idxSelf)}
+            onMouseLeave={() => props.setHighlighted(null)}
             onClick={() => {
               props.onClose();
               runRadioItem(rg, riSelf.value);
@@ -377,8 +498,11 @@ function MenuDropdown(props: MenuDropdownProps): JSX.Element {
           width={w}
           height={ITEM_H}
           background={isHighlighted() && !ai.disabled ? 1 : 0}
-          onMouseEnter={() => { if (!ai.disabled) setHighlightedMenuItem(idxSelf); }}
-          onMouseLeave={() => setHighlightedMenuItem(null)}
+          onMouseEnter={() => {
+            if (ai.disabled) setSubmenu(null);
+            else enterRow(idxSelf);
+          }}
+          onMouseLeave={() => props.setHighlighted(null)}
           onClick={() => { if (!ai.disabled) props.onRun(ai); }}
         >
           <box position="absolute" left={8} top={0} width={w - 16} height={ITEM_H} justifyContent="center">
@@ -403,30 +527,55 @@ function MenuDropdown(props: MenuDropdownProps): JSX.Element {
 
   return (
     <>
-      {/* Background overlay to capture clicks outside the menu and close it */}
-      <box
-        position="absolute"
-        left={0}
-        top={0}
-        width={10000}
-        height={10000}
-        onClick={() => props.onClose()}
-      />
-
-      {/* The dropdown box itself */}
       <box
         position="absolute"
         left={left}
-        top={MENUBAR_H - 1}
+        top={top}
         width={w}
         height={h}
         background={0}
         borderColor={1}
         borderWidth={1}
       >
-      {itemNodes}
-    </box>
+        {itemNodes}
+      </box>
+      <Show when={submenu()} keyed>
+        {(open) => (
+          <MenuPanel
+            items={open.item.items}
+            left={open.left}
+            top={open.top}
+            screenWidth={props.screenWidth}
+            screenBottom={props.screenBottom}
+            highlighted={subHighlight}
+            setHighlighted={setSubHighlight}
+            onClose={props.onClose}
+            onRun={props.onRun}
+          />
+        )}
+      </Show>
     </>
+  );
+}
+
+const SUBMENU_ARROW = { width: 4, height: 7 };
+
+/** The ▸ on a submenu item: a solid triangle, drawn rather than taken from the font. */
+function SubmenuArrow(props: { left: number; ink: 0 | 1 }): JSX.Element {
+  const top = Math.floor((ITEM_H - SUBMENU_ARROW.height) / 2);
+  return (
+    <For each={Array.from({ length: SUBMENU_ARROW.width }, (_, k) => k)}>
+      {(k) => (
+        <box
+          position="absolute"
+          left={props.left + k}
+          top={top + k}
+          width={1}
+          height={SUBMENU_ARROW.height - 2 * k}
+          background={props.ink}
+        />
+      )}
+    </For>
   );
 }
 

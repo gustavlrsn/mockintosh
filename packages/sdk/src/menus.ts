@@ -13,6 +13,7 @@ export interface MenubarDefinition {
 export type MenubarItemDef =
   | MenubarActionItem
   | MenubarRadioGroupDef
+  | MenubarSubmenuDef
   | MenubarSeparator;
 
 /** A clickable command. `shortcut` is a single character, shown and bound as ⌘+key. */
@@ -30,6 +31,18 @@ export interface MenubarRadioGroupDef {
   value: string;
   onValueChange: (value: string) => void;
   items: { label: string; value: string; disabled?: boolean }[];
+}
+
+/**
+ * A hierarchical menu: an item with a ▸ that opens `items` beside it on
+ * hover. Items inside keep their ⌘-shortcuts. A disabled submenu can't be
+ * opened, and its items' shortcuts don't fire.
+ */
+export interface MenubarSubmenuDef {
+  type: "submenu";
+  label: string;
+  disabled?: boolean;
+  items: MenubarItemDef[];
 }
 
 export interface MenubarSeparator {

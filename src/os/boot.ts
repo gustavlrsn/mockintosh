@@ -19,7 +19,7 @@ import { InitGraf, InitCursor, SetCursor, cursorState, globals as qd } from "@mo
 import { newBitMap } from "@mockintosh/quickdraw/bits";
 import { createDoubleClickTracker, createUI, type Modifiers } from "@mockintosh/ui";
 import { FileSystem } from "@mockintosh/fs";
-import type { AppContext, MenubarActionItem } from "@mockintosh/sdk";
+import type { AppContext } from "@mockintosh/sdk";
 import type { Platform, PlatformDropEvent, PlatformKeyEvent, PlatformPointerEvent } from "../platform/types";
 import { importHostFile, isImportableImage, resolveImportTarget } from "./hostImport";
 import { SpriteRegistry, registerBuiltinSprites } from "./sprites";
@@ -58,7 +58,7 @@ import {
 import { createSystemPrinters } from "./printers/manager";
 
 import { createDesktopSettings, registerDesktopSettings } from "./kernel/settings";
-import { runMenuItem } from "./kernel/menus";
+import { menuCommands, runMenuItem } from "./kernel/menus";
 import { registerShell } from "./shell";
 import { registerUIOperations } from "./kernel/uiService";
 import { Cancellation } from "./kernel/cancellation";
@@ -508,10 +508,10 @@ export async function bootOS(platform: Platform, options?: BootOptions): Promise
   /** ⌘-shortcut from the current menubar, if any. Returns true when handled. */
   function runMenuShortcut(key: string): boolean {
     for (const menu of getMenubarMenus()) {
-      for (const item of menu.items) {
-        const ai = item as MenubarActionItem;
-        if (ai.shortcut && ai.shortcut.toLowerCase() === key.toLowerCase() && !ai.disabled) {
-          if (ai.onClick) runMenuItem(ai);
+      for (const item of menuCommands(menu.items)) {
+        if (item.type === "radiogroup") continue;
+        if (item.shortcut && item.shortcut.toLowerCase() === key.toLowerCase() && !item.disabled) {
+          if (item.onClick) runMenuItem(item);
           setOpenMenuIndex(null);
           return true;
         }

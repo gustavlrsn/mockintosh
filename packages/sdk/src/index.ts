@@ -22,6 +22,7 @@ export type {
   MenubarItemDef,
   MenubarActionItem,
   MenubarRadioGroupDef,
+  MenubarSubmenuDef,
   MenubarSeparator,
 } from "./menus";
 

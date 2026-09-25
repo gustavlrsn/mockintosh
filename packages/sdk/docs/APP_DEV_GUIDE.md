@@ -431,7 +431,7 @@ export default defineApp({
 });
 ```
 
-Item types (`MenubarItemDef`): an action `{ label, shortcut?, disabled?, onClick? }`, a `{ type: "separator" }`, or a `{ type: "radiogroup", value, onValueChange, items }`. The Apple menu is the OS's; you can't add to it.
+Item types (`MenubarItemDef`): an action `{ label, shortcut?, disabled?, onClick? }`, a `{ type: "separator" }`, a `{ type: "radiogroup", value, onValueChange, items }`, or a hierarchical menu `{ type: "submenu", label, disabled?, items }` that opens beside its item on hover. Items inside a submenu keep their ⌘-shortcuts. Reach for a submenu when a menu grows past about 15 items, since a pull-down taller than the screen gets cut off. The Apple menu is the OS's; you can't add to it.
 
 ## Windows
 

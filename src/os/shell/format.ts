@@ -1,5 +1,5 @@
 import type { FileResource } from "../kernel";
-import type { MenubarDefinition } from "@mockintosh/sdk";
+import type { MenubarDefinition, MenubarItemDef } from "@mockintosh/sdk";
 import type { InspectionNode } from "@mockintosh/ui";
 
 /** Keep names and values on one line, including untrusted terminal control bytes. */
@@ -56,12 +56,15 @@ export const formatters = {
   },
   menu: (result: unknown, args: string[]): string => {
     if (args.length) return "";
-    return lines((result as MenubarDefinition[]).flatMap(menu => [text(menu.label), ...menu.items.flatMap(item => {
-      if (item.type === "separator") return ["  ---"];
+    const menuLines = (items: readonly MenubarItemDef[], indent: string): string[] => items.flatMap(item => {
+      if (item.type === "separator") return [`${indent}---`];
       if (item.type === "radiogroup") return item.items.map(option =>
-        `  ${option.value === item.value ? "* " : "  "}${text(option.label)}${option.disabled ? " (disabled)" : ""}`);
-      return [`  ${text(item.label)}${item.disabled ? " (disabled)" : ""}`];
-    })]));
+        `${indent}${option.value === item.value ? "* " : "  "}${text(option.label)}${option.disabled ? " (disabled)" : ""}`);
+      const line = `${indent}${text(item.label)}${item.disabled ? " (disabled)" : ""}`;
+      if (item.type === "submenu") return [`${line} >`, ...menuLines(item.items, `${indent}  `)];
+      return [line];
+    });
+    return lines((result as MenubarDefinition[]).flatMap(menu => [text(menu.label), ...menuLines(menu.items, "  ")]));
   },
   screenshot: (result: unknown): string => {
     return text((result as FileResource).path) + "\n";
