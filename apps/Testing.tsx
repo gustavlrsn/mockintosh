@@ -1,9 +1,15 @@
 import type { JSX } from "@mockintosh/ui";
-import { Button, Checkbox, TextInput, createSignal } from "@mockintosh/ui";
+import { Button, Checkbox, TextInput, createEffect, createSignal } from "@mockintosh/ui";
 import { defineApp, useApp } from "@mockintosh/sdk";
 
 function Testing(_props: Record<string, unknown>): JSX.Element {
-  const win = useApp().window;
+  const app = useApp();
+  const win = app.window;
+  createEffect(() => true, () => {
+    app.setMenus([
+      { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] },
+    ]);
+  });
   const [count, setCount] = createSignal(0);
   const [checked, setChecked] = createSignal(false);
   const [name, setName] = createSignal("System 7");

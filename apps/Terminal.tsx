@@ -1,4 +1,4 @@
-import { createSignal, onCleanup } from "solid-js";
+import { createEffect, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
 import { TextInput } from "@mockintosh/ui";
 import { defineApp, useApp } from "@mockintosh/sdk";
@@ -6,6 +6,11 @@ import { defineApp, useApp } from "@mockintosh/sdk";
 function Terminal(): JSX.Element {
   const app = useApp();
   const kernel = app.kernel!;
+  createEffect(() => true, () => {
+    app.setMenus([
+      { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] },
+    ]);
+  });
   const release = app.keepAlive?.();
   let session: string | undefined;
   let cwd = "/disk";

@@ -10,6 +10,11 @@ function looksLikeMarkdown(title: string, content: string): boolean {
 function FileViewer(props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const win = app.window;
+  createEffect(() => true, () => {
+    app.setMenus([
+      { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] },
+    ]);
+  });
   const title = () => String(props.title ?? "File");
   const content = createMemo(() => {
     if (typeof props.content === "string") return props.content;

@@ -541,6 +541,38 @@ describe("bootOS on the headless platform", () => {
     expect(titleBarStripeLines(platform.lastFrame()!, picture.x, picture.y)).toBe(6);
   });
 
+  it("File → Quit, installed by the app, ends every window of that launch", () => {
+    registerApp({
+      id: "test-quit",
+      title: "Quitter",
+      icon: "icon/computer",
+      defaultSize: { width: 80, height: 40 },
+      Component: () => {
+        const app = useApp();
+        createEffect(() => true, () => {
+          app.setMenus([
+            { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] },
+          ]);
+        });
+        return whiteBox();
+      },
+      onOpen(app) {
+        app.openWindow({ title: "A", position: { x: 40, y: 40 } });
+        app.openWindow({ title: "B", position: { x: 200, y: 40 } });
+      },
+    });
+
+    os.services.openApp("test-quit");
+    platform.tick();
+    expect(getWindows().filter((w) => w.appId === "test-quit")).toHaveLength(2);
+
+    const meta = { shift: false, ctrl: false, alt: false, meta: true };
+    platform.key({ type: "down", key: "q", modifiers: meta });
+    platform.key({ type: "up", key: "q", modifiers: meta });
+    platform.tick();
+    expect(getWindows().filter((w) => w.appId === "test-quit")).toHaveLength(0);
+  });
+
   it("writes a dropped host image onto the desktop", async () => {
     const desktop = os.services.fs.locate("desktop")!;
     expect(os.services.fs.child(desktop.id, "face.png")).toBeUndefined();

@@ -5,6 +5,7 @@ import {
   Checkbox,
   Errored,
   Loading,
+  createEffect,
   createMemo,
   createSignal,
   toBits,
@@ -89,6 +90,11 @@ async function loadReference(images: NonNullable<ReturnType<typeof useApp>["imag
  */
 export function AsciiCompare(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
+  createEffect(() => true, () => {
+    app.setMenus([
+      { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] },
+    ]);
+  });
   const win = app.window;
   const [showDiff, setShowDiff] = createSignal(false);
   const [contrast, setContrast] = createSignal(CONTRAST_DEFAULT);

@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onSettled, action } from "solid-js";
+import { createEffect, createSignal, onCleanup, onSettled, action } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
 import {Button, TextInput, TextEditor} from "@mockintosh/ui";
 import {defineApp, jobSchema, parse, resource, useApp} from "@mockintosh/sdk";
@@ -17,6 +17,16 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
 function SourceEditor(props: {path?: string}): JSX.Element {
   const app = useApp(), kernel = app.kernel!;
+  createEffect(() => true, () => {
+    app.setMenus([
+      { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => {
+        void (async () => {
+          if (text() !== saved() && await app.os.showDialog({ message: "Discard unsaved changes and quit?", buttons: ["Cancel", "Discard"] }) !== "Discard") return;
+          app.quit();
+        })();
+      } }] },
+    ]);
+  });
   const [path, setPath] = createSignal(props.path ?? "/disk/Applications/Counter.app");
   const [text, setText] = createSignal(""), [saved, setSaved] = createSignal("");
   const [status, setStatus] = createSignal("Load a project or create Counter."), [busy, setBusy] = createSignal(false), [line, setLine] = createSignal(1);

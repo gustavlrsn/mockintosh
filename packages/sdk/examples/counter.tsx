@@ -60,6 +60,10 @@ export default defineApp({
       ({ count: n, step: s }) => {
       app.setMenus([
         {
+          label: "File",
+          items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }],
+        },
+        {
           label: "Counter",
           items: [
             { label: "Reset", shortcut: "R", disabled: n === 0, onClick: () => setCount(0) },

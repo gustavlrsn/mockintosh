@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onSettled } from "solid-js";
+import { createEffect, createSignal, onCleanup, onSettled } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
 import { Button } from "@mockintosh/ui";
 import { createDitherer, defineApp, useApp, type VideoSource } from "@mockintosh/sdk";
@@ -6,6 +6,11 @@ import { createDitherer, defineApp, useApp, type VideoSource } from "@mockintosh
 function VideoPlayer(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const win = app.window;
+  createEffect(() => true, () => {
+    app.setMenus([
+      { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] },
+    ]);
+  });
   const [playing, setPlaying] = createSignal(false);
   const [frame, setFrame] = createSignal(0);
   let source: VideoSource | null = null;

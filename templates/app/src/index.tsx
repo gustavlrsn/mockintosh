@@ -63,6 +63,8 @@ export default defineApp({
             label: "File",
             items: [
               { label: "Reset", shortcut: "R", disabled: count === 0, onClick: () => setN(0) },
+              { type: "separator" },
+              { label: "Quit", shortcut: "Q", onClick: () => app.quit() },
             ],
           },
         ]);

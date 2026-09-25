@@ -16,6 +16,11 @@ const BUILD_INTENT = /\b(build|create|make|write)\b.*\b(app|counter|drawing|note
 function ChatGippity(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const win = app.window;
+  createEffect(() => true, () => {
+    app.setMenus([
+      { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] },
+    ]);
+  });
   const fetch = app.fetch!;
   const kernel = app.kernel!;
   const tools = allAgentTools(kernel.describe());

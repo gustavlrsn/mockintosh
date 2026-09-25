@@ -50,6 +50,11 @@ interface DevicePollResponse {
 function SpotifyPlayer(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const win = app.window;
+  createEffect(() => true, () => {
+    app.setMenus([
+      { label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] },
+    ]);
+  });
   const { storage } = app;
   const CLIENT_ID = app.env.config.SPOTIFY_CLIENT_ID ?? "";
   const REDIRECT_URI = spotifyRedirectUri(app.env.origin);

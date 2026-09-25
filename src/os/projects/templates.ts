@@ -1,9 +1,13 @@
 export type ProjectTemplate = "counter" | "blank" | "canvas";
 
 export function counterSource(id: string, title: string): string {
-  return `import { defineApp, createSignal, Button } from "@mockintosh/sdk";
+  return `import { defineApp, createEffect, createSignal, useApp, Button } from "@mockintosh/sdk";
 function Counter() {
+  const app = useApp();
   const [count, setCount] = createSignal(0);
+  createEffect(() => true, () => {
+    app.setMenus([{ label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] }]);
+  });
   return <box padding={12} gap={8}>
     <text nowrap semantic={{name: "counter-value"}}>{String(count())}</text>
     <Button name="counter-increment" label="Add one" onClick={() => setCount(count() + 1)} />
@@ -15,9 +19,13 @@ export default defineApp({ id: ${JSON.stringify(id)}, title: ${JSON.stringify(ti
 }
 
 export function blankSource(id: string, title: string): string {
-  return `import { defineApp } from "@mockintosh/sdk";
+  return `import { defineApp, createEffect, useApp } from "@mockintosh/sdk";
 
 function App() {
+  const app = useApp();
+  createEffect(() => true, () => {
+    app.setMenus([{ label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] }]);
+  });
   return <box padding={12}>
     <text font="body" nowrap semantic={{name: "app-title"}}>${title}</text>
   </box>;
@@ -34,7 +42,7 @@ export default defineApp({
 }
 
 export function canvasSource(id: string, title: string): string {
-  return `import { defineApp, createSignal, Button } from "@mockintosh/sdk";
+  return `import { defineApp, createEffect, createSignal, useApp, Button } from "@mockintosh/sdk";
 
 const W = 200;
 const H = 140;
@@ -45,7 +53,11 @@ function paint(pixels: Uint8Array, x: number, y: number, ink: number) {
 }
 
 function App() {
+  const app = useApp();
   const [pixels, setPixels] = createSignal(new Uint8Array(W * H));
+  createEffect(() => true, () => {
+    app.setMenus([{ label: "File", items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }] }]);
+  });
   const [tool, setTool] = createSignal<"pencil" | "eraser">("pencil");
   const stamp = (x: number, y: number) => {
     const next = pixels().slice();
