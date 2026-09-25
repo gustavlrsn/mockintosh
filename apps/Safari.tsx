@@ -69,7 +69,7 @@ function Safari(props: Record<string, unknown>): JSX.Element {
       </box>
       <box overflow="scroll" flexGrow={1} padding={6}>
         <Show when={error()}>
-          <text font="body" wrap>{error()}</text>
+          {(message) => <text font="body" wrap>{message()}</text>}
         </Show>
         <Show when={!page() && !error() && !busy()}>
           <text font="body" wrap>Enter a URL and press Go.</text>
