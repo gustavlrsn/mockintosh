@@ -41,6 +41,7 @@ describe("bootstrapFileSystem", () => {
     expect(names).toContain("Canvas");
     expect(names).toContain("MacPaint");
     expect(names).toContain("Dither");
+    expect(names).toContain("Trace");
     expect(names).not.toContain("scratch");
     expect(fs.locate("volume")?.name).toBe(STARTUP_VOLUME_NAME);
   });
@@ -71,6 +72,9 @@ describe("bootstrapFileSystem", () => {
       type: MIME.appShortcut,
     });
     expect(fs.attributes(dither!.id).icon).toBe("dither/icon");
+    const trace = fs.child(fs.locate("desktop")!.id, "Trace");
+    expect(trace).toMatchObject({ kind: "file", type: MIME.appShortcut });
+    expect(fs.attributes(trace!.id).icon).toBe("trace/icon");
   });
 
   it("updates a camera-icon Dither shortcut to Scanned Art", async () => {

@@ -1,7 +1,7 @@
 /**
  * Host file import — a file the user dragged from the real computer onto the
- * Mockintosh screen becomes an ordinary FS node. Dither (and later others)
- * then open it the usual Finder way.
+ * Mockintosh screen becomes an ordinary FS node. Dropping it on Dither or
+ * Trace opens that app; anything else lands in the folder under the pointer.
  */
 import { inferMimeType, isImageType, type FileSystem, type FSFile } from "@mockintosh/fs";
 import type { HostFileDrop } from "../platform/types";
@@ -9,6 +9,7 @@ import type { OSWindow } from "./state";
 import { windowContentRect, windowTotalHeight } from "./windowGeometry";
 
 export const DITHER_APP_ID = "dither";
+export const TRACE_APP_ID = "trace";
 export const IMPORTED_IMAGE_ICON = "icon/camera";
 
 export interface ImportTarget {
@@ -57,11 +58,11 @@ export function resolveImportTarget(
       x >= win.x && x < win.x + win.width && y >= win.y && y < win.y + height;
     if (!inside) continue;
 
-    if (win.appId === DITHER_APP_ID) {
+    if (win.appId === DITHER_APP_ID || win.appId === TRACE_APP_ID) {
       return {
         parentId: desktop.id,
         position: desktopPosition(x, y, menubarHeight),
-        openIn: DITHER_APP_ID,
+        openIn: win.appId,
       };
     }
     if (win.kind === "finder-folder") {

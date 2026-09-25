@@ -16,6 +16,7 @@ interface DesktopShortcut {
 const DESKTOP_SHORTCUTS: readonly DesktopShortcut[] = [
   { name: "Photo Booth",    appId: "photobooth",  icon: "icon/photobooth-smr-32" },
   { name: "Dither",         appId: "dither",      icon: "dither/icon" },
+  { name: "Trace",          appId: "trace",       icon: "trace/icon" },
   { name: "1984.mp4",       appId: "video",       icon: "icon/MacFlim" },
   { name: "Safari",         appId: "safari",      icon: "icon/safari" },
   { name: "App Store",      appId: "appstore",    icon: "icon/appstore-smr-32x32" },
@@ -46,16 +47,27 @@ export async function bootstrapFileSystem(fs: FileSystem): Promise<void> {
       await writeDesktopShortcut(fs, desktop.id, s);
     }
   } else {
-    const dither = DESKTOP_SHORTCUTS.find((s) => s.appId === "dither");
-    if (dither) {
-      const existing = fs.child(desktop.id, "Dither");
-      if (!existing) await writeDesktopShortcut(fs, desktop.id, dither);
-      else if (fs.attributes(existing.id).icon === "icon/camera") {
-        fs.setAttributes(existing.id, { icon: dither.icon });
-      }
-    }
+    await ensureDesktopShortcut(fs, desktop, "dither");
+    await ensureDesktopShortcut(fs, desktop, "trace");
   }
   await fs.flush();
+}
+
+async function ensureDesktopShortcut(
+  fs: FileSystem,
+  desktop: { id: string },
+  appId: string,
+): Promise<void> {
+  const spec = DESKTOP_SHORTCUTS.find((shortcut) => shortcut.appId === appId);
+  if (!spec) return;
+  const existing = fs.child(desktop.id, spec.name);
+  if (!existing) {
+    await writeDesktopShortcut(fs, desktop.id, spec);
+    return;
+  }
+  if (appId === "dither" && fs.attributes(existing.id).icon === "icon/camera") {
+    fs.setAttributes(existing.id, { icon: spec.icon });
+  }
 }
 
 async function writeDesktopShortcut(

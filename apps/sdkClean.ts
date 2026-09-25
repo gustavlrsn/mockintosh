@@ -13,6 +13,7 @@ export const SDK_CLEAN = [
   "FileViewer.tsx",
   "Picture.tsx",
   "Dither.tsx",
+  "Trace.tsx",
   "VideoPlayer.tsx",
   "PhotoBooth.tsx",
   "SourceEditor.tsx",
@@ -37,6 +38,7 @@ export const BUNDLED_APPS = [
   "FileViewer.tsx",
   "Picture.tsx",
   "Dither.tsx",
+  "Trace.tsx",
   "VideoPlayer.tsx",
   "PhotoBooth.tsx",
   "SpotifyPlayer.tsx",
@@ -58,6 +60,7 @@ export const APP_SIBLING_DIRS: Partial<Record<BundledAppEntry, readonly string[]
   "Finder.solid.tsx": ["finder"],
   "PhotoBooth.tsx": ["photobooth"],
   "Dither.tsx": ["photobooth", "dither"],
+  "Trace.tsx": ["trace"],
 };
 
 export const APP_TITLES: Record<BundledAppEntry, string> = {
@@ -68,6 +71,7 @@ export const APP_TITLES: Record<BundledAppEntry, string> = {
   "FileViewer.tsx": "File",
   "Picture.tsx": "Picture",
   "Dither.tsx": "Dither",
+  "Trace.tsx": "Trace",
   "VideoPlayer.tsx": "Video Player",
   "PhotoBooth.tsx": "Photo Booth",
   "SpotifyPlayer.tsx": "Spotify",

@@ -8,6 +8,7 @@ import { registerApp } from "./os/apps";
 import Testing from "@/apps/Testing";
 import FileViewer from "@/apps/FileViewer";
 import Dither from "@/apps/Dither";
+import Trace from "@/apps/Trace";
 import Picture from "@/apps/Picture";
 import VideoPlayer from "@/apps/VideoPlayer";
 import PhotoBooth from "@/apps/PhotoBooth";
@@ -23,6 +24,7 @@ for (const app of [
   Testing,
   FileViewer,
   Dither,
+  Trace,
   Picture,
   VideoPlayer,
   PhotoBooth,

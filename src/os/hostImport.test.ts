@@ -101,4 +101,29 @@ describe("hostImport", () => {
     expect(target?.parentId).toBe(desktop.id);
     expect(target?.openIn).toBe("dither");
   });
+
+  it("resolveImportTarget opens Trace when the drop hits its window", async () => {
+    const fs = await bootedFS();
+    const desktop = fs.locate("desktop")!;
+    const trace: OSWindow = {
+      id: "t1",
+      appId: "trace",
+      title: "Trace",
+      x: 10,
+      y: 30,
+      width: 200,
+      height: 160,
+      kind: "document",
+      props: {},
+      scrollY: 0,
+      scrollX: 0,
+      contentHeight: 160,
+      contentWidth: 200,
+      scrollable: false,
+      resizable: true,
+    };
+    const target = resolveImportTarget(fs, [trace], 40, 80, 20);
+    expect(target?.parentId).toBe(desktop.id);
+    expect(target?.openIn).toBe("trace");
+  });
 });

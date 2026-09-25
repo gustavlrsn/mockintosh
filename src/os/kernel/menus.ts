@@ -44,6 +44,9 @@ export function appleMenu(os: OSServices): MenubarDefinition {
       label: "MacPaint",
       onClick: () => os.openApp("macpaint")
     }, {
+      label: "Trace",
+      onClick: () => os.openApp("trace")
+    }, {
       label: "Terminal",
       onClick: () => os.openApp("terminal")
     }, {
