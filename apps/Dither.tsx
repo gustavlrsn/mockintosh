@@ -1,10 +1,11 @@
-import { Show, createEffect, createMemo, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onSettled } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
 import {
   Errored,
   Loading,
   IMAGE_TYPES,
   MIME,
+  alternateFileTypes,
   defineApp,
   encodePng1bit,
   readImageFile,
@@ -19,39 +20,46 @@ import {
   type AsciiDitherOptions,
   type FileDocumentProps,
   type ImageFrame,
+  type MenubarDefinition,
 } from "@mockintosh/sdk";
-import { AdjustSlider } from "./photobooth/AdjustSlider";
-import { AsciiControls } from "./photobooth/AsciiControls";
 import {
   applyAdjustInPlace,
   BRIGHTNESS_DEFAULT,
-  BRIGHTNESS_MAX,
-  BRIGHTNESS_MIN,
   CONTRAST_DEFAULT,
-  CONTRAST_MAX,
-  CONTRAST_MIN,
   IDENTITY_ADJUST,
   isIdentityAdjust,
 } from "./photobooth/adjust";
 import {
-  CROP_PAN_MAX,
-  CROP_PAN_MIN,
   CROP_SCALE_DEFAULT,
-  CROP_SCALE_MAX,
-  CROP_SCALE_MIN,
   IDENTITY_CROP,
   clampCrop,
   isIdentityCrop,
   sampleCover,
 } from "./photobooth/crop";
+import { DitherControls } from "./dither/Controls";
 import { sprites } from "./dither/icons";
 import { createPhotoDitherer, type PhotoDither } from "./photobooth/ditherMode";
 
-const BASE_SLIDER_H = 86;
-const ASCII_EXTRA_H = 40;
+/** Palette content size. Tall enough for the ascii row; the OS adds the title bar. */
+const CONTROLS_W = 240;
+const CONTROLS_H = 168;
 const DECODE_MAX = 800;
 
 type DitherProps = Partial<FileDocumentProps> & Record<string, unknown>;
+
+interface MenuState {
+  hasFile: boolean;
+  canExport: boolean;
+  mode: PhotoDither;
+  contrast: number;
+  brightness: number;
+  scale: number;
+  panX: number;
+  panY: number;
+  asciiBaseline: boolean;
+  full: boolean;
+  controlsOpen: boolean;
+}
 
 function stem(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -73,12 +81,10 @@ function Dither(props: DitherProps): JSX.Element {
   const [panX, setPanX] = createSignal(IDENTITY_CROP.panX);
   const [panY, setPanY] = createSignal(IDENTITY_CROP.panY);
   const [frame, setFrame] = createSignal(0);
+  const [controlsOpen, setControlsOpen] = createSignal(false);
 
-  const sliderH = () => (ditherMode() === "ascii" ? BASE_SLIDER_H + ASCII_EXTRA_H : BASE_SLIDER_H);
-  const view = () => ({
-    width: win.width(),
-    height: Math.max(1, win.height() - sliderH()),
-  });
+  const isFullScreen = () => win.kind() === "fullscreen";
+  const view = () => ({ width: win.width(), height: win.height() });
 
   let drag: { lx: number; ly: number; panX: number; panY: number } | null = null;
   let dither: ((src: ImageFrame, out: Uint8Array) => void) | null = null;
@@ -86,6 +92,9 @@ function Dither(props: DitherProps): JSX.Element {
   let scaled: ImageFrame | null = null;
   let bits: Uint8Array | null = null;
   let ready: ImageFrame | null = null;
+  /** Id of the palette, while it is open. Shared with the palette's close cleanup. */
+  const palette: { id: string | null } = { id: null };
+  let viewAlive = true;
 
   const source = createMemo(async () => {
     const fileId = props.fileId;
@@ -100,15 +109,21 @@ function Dither(props: DitherProps): JSX.Element {
     },
   );
 
+  function bump(): void {
+    setFrame((n) => n + 1);
+  }
+
   function resetAdjust(): void {
     setContrast(IDENTITY_ADJUST.contrast);
     setBrightness(IDENTITY_ADJUST.brightness);
+    bump();
   }
 
   function resetCrop(): void {
     setScale(IDENTITY_CROP.scale);
     setPanX(IDENTITY_CROP.panX);
     setPanY(IDENTITY_CROP.panY);
+    bump();
   }
 
   function asciiOpts(): AsciiDitherOptions {
@@ -125,6 +140,7 @@ function Dither(props: DitherProps): JSX.Element {
     setDirectional(ASCII_DIRECTIONAL_DEFAULT);
     setNormalize(ASCII_NORMALIZE_DEFAULT);
     setDiffuse(ASCII_DIFFUSE_DEFAULT);
+    bump();
   }
 
   function beginPan(lx: number, ly: number): void {
@@ -197,94 +213,187 @@ function Dither(props: DitherProps): JSX.Element {
     }
   }
 
-  createEffect(
-    () => ({
-      fileId: props.fileId,
+  function noteControlsClosed(): void {
+    palette.id = null;
+    if (viewAlive) setControlsOpen(false);
+  }
+
+  function closeControls(): void {
+    const id = palette.id;
+    if (!id) return;
+    app.os.closeWindow(id);
+  }
+
+  function openControls(): void {
+    if (palette.id) return;
+    palette.id = app.openWindow({
+      kind: "utility",
+      title: "",
+      size: { width: CONTROLS_W, height: CONTROLS_H },
+      position: { x: 480, y: 400 },
+      scrollable: false,
+      resizable: false,
+      Component: DitherControls,
+      props: {
+        ditherMode,
+        setDitherMode: (mode: PhotoDither) => {
+          setDitherMode(mode);
+          bump();
+        },
+        contrast,
+        setContrast: (value: number) => {
+          setContrast(value);
+          bump();
+        },
+        brightness,
+        setBrightness: (value: number) => {
+          setBrightness(value);
+          bump();
+        },
+        scale,
+        setScale: (value: number) => {
+          setScale(value);
+          bump();
+        },
+        panX,
+        setPanX,
+        panY,
+        setPanY,
+        punch,
+        setPunch: (value: number) => {
+          setPunch(value);
+          bump();
+        },
+        directional,
+        setDirectional,
+        normalize,
+        setNormalize,
+        diffuse,
+        setDiffuse,
+        snapshot,
+        menusFor,
+        onClose: noteControlsClosed,
+      },
+    });
+    setControlsOpen(true);
+  }
+
+  function snapshot(): MenuState {
+    return {
+      hasFile: !!props.fileId,
+      canExport: !!app.download,
       mode: ditherMode(),
       contrast: contrast(),
       brightness: brightness(),
-      punch: punch(),
-      directional: directional(),
-      normalize: normalize(),
-      diffuse: diffuse(),
       scale: scale(),
       panX: panX(),
       panY: panY(),
-    }),
-    ({ fileId, mode, contrast: contrastAmt, brightness: brightAmt, scale: zoom, panX: x, panY: y }) => {
-      const hasFile = !!fileId;
-      const crop = { scale: zoom, panX: x, panY: y };
-      const canExport = !!app.download;
-      const ascii = asciiOpts();
-      app.setMenus([
-        {
-          label: "File",
-          items: [
-            {
-              label: "Save 1-bit",
-              shortcut: "S",
-              disabled: !hasFile,
-              onClick: () => {
-                void saveDithered();
-              },
-            },
-            ...(canExport
-              ? [
-                  {
-                    label: "Export…",
-                    shortcut: "E",
-                    disabled: !hasFile,
-                    onClick: () => {
-                      void exportPng();
-                    },
-                  },
-                ]
-              : []),
-          ],
-        },
-        {
-          label: "Adjust",
-          items: [
-            {
-              label: "Reset Tone",
-              disabled: isIdentityAdjust({ contrast: contrastAmt, brightness: brightAmt }),
-              onClick: resetAdjust,
-            },
-            {
-              label: "Reset Crop",
-              disabled: isIdentityCrop(crop),
-              onClick: resetCrop,
-            },
-            {
-              label: "Reset Ascii",
-              disabled: mode !== "ascii" || isBaselineAscii(ascii),
-              onClick: resetAscii,
-            },
-          ],
-        },
-        {
-          label: "Dithering",
-          items: [
-            {
-              type: "radiogroup",
-              value: mode,
-              onValueChange: (v) => setDitherMode(v as PhotoDither),
-              items: [
-                { label: "Atkinson", value: "atkinson" },
-                { label: "Bayer", value: "bayer" },
-                { label: "Ascii", value: "ascii" },
-              ],
-            },
-          ],
-        },
-      ]);
-    },
-  );
+      asciiBaseline: isBaselineAscii(asciiOpts()),
+      full: isFullScreen(),
+      controlsOpen: controlsOpen(),
+    };
+  }
 
-  const track = () => Math.max(72, view().width - 120);
+  function menusFor(state: MenuState): MenubarDefinition[] {
+    return [
+      {
+        label: "File",
+        items: [
+          {
+            label: "Save 1-bit",
+            shortcut: "S",
+            disabled: !state.hasFile,
+            onClick: () => {
+              void saveDithered();
+            },
+          },
+          ...(state.canExport
+            ? [
+                {
+                  label: "Export…",
+                  shortcut: "E",
+                  disabled: !state.hasFile,
+                  onClick: () => {
+                    void exportPng();
+                  },
+                },
+              ]
+            : []),
+          { type: "separator" },
+          { label: "Quit", shortcut: "Q", onClick: () => app.quit() },
+        ],
+      },
+      {
+        label: "View",
+        items: [
+          {
+            label: state.full ? "Exit Full Screen" : "Full Screen",
+            shortcut: "F",
+            onClick: () => win.setFullScreen(win.kind() !== "fullscreen"),
+          },
+          {
+            label: state.controlsOpen ? "Hide Controls" : "Show Controls",
+            onClick: () => {
+              if (palette.id) closeControls();
+              else openControls();
+            },
+          },
+        ],
+      },
+      {
+        label: "Adjust",
+        items: [
+          {
+            label: "Reset Tone",
+            disabled: isIdentityAdjust({ contrast: state.contrast, brightness: state.brightness }),
+            onClick: resetAdjust,
+          },
+          {
+            label: "Reset Crop",
+            disabled: isIdentityCrop({ scale: state.scale, panX: state.panX, panY: state.panY }),
+            onClick: resetCrop,
+          },
+          {
+            label: "Reset Ascii",
+            disabled: state.mode !== "ascii" || state.asciiBaseline,
+            onClick: resetAscii,
+          },
+        ],
+      },
+      {
+        label: "Dithering",
+        items: [
+          {
+            type: "radiogroup",
+            value: state.mode,
+            onValueChange: (v) => {
+              setDitherMode(v as PhotoDither);
+              bump();
+            },
+            items: [
+              { label: "Atkinson", value: "atkinson" },
+              { label: "Bayer", value: "bayer" },
+              { label: "Ascii", value: "ascii" },
+            ],
+          },
+        ],
+      },
+    ];
+  }
+
+  createEffect(snapshot, (state) => {
+    app.setMenus(menusFor(state));
+  });
+
+  onSettled(() => openControls());
+
+  onCleanup(() => {
+    viewAlive = false;
+    if (palette.id) app.os.closeWindow(palette.id);
+  });
 
   return (
-    <box width={win.width()} height={win.height()} flexDirection="column" background={0}>
+    <box width={win.width()} height={win.height()} background={0}>
       <Show
         when={props.fileId}
         fallback={
@@ -326,117 +435,25 @@ function Dither(props: DitherProps): JSX.Element {
               (ditherMode() === "ascii" ? 1 : ditherMode() === "bayer" ? 2 : 3) +
               asciiOptionsRevision(asciiOpts()) * 17;
             return (
-              <>
-                <box
+              <box
+                width={size.width}
+                height={size.height}
+                onMouseDown={beginPan}
+                onDrag={movePan}
+                onDragEnd={() => {
+                  drag = null;
+                }}
+              >
+                <raster
                   width={size.width}
                   height={size.height}
-                  onMouseDown={beginPan}
-                  onDrag={movePan}
-                  onDragEnd={() => {
-                    drag = null;
+                  revision={revision}
+                  onPaint={(surface) => {
+                    surface.fill(0);
+                    if (pixels) surface.blitPixels(pixels, size.width, size.height, 0, 0);
                   }}
-                >
-                  <raster
-                    width={size.width}
-                    height={size.height}
-                    revision={revision}
-                    onPaint={(surface) => {
-                      surface.fill(0);
-                      if (pixels) surface.blitPixels(pixels, size.width, size.height, 0, 0);
-                    }}
-                  />
-                </box>
-                <box height={1} background={1} />
-                <box height={sliderH() - 1} padding={4} flexDirection="column" gap={2} background={0}>
-                  <AdjustSlider
-                    name="contrast"
-                    label="Contrast"
-                    labelWidth={48}
-                    value={contrast()}
-                    min={CONTRAST_MIN}
-                    max={CONTRAST_MAX}
-                    trackWidth={track()}
-                    format={(v) => `${Math.round(v * 100)}%`}
-                    onChange={(v) => {
-                      setContrast(v);
-                      setFrame((n) => n + 1);
-                    }}
-                  />
-                  <AdjustSlider
-                    name="brightness"
-                    label="Bright"
-                    labelWidth={48}
-                    value={brightness()}
-                    min={BRIGHTNESS_MIN}
-                    max={BRIGHTNESS_MAX}
-                    step={2}
-                    trackWidth={track()}
-                    format={(v) => (v > 0 ? `+${v}` : String(v))}
-                    onChange={(v) => {
-                      setBrightness(v);
-                      setFrame((n) => n + 1);
-                    }}
-                  />
-                  <box flexDirection="row" gap={6} alignItems="center">
-                    <AdjustSlider
-                      name="scale"
-                      label="Scale"
-                      labelWidth={48}
-                      value={scale()}
-                      min={CROP_SCALE_MIN}
-                      max={CROP_SCALE_MAX}
-                      step={0.02}
-                      trackWidth={Math.max(48, track() - 140)}
-                      format={(v) => `${Math.round(v * 100)}%`}
-                      onChange={(v) => {
-                        setScale(v);
-                        setFrame((n) => n + 1);
-                      }}
-                    />
-                    <AdjustSlider
-                      name="pan-x"
-                      label="X"
-                      labelWidth={10}
-                      value={panX()}
-                      min={CROP_PAN_MIN}
-                      max={CROP_PAN_MAX}
-                      step={1}
-                      trackWidth={48}
-                      format={(v) => `${v > 0 ? "+" : ""}${Math.round(v)}`}
-                      onChange={setPanX}
-                    />
-                    <AdjustSlider
-                      name="pan-y"
-                      label="Y"
-                      labelWidth={10}
-                      value={panY()}
-                      min={CROP_PAN_MIN}
-                      max={CROP_PAN_MAX}
-                      step={1}
-                      trackWidth={48}
-                      format={(v) => `${v > 0 ? "+" : ""}${Math.round(v)}`}
-                      onChange={setPanY}
-                    />
-                  </box>
-                  <Show when={ditherMode() === "ascii"}>
-                    <AsciiControls
-                      punch={punch()}
-                      directional={directional()}
-                      normalize={normalize()}
-                      diffuse={diffuse()}
-                      trackWidth={track()}
-                      labelWidth={48}
-                      onPunch={(v) => {
-                        setPunch(v);
-                        setFrame((n) => n + 1);
-                      }}
-                      onDirectional={setDirectional}
-                      onNormalize={setNormalize}
-                      onDiffuse={setDiffuse}
-                    />
-                  </Show>
-                </box>
-              </>
+                />
+              </box>
             );
           })()}
           </Errored>
@@ -452,10 +469,10 @@ export default defineApp({
   title: "Dither",
   icon: "dither/icon",
   sprites,
-  defaultSize: { width: 288, height: 288 + BASE_SLIDER_H + ASCII_EXTRA_H },
-  minSize: { width: 220, height: 180 },
+  defaultSize: { width: 288, height: 288 },
+  minSize: { width: 120, height: 80 },
   scrollable: false,
   resizable: true,
-  fileTypes: [MIME.sprite, ...IMAGE_TYPES],
+  fileTypes: alternateFileTypes([MIME.sprite, ...IMAGE_TYPES]),
   Component: Dither,
 });
