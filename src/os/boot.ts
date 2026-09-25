@@ -55,7 +55,7 @@ import {
   missingCapabilities,
   platformCapabilities,
 } from "./capabilities";
-import { createPrintService } from "./printing";
+import { createSystemPrinters } from "./printers/manager";
 
 import { createDesktopSettings, registerDesktopSettings } from "./kernel/settings";
 import { runMenuItem } from "./kernel/menus";
@@ -75,6 +75,13 @@ function defaultOnOpen(app: AppContext, props: Record<string, unknown>): void {
   app.openWindow({ props });
 }
 
+export type OSRootFactory = (services: OSServices, menubarHeight: number) => () => import("@mockintosh/ui").JSX.Element;
+
+export interface BootOptions {
+  /** Override the mounted tree. Device bring-up uses a slimmer root. */
+  root?: OSRootFactory;
+}
+
 export interface BootedOS {
   kernel: Kernel;
   input: {
@@ -91,12 +98,18 @@ export interface BootedOS {
   shutdown(): void;
 }
 
-export async function bootOS(platform: Platform): Promise<BootedOS> {
+function bootTrace(message: string): void {
+  const write = (globalThis as { trace?: (s: string) => void }).trace;
+  if (typeof write === "function") write(`${message}\n`);
+}
+
+export async function bootOS(platform: Platform, options?: BootOptions): Promise<BootedOS> {
   let stopped = false;
   const { display, scheduler } = platform;
   const resolution = { width: display.width, height: display.height };
 
   // --- QuickDraw framebuffer ---
+  bootTrace("qd");
   InitGraf(display.framebuffer ?? newBitMap(display.width, display.height));
   const screen = qd.screenBits;
   const present = () => { if (!stopped) display.present(screen); };
@@ -119,6 +132,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   const instances = new AppInstances(id => closeOSWindow(id));
 
   // --- UI instance (full-screen Solid renderer) ---
+  bootTrace("ui");
   const ui = createUI({
     screen,
     scheduleRender: scheduleRepaint,
@@ -151,6 +165,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   });
 
   // --- File system ---
+  bootTrace("fs");
   const fs = await FileSystem.open({ backend: platform.storage });
   await bootstrapFileSystem(fs);
   const kernel = new Kernel();
@@ -164,8 +179,15 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     : undefined;
   await installer?.loadInstalled();
 
-  // --- Printer ---
-  const printer = platform.printer ? createPrintService(platform.printer) : undefined;
+  // --- Printers ---
+  const printers =
+    platform.printerLinks || platform.printer
+      ? await createSystemPrinters({
+          fs,
+          links: platform.printerLinks,
+          fixed: platform.printer ? { transport: platform.printer, profile: platform.printerProfile } : undefined,
+        })
+      : undefined;
 
   // --- OS services (passed to Solid components via context) ---
   const osServices: OSServices = {
@@ -180,7 +202,7 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
     scheduler: platform.scheduler,
     capabilities,
     fetch: platform.fetch,
-    printer,
+    printers,
     download: platform.download,
     images: platform.images,
     video: platform.video,
@@ -358,7 +380,16 @@ export async function bootOS(platform: Platform): Promise<BootedOS> {
   registerApp(SourceEditor);
 
   // --- Mount Solid tree ---
-  const unmount = ui.render(makeOSRoot(osServices, MENUBAR_HEIGHT));
+  bootTrace("root");
+  let unmount: () => void;
+  try {
+    unmount = ui.render((options?.root ?? makeOSRoot)(osServices, MENUBAR_HEIGHT));
+    bootTrace("root ok");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    bootTrace(`root fail: ${message}`);
+    throw error;
+  }
 
   // --- Boot: dismiss splash after a short delay ---
   let splashPending = true;

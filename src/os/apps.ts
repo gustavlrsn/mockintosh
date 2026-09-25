@@ -16,19 +16,22 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
   windowKind?: OSWindowKind;
 }
 
-const apps = new Map<string, SolidApp<any>>();
+let apps: Map<string, SolidApp<any>> | undefined;
+function appMap(): Map<string, SolidApp<any>> {
+  return (apps ??= new Map());
+}
 
 export function registerApp<P extends Record<string, unknown>>(app: SolidApp<P>): void {
-  apps.set(app.id, app);
+  appMap().set(app.id, app);
   setAppMenus(app.id, app.menus ?? []);
 }
 
 export function getApp(id: string): SolidApp<any> | undefined {
-  return apps.get(id);
+  return appMap().get(id);
 }
 
 export function getAllApps(): SolidApp<any>[] {
-  return Array.from(apps.values());
+  return Array.from(appMap().values());
 }
 
 /** An installed app the OS knows about but did not load, because this platform cannot run it. */
@@ -38,14 +41,17 @@ export interface UnavailableApp {
   missing: Capability[];
 }
 
-const unavailable = new Map<string, UnavailableApp>();
+let unavailable: Map<string, UnavailableApp> | undefined;
+function unavailableMap(): Map<string, UnavailableApp> {
+  return (unavailable ??= new Map());
+}
 
 export function registerUnavailableApp(app: UnavailableApp): void {
-  unavailable.set(app.id, app);
+  unavailableMap().set(app.id, app);
 }
 
 export function getUnavailableApp(id: string): UnavailableApp | undefined {
-  return unavailable.get(id);
+  return unavailableMap().get(id);
 }
 
-export function unregisterApp(id: string): void { apps.delete(id); setAppMenus(id, []); }
+export function unregisterApp(id: string): void { appMap().delete(id); setAppMenus(id, []); }

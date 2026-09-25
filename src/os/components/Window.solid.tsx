@@ -3,6 +3,7 @@ import { For, Show, createSignal, createMemo } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
 import { useOS } from "../context";
 import {
+  getActiveAppId,
   getActiveWindowId,
   bringToFront,
   updateOSWindow,
@@ -38,6 +39,7 @@ import {
   windowHeaderHeight,
   windowTotalHeight,
   windowContentWidth,
+  titleBarOuterHeight,
 } from "../windowGeometry";
 
 /** Offsets of the six title-bar stripe lines within the 11px close-box band. */
@@ -69,6 +71,10 @@ export function Window(props: WindowProps): JSX.Element {
 
   // What this kind of window is made of (title bar, boxes, frame, shadow).
   const def = createMemo(() => windowDefinition(props.win.kind));
+  /** A palette is on whenever its app is front, even while a document is the key window. */
+  const appFront = () => getActiveAppId() === props.win.appId;
+  const chromeOn = () => (def().toolPalette ? appFront() : isActive());
+  const shown = () => !def().toolPalette || appFront();
 
   // Outer geometry
   const frame = createMemo(() => windowFrame(props.win));
@@ -87,7 +93,11 @@ export function Window(props: WindowProps): JSX.Element {
   // Interior geometry (inside the outer hairline) — all children use these.
   const innerW = createMemo(() => props.win.width - 2 * outer());
   const innerH = createMemo(() => totalH() - 2 * outer());
-  const titleBarInnerH = TITLE_BAR_H - FRAME;
+  const barInner = createMemo(() => Math.max(0, titleBarOuterHeight(props.win) - FRAME));
+  /** 11px close box fills an untitled drag bar; document bars keep the historical inset. */
+  const closeTop = createMemo(() =>
+    barInner() <= CLOSE_SIZE ? 0 : Math.floor((TITLE_BAR_H - CLOSE_SIZE) / 2) - FRAME,
+  );
   const headerInnerH = createMemo(() => headerH() - outer());
   const contentW = createMemo(() => windowContentWidth(props.win));
 
@@ -103,10 +113,8 @@ export function Window(props: WindowProps): JSX.Element {
 
   // Close/zoom boxes and stripes within the title bar interior
   const closeX = 7;
-  const closeY = Math.floor((TITLE_BAR_H - CLOSE_SIZE) / 2) - FRAME;
   const zoomX  = createMemo(() => innerW() - 7 - ZOOM_SIZE);
   const zoomY  = Math.floor((TITLE_BAR_H - ZOOM_SIZE) / 2) - FRAME;
-  const stripeY = closeY;
 
   // Scrollbar thumb geometry — the track is the scrollable body only.
   const scrollableBodyH = createMemo(() =>
@@ -155,6 +163,9 @@ export function Window(props: WindowProps): JSX.Element {
       ev.preventDefault();
       return;
     }
+    // A utility window is used from the document. The press drags the bar or
+    // changes a control; it does not take the key window, so both stay active.
+    if (def().toolPalette) return;
     if (isActive()) return;
     bringToFront(props.win.id);
     if (!hasTitleBar(props.win) || ev.localY >= TITLE_BAR_H) ev.preventDefault();
@@ -170,6 +181,7 @@ export function Window(props: WindowProps): JSX.Element {
   }
 
   return (
+    <Show when={shown()}>
     <box
       position="absolute"
       left={props.win.x}
@@ -232,7 +244,8 @@ export function Window(props: WindowProps): JSX.Element {
           left={0}
           top={0}
           width={innerW()}
-          height={titleBarInnerH}
+          height={barInner()}
+          background={def().titleFill === "gray25" && chromeOn() ? "gray25" : 0}
         >
           {/* Title drag region — MUST be first (lowest hit priority) so that
               close/zoom boxes (rendered later) take precedence on click */}
@@ -241,7 +254,7 @@ export function Window(props: WindowProps): JSX.Element {
             left={0}
             top={0}
             width={innerW()}
-            height={titleBarInnerH}
+            height={barInner()}
             semantic={{ name: "titlebar", role: "titlebar" }}
             onMouseDown={(lx, ly) => {
               dragOffsetX = lx;
@@ -266,37 +279,39 @@ export function Window(props: WindowProps): JSX.Element {
           <box
             position="absolute"
             left={0}
-            top={titleBarInnerH - 1}
+            top={barInner() - 1}
             width={innerW()}
             height={1}
             background={1}
           />
 
-          {/* Active-window decorations */}
-          <Show when={isActive()}>
+          {/* Active chrome. A palette uses this while its app is front, stripes only on documents. */}
+          <Show when={chromeOn()}>
             {/* Six 1px rules, not a screen-aligned `hstripe` fill: QuickDraw
                 patterns tile in screen space, so an 11px band would show 5
                 or 6 lines depending on window Y. Classic WDEFs drew fixed
-                lines. */}
+                lines. Utility windows use 25% gray instead. */}
+            <Show when={def().titleFill === "stripes"}>
             <For each={TITLE_BAR_STRIPE_ROWS}>
               {(row) => (
                 <box
                   position="absolute"
                   left={0}
-                  top={stripeY + row}
+                  top={closeTop() + row}
                   width={innerW()}
                   height={1}
                   background={1}
                 />
               )}
             </For>
+            </Show>
 
             {/* Close box — white clearance, then sprite */}
             <Show when={def().closeBox}>
             <box
               position="absolute"
               left={closeX - 1}
-              top={closeY - 1}
+              top={closeTop() - 1}
               width={CLOSE_SIZE + 2}
               height={CLOSE_SIZE + 2}
               background={0}
@@ -307,7 +322,7 @@ export function Window(props: WindowProps): JSX.Element {
                 <box
                   position="absolute"
                   left={closeX}
-                  top={closeY}
+                  top={closeTop()}
                   width={CLOSE_SIZE}
                   height={CLOSE_SIZE}
                   borderColor={1}
@@ -326,7 +341,7 @@ export function Window(props: WindowProps): JSX.Element {
                 <image
                   position="absolute"
                   left={closeX}
-                  top={closeY}
+                  top={closeTop()}
                   width={s().width}
                   height={s().height}
                   src={spriteSrc(s())}
@@ -392,23 +407,26 @@ export function Window(props: WindowProps): JSX.Element {
             </Show>
 
             {/* White clearance behind title text (titleW + 8, as in the original) */}
+            <Show when={props.win.title}>
             <box
               position="absolute"
               left={titleX() - 4}
               top={0}
               width={titleW() + 8}
-              height={titleBarInnerH - 1}
+              height={barInner() - 1}
               background={0}
             />
+            </Show>
           </Show>
 
-          {/* Title text — optical middle (cap box), not the full Decker cell. */}
+          {/* Title text — optical middle (cap box), not the full Decker cell. Untitled palettes omit it. */}
+          <Show when={props.win.title}>
           <text
             position="absolute"
             left={0}
             top={0}
             width={innerW()}
-            height={titleBarInnerH}
+            height={barInner()}
             font="menu"
             align="center"
             verticalAlign="middle"
@@ -416,6 +434,7 @@ export function Window(props: WindowProps): JSX.Element {
           >
             {titlePending() ? `${props.win.title}…` : props.win.title}
           </text>
+          </Show>
         </box>
         </Show>
 
@@ -453,7 +472,7 @@ export function Window(props: WindowProps): JSX.Element {
           <box
             position="absolute"
             left={0}
-            top={titleBarInnerH}
+            top={barInner()}
             width={innerW()}
             height={bandH()}
             background={0}
@@ -601,6 +620,7 @@ export function Window(props: WindowProps): JSX.Element {
         </Show>
       </box>
     </box>
+    </Show>
   );
 }
 

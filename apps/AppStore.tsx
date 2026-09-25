@@ -119,6 +119,7 @@ export default defineApp({
   requires: ["network"],
   title: "App Store",
   icon: "icon/appstore-smr-32x32",
+  smallIcon: "icon/appstore-16x16",
   defaultSize: { width: 320, height: 280 },
   scrollable: true,
   resizable: true,

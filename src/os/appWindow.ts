@@ -35,7 +35,7 @@ export function buildAppWindow<P extends Record<string, unknown>>(
   const title = spec.title ?? (typeof props.title === "string" ? props.title : app.title);
   // Stored height is content height, so reserve the title/frame/scrollbar
   // before fitting either normal or zoomed bounds to the desktop.
-  const chromeHeight = windowTotalHeight({ kind, scrollable, height: 0 });
+  const chromeHeight = windowTotalHeight({ kind, title, scrollable, height: 0 });
 
   // The gray region: the desktop minus a margin, as the zoom box's standard state.
   const standardBounds: WindowBounds = {

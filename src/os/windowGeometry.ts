@@ -75,17 +75,31 @@ export function footerBandHeight(win: Pick<OSWindow, "footerHeight">): number {
   return win.footerHeight ?? 0;
 }
 
+/**
+ * Outer height of this window's drag/title bar, including the top frame line.
+ * An untitled utility window is the HIG's 11px drag region; a title uses the
+ * document height. Callers that omit `title` get the titled height.
+ */
+export function titleBarOuterHeight(win: Pick<OSWindow, "kind"> & { title?: string }): number {
+  const d = windowDefinition(win.kind);
+  if (!d.titleBar) return 0;
+  if (d.toolPalette && win.title === "") return d.untitledBarHeight ?? d.titleBarHeight;
+  return d.titleBarHeight;
+}
+
 /** Outer height of the title bar + header band; frame only without a title bar. */
 export function windowHeaderHeight(
-  win: Pick<OSWindow, "kind" | "headerHeight" | "infoBar">
+  win: Pick<OSWindow, "kind" | "headerHeight" | "infoBar"> & { title?: string }
 ): number {
   if (!hasTitleBar(win)) return windowFrame(win);
-  return TITLE_BAR_H + headerBandHeight(win);
+  return titleBarOuterHeight(win) + headerBandHeight(win);
 }
 
 /** Outer frame height. */
 export function windowTotalHeight(
-  win: Pick<OSWindow, "kind" | "headerHeight" | "infoBar" | "footerHeight" | "height" | "scrollable">
+  win: Pick<OSWindow, "kind" | "headerHeight" | "infoBar" | "footerHeight" | "height" | "scrollable"> & {
+    title?: string;
+  }
 ): number {
   return (
     windowHeaderHeight(win) +

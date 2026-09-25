@@ -1,16 +1,24 @@
 import { appleMenu, runMenuItem, runRadioItem } from "../kernel/menus";
 import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
-import { measureText, COMMAND_KEY, CHECK_MARK } from "@mockintosh/ui";
+import { measureText, COMMAND_KEY, CHECK_MARK, smallIcon, type Sprite } from "@mockintosh/ui";
+import { getApp } from "../apps";
+import { runningAppIds } from "../appSwitcher";
 import { useOS } from "../context";
 import {
-  getMenubarMenus,
-  getOpenMenuIndex,
-  setOpenMenuIndex,
+  FINDER_APP_ID,
+  activateApp,
+  getActiveAppId,
   getHighlightedMenuItem,
+  getOpenMenuIndex,
+  getWindows,
   setHighlightedMenuItem,
+  setOpenMenuIndex,
 } from "../state";
 import type { MenubarDefinition, MenubarItemDef, MenubarActionItem, MenubarRadioGroupDef } from "@mockintosh/sdk";
+
+/** The application menu, on the right. Distinct from the Apple menu (−1). */
+const APP_MENU = -2;
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -23,6 +31,8 @@ const LABEL_PAD     = 12;   // horizontal padding inside each menu title
 const APPLE_W       = 24;   // Apple menu is wider than label alone
 const MENU_FONT     = "menu";
 const CHECK_COL_W   = 14;       // fixed column for the radio-group check mark so labels align
+const SMALL_ICON    = 16;       // ics# — what the application menu shows
+const SWITCHER_W    = 26;       // icon plus the gap the menu bar keeps around it
 
 interface MenubarProps {
   height: number;
@@ -90,13 +100,33 @@ export function Menubar(props: MenubarProps): JSX.Element {
 
   const menuXOffsets = createMemo(() => computeMenuXOffsets(props.menus));
 
+  const running = createMemo(() =>
+    runningAppIds(getWindows(), FINDER_APP_ID).map((id) => {
+      const app = getApp(id);
+      const sprite = os.sprites.get(app?.smallIcon ?? app?.icon ?? "");
+      return {
+        id,
+        title: app?.title ?? (id === FINDER_APP_ID ? "Finder" : id),
+        icon: sprite ? smallIcon(sprite) : undefined,
+      };
+    }),
+  );
+  const activeIcon = () => running().find((app) => app.id === getActiveAppId())?.icon;
+  const switcherX = () => os.resolution.width - SWITCHER_W;
+
   const openIdx   = () => getOpenMenuIndex();
   const openMenu  = () => {
     const idx = openIdx();
     if (idx === -1) return appleMenu(os);
+    if (idx === APP_MENU) return null;
     return idx !== null ? props.menus[idx] ?? null : null;
   };
-  const openMenuX = () => openIdx() === -1 ? 0 : (openIdx() !== null ? menuXOffsets()[openIdx()!] : 0);
+  const openMenuX = () => {
+    const idx = openIdx();
+    if (idx === -1) return 0;
+    if (idx === APP_MENU) return switcherX();
+    return idx !== null ? menuXOffsets()[idx] ?? 0 : 0;
+  };
 
   function toggleMenu(idx: number) {
     setOpenMenuIndex(openIdx() === idx ? null : idx);
@@ -194,7 +224,45 @@ export function Menubar(props: MenubarProps): JSX.Element {
             </box>
           );
         }}
-      </For>
+        </For>
+
+      {/* Application menu — the front app's 16×16 icon, at the right end. */}
+      <box
+        position="absolute"
+        left={switcherX()}
+        top={0}
+        width={SWITCHER_W}
+        height={MENUBAR_H - 1}
+        justifyContent="center"
+        alignItems="center"
+        background={openIdx() === APP_MENU ? 1 : 0}
+        semantic={{ name: "Application", role: "menu" }}
+        onClick={() => toggleMenu(APP_MENU)}
+      >
+        <Show when={activeIcon()}>
+          {(icon) => (
+            <image
+              width={SMALL_ICON}
+              height={SMALL_ICON}
+              src={spriteSrc(icon())}
+              mode={openIdx() === APP_MENU ? "inverted" : "normal"}
+            />
+          )}
+        </Show>
+      </box>
+
+      <Show when={openIdx() === APP_MENU}>
+        <AppMenuDropdown
+          apps={running()}
+          activeId={getActiveAppId()}
+          screenWidth={os.resolution.width}
+          onClose={closeMenu}
+          onChoose={(id) => {
+            closeMenu();
+            activateApp(id);
+          }}
+        />
+      </Show>
 
       {/* Open dropdown */}
       <Show when={openMenu() !== null && openIdx() !== null}>
@@ -356,7 +424,98 @@ function MenuDropdown(props: MenuDropdownProps): JSX.Element {
         borderColor={1}
         borderWidth={1}
       >
-        {itemNodes}
+      {itemNodes}
+    </box>
+    </>
+  );
+}
+
+function spriteSrc(sprite: Sprite) {
+  return { width: sprite.width, height: sprite.height, data: sprite.data, mask: sprite.mask };
+}
+
+interface AppMenuEntry {
+  id: string;
+  title: string;
+  icon?: Sprite;
+}
+
+function AppMenuDropdown(props: {
+  apps: AppMenuEntry[];
+  activeId: string;
+  screenWidth: number;
+  onClose: () => void;
+  onChoose: (id: string) => void;
+}): JSX.Element {
+  let labelW = 80;
+  for (const app of props.apps) labelW = Math.max(labelW, measureText(app.title, MENU_FONT));
+  const w = 8 + CHECK_COL_W + SMALL_ICON + 6 + labelW + 12;
+  const h = MENU_PADDING * 2 + props.apps.length * ITEM_H;
+  const left = Math.min(props.screenWidth - SWITCHER_W, props.screenWidth - w - 4);
+  const highlighted = getHighlightedMenuItem;
+
+  return (
+    <>
+      <box position="absolute" left={0} top={0} width={10000} height={10000} onClick={() => props.onClose()} />
+      <box
+        position="absolute"
+        left={Math.max(0, left)}
+        top={MENUBAR_H - 1}
+        width={w}
+        height={h}
+        background={0}
+        borderColor={1}
+        borderWidth={1}
+      >
+        <For each={props.apps}>
+          {(app, index) => {
+            const top = MENU_PADDING + index() * ITEM_H;
+            const on = () => highlighted() === index();
+            const ink = () => (on() ? 0 : 1);
+            return (
+              <box
+                position="absolute"
+                left={0}
+                top={top}
+                width={w}
+                height={ITEM_H}
+                background={on() ? 1 : 0}
+                onMouseEnter={() => setHighlightedMenuItem(index())}
+                onMouseLeave={() => setHighlightedMenuItem(null)}
+                onClick={() => props.onChoose(app.id)}
+              >
+                <Show when={app.id === props.activeId}>
+                  <box position="absolute" left={4} top={0} width={CHECK_COL_W} height={ITEM_H} justifyContent="center">
+                    <text font={MENU_FONT} nowrap color={ink()} verticalAlign="middle">{CHECK_MARK}</text>
+                  </box>
+                </Show>
+                <Show when={app.icon}>
+                  {(icon) => (
+                    <image
+                      position="absolute"
+                      left={4 + CHECK_COL_W}
+                      top={0}
+                      width={SMALL_ICON}
+                      height={SMALL_ICON}
+                      src={spriteSrc(icon())}
+                      mode={on() ? "inverted" : "normal"}
+                    />
+                  )}
+                </Show>
+                <box
+                  position="absolute"
+                  left={4 + CHECK_COL_W + SMALL_ICON + 6}
+                  top={0}
+                  width={labelW}
+                  height={ITEM_H}
+                  justifyContent="center"
+                >
+                  <text font={MENU_FONT} nowrap color={ink()} verticalAlign="middle">{app.title}</text>
+                </box>
+              </box>
+            );
+          }}
+        </For>
       </box>
     </>
   );

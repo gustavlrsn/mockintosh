@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { footerBandHeight, headerBandHeight, windowHeaderHeight, windowTotalHeight } from "./windowGeometry";
+import { footerBandHeight, headerBandHeight, titleBarOuterHeight, windowHeaderHeight, windowTotalHeight } from "./windowGeometry";
 
 const doc = { kind: "document" as const, height: 200, scrollable: true };
 
@@ -15,6 +15,12 @@ describe("window header/footer bands", () => {
     const win = { ...doc, infoBar: ["3 items"] };
     expect(headerBandHeight(win)).toBe(20);
     expect(windowHeaderHeight(win)).toBe(40);
+  });
+
+  it("gives an untitled utility window the 11px drag bar", () => {
+    expect(titleBarOuterHeight({ kind: "utility", title: "" })).toBe(12);
+    expect(titleBarOuterHeight({ kind: "utility", title: "Tools" })).toBe(20);
+    expect(windowHeaderHeight({ kind: "utility", title: "" })).toBe(12);
   });
 
   it("adds WindowFooter below the scrollable body", () => {

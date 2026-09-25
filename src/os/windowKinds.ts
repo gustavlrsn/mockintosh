@@ -35,6 +35,24 @@ export interface WindowDefinition {
   modal: boolean;
   /** Stacking layer; higher layers paint above lower ones regardless of activation order. */
   layer: number;
+  /**
+   * Outer height of the drag/title bar, including the top frame line.
+   * Document windows are 20. Kinds without a title bar use 0.
+   */
+  titleBarHeight: number;
+  /**
+   * Outer drag-bar height when this is a tool palette with an empty title:
+   * the 1px frame plus the HIG's 11px untitled drag region.
+   */
+  untitledBarHeight?: number;
+  /** Drag-bar fill while the window is showing its active chrome. Utility windows are 25% gray, not racing stripes. */
+  titleFill: "stripes" | "gray25";
+  /**
+   * Tool palette. While its app is frontmost the drag bar stays filled even
+   * though a document is the key window, and a press does not take the key
+   * window — the first click changes a control. Hidden when another app is frontmost.
+   */
+  toolPalette: boolean;
 }
 
 const DOCUMENT: WindowDefinition = {
@@ -47,6 +65,9 @@ const DOCUMENT: WindowDefinition = {
   coversScreen: false,
   modal: false,
   layer: 1,
+  titleBarHeight: 20,
+  titleFill: "stripes",
+  toolPalette: false,
 };
 
 const PLAIN: WindowDefinition = {
@@ -59,16 +80,29 @@ const PLAIN: WindowDefinition = {
   coversScreen: false,
   modal: false,
   layer: 1,
+  titleBarHeight: 0,
+  titleFill: "stripes",
+  toolPalette: false,
 };
 
 const WINDOW_DEFINITIONS: Record<OSWindowKind, WindowDefinition> = {
   document: DOCUMENT,
   "finder-folder": DOCUMENT,
   dialog: { ...DOCUMENT, zoomBox: false, growBox: false },
-  utility: { ...DOCUMENT, zoomBox: false, growBox: false, layer: 2 },
+  // Above fullscreen so a tool palette stays on a full-screen picture.
+  // Untitled (empty title): 12px outer bar = frame + the HIG's 11px drag region, 25% gray, no stripes.
+  utility: {
+    ...DOCUMENT,
+    zoomBox: false,
+    growBox: false,
+    layer: 4,
+    titleFill: "gray25",
+    untitledBarHeight: 12,
+    toolPalette: true,
+  },
   plain: PLAIN,
   // dBoxProc: 1px outer, 2px white, 2px inner band; square; system-modal.
-  alert: { ...PLAIN, frameGap: 2, innerFrame: 2, modal: true, layer: 4 },
+  alert: { ...PLAIN, frameGap: 2, innerFrame: 2, modal: true, layer: 5 },
   fullscreen: {
     titleBar: false,
     closeBox: false,
@@ -79,6 +113,9 @@ const WINDOW_DEFINITIONS: Record<OSWindowKind, WindowDefinition> = {
     coversScreen: true,
     modal: false,
     layer: 3,
+    titleBarHeight: 0,
+    titleFill: "stripes",
+    toolPalette: false,
   },
 };
 

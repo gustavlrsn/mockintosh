@@ -25,6 +25,7 @@ function runHostWrite(write: () => void): void {
   runWithOwner(null, write);
 }
 import type { JSX } from "@mockintosh/ui";
+import { keyWindowId, orderWindowsForApp } from "./appSwitcher";
 import { isModalKind, sortWindowsForPaint, windowLayer } from "./layering";
 import { tuckMenubar } from "./menubarReveal";
 import { windowDefinition, type OSWindowKind } from "./windowKinds";
@@ -110,21 +111,44 @@ export interface OSWindow {
  * This keeps the object reference for each window stable across updates,
  * which means Solid's `<For>` never destroys and recreates Window components
  * during a drag — preventing stale CanvasNode ids and reset drag offsets.
+ *
+ * Stores and signals are created on first access, not at module evaluation.
  */
-const [_windowStore, _setWindowStoreRaw] = createStore<{ list: OSWindow[] }>({ list: [] });
+let _windowStore: { list: OSWindow[] } | undefined;
+let _setWindowStoreRaw: StoreSetter<{ list: OSWindow[] }> | undefined;
+
+function windowStore(): { list: OSWindow[] } {
+  if (!_windowStore) {
+    [_windowStore, _setWindowStoreRaw] = createStore<{ list: OSWindow[] }>({ list: [] });
+  }
+  return _windowStore;
+}
+
 const _setWindowStore: StoreSetter<{ list: OSWindow[] }> = (fn) => {
+  windowStore();
   // Window open/close runs from instance `createRoot`s and effect cleanups;
   // those writes are host mutations, not component-owned state.
-  runHostWrite(() => { _setWindowStoreRaw(fn); });
+  runHostWrite(() => { _setWindowStoreRaw!(fn); });
 };
 
 export function getWindows(): OSWindow[] {
-  return _windowStore.list as OSWindow[];
+  return windowStore().list as OSWindow[];
 }
 
-export const [getActiveWindowId, setActiveWindowId] = createSignal<string | null>(null, {
-  ownedWrite: true,
-});
+type SignalPair<T> = ReturnType<typeof createSignal<T>>;
+
+function lazySignal<T>(init: T): SignalPair<T> {
+  let pair: SignalPair<T> | undefined;
+  function ensure(): SignalPair<T> {
+    pair ??= createSignal(init as Exclude<T, Function>, { ownedWrite: true }) as SignalPair<T>;
+    return pair;
+  }
+  const get = ((...args: Parameters<SignalPair<T>[0]>) => ensure()[0](...args)) as SignalPair<T>[0];
+  const set = ((...args: Parameters<SignalPair<T>[1]>) => ensure()[1](...args)) as SignalPair<T>[1];
+  return [get, set];
+}
+
+export const [getActiveWindowId, setActiveWindowId] = lazySignal<string | null>(null);
 
 // ---------------------------------------------------------------------------
 // Apps and the menubar
@@ -135,18 +159,27 @@ export const [getActiveWindowId, setActiveWindowId] = createSignal<string | null
 // may override it with `OSWindow.menus` when its menus depend on window state.
 // ---------------------------------------------------------------------------
 
-const [_appMenus, _setAppMenusRaw] = createStore<Record<string, MenubarDefinition[]>>({});
+let _appMenus: Record<string, MenubarDefinition[]> | undefined;
+let _setAppMenusRaw: StoreSetter<Record<string, MenubarDefinition[]>> | undefined;
+
+function appMenus(): Record<string, MenubarDefinition[]> {
+  if (!_appMenus) {
+    [_appMenus, _setAppMenusRaw] = createStore<Record<string, MenubarDefinition[]>>({});
+  }
+  return _appMenus;
+}
 
 export function setAppMenus(appId: string, menus: MenubarDefinition[]): void {
+  appMenus();
   runHostWrite(() => {
-    _setAppMenusRaw((s) => {
+    _setAppMenusRaw!((s) => {
       s[appId] = menus;
     });
   });
 }
 
 export function getAppMenus(appId: string): MenubarDefinition[] | undefined {
-  return _appMenus[appId];
+  return appMenus()[appId];
 }
 
 /**
@@ -157,8 +190,11 @@ export function getAppMenus(appId: string): MenubarDefinition[] | undefined {
  */
 function menubarWindow(): OSWindow | undefined {
   const active = getActiveWindow();
-  if (active && !isModalKind(active.kind)) return active;
-  const stack = sortWindowsForPaint(_windowStore.list as OSWindow[]);
+  // No key window means the Finder desktop is front, even if other apps
+  // still have windows open behind it.
+  if (!active) return undefined;
+  if (!isModalKind(active.kind)) return active;
+  const stack = sortWindowsForPaint(windowStore().list as OSWindow[]);
   for (let i = stack.length - 1; i >= 0; i--) {
     if (!isModalKind(stack[i].kind)) return stack[i];
   }
@@ -180,28 +216,34 @@ export function getMenubarMenus(): MenubarDefinition[] {
  * Whether the menubar is off screen: the frontmost non-modal window covers
  * the screen (Macintosh "special presentation mode"). Its menus still exist —
  * ⌘ shortcuts keep working — which is how an app offers the way back.
+ *
+ * A tool palette of that same app stays usable on top of the picture. Clicking
+ * it does not bring the menubar back; the presentation is still in progress.
  */
 export function isMenubarHidden(): boolean {
   const win = menubarWindow();
-  return !!win && windowDefinition(win.kind).coversScreen;
+  if (!win) return false;
+  if (windowDefinition(win.kind).coversScreen) return true;
+  if (windowLayer(win.kind) > windowLayer("fullscreen")) {
+    return getWindows().some(
+      (other) => other.id !== win.id && other.appId === win.appId && windowDefinition(other.kind).coversScreen,
+    );
+  }
+  return false;
 }
 
-export const [getOpenMenuIndex, setOpenMenuIndex] = createSignal<number | null>(null, {
-  ownedWrite: true,
-});
-export const [getHighlightedMenuItem, setHighlightedMenuItem] = createSignal<number | null>(null, {
-  ownedWrite: true,
-});
+export const [getOpenMenuIndex, setOpenMenuIndex] = lazySignal<number | null>(null);
+export const [getHighlightedMenuItem, setHighlightedMenuItem] = lazySignal<number | null>(null);
 
-export const [getSplashVisible, setSplashVisible] = createSignal(true, { ownedWrite: true });
+export const [getSplashVisible, setSplashVisible] = lazySignal(true);
 
 /** XOR window drag/resize outline, in screen coordinates. */
-export const [getWindowOutline, setWindowOutline] = createSignal<{
+export const [getWindowOutline, setWindowOutline] = lazySignal<{
   x: number;
   y: number;
   width: number;
   height: number;
-} | null>(null, { ownedWrite: true });
+} | null>(null);
 
 // ---------------------------------------------------------------------------
 // Window helpers
@@ -215,7 +257,12 @@ export function openOSWindow(win: OSWindow): void {
     if (idx >= 0) s.list.splice(idx, 1);
     s.list.push(win);
   });
-  setActiveWindowId(win.id);
+  // A palette joins an already-front app without taking the key window, so the
+  // document keeps its stripes while the palette's drag bar stays filled.
+  const active = getActiveWindow();
+  if (!windowDefinition(win.kind).toolPalette || !active || active.appId !== win.appId) {
+    setActiveWindowId(win.id);
+  }
   flushIfIdle();
 }
 
@@ -226,7 +273,7 @@ export function closeOSWindow(id: string): void {
   });
   setActiveWindowId((prev) => {
     if (prev !== id) return prev;
-    const remaining = _windowStore.list.filter((w) => w.id !== id);
+    const remaining = windowStore().list.filter((w) => w.id !== id);
     return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
   });
   flushIfIdle();
@@ -238,6 +285,16 @@ export function closeAllWindows(): void {
     s.list = [];
   });
   setActiveWindowId(null);
+  flushIfIdle();
+}
+
+/** Bring an application's windows forward and make it the active app. */
+export function activateApp(appId: string): void {
+  _setWindowStore((s) => {
+    const next = orderWindowsForApp(s.list, appId);
+    s.list.splice(0, s.list.length, ...next);
+  });
+  setActiveWindowId(keyWindowId(windowStore().list as OSWindow[], appId));
   flushIfIdle();
 }
 
@@ -277,7 +334,7 @@ export function updateOSWindow(id: string, updates: Partial<OSWindow>): void {
 
 export function getActiveWindow(): OSWindow | undefined {
   const id = getActiveWindowId();
-  return id ? _windowStore.list.find((w) => w.id === id) : undefined;
+  return id ? windowStore().list.find((w) => w.id === id) : undefined;
 }
 
 /**
@@ -300,7 +357,7 @@ export function setWindowFullScreen(
   on: boolean,
   screen: { width: number; height: number }
 ): void {
-  const win = _windowStore.list.find((w) => w.id === id);
+  const win = windowStore().list.find((w) => w.id === id);
   if (!win) return;
   const isFullScreen = windowDefinition(win.kind).coversScreen;
   if (on && !isFullScreen) {
@@ -313,5 +370,8 @@ export function setWindowFullScreen(
     bringToFront(id);
   } else if (!on && isFullScreen && win.windowed) {
     updateOSWindow(id, { ...win.windowed, windowed: undefined });
+    // Entering flushes via bringToFront. Leaving has to flush itself, or the
+    // restored kind stays batched until some later repaint.
+    flushIfIdle();
   }
 }

@@ -5,26 +5,34 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "@mockintosh/ui";
-import { useApp, type AppContext, type AppServices } from "@mockintosh/sdk";
+import { createEffect, useApp, type AppContext, type AppServices } from "@mockintosh/sdk";
 import { createElement, setProp } from "@mockintosh/ui/renderer";
 import { bootOS, type BootedOS } from "./boot";
 import { createHeadlessPlatform, type HeadlessPlatform } from "../platform/headless";
 import { registerApp } from "./apps";
 import { MIME } from "@mockintosh/fs";
-import { getWindows, setWindowFullScreen } from "./state";
-import { TITLE_BAR_H } from "./windowGeometry";
+import { getActiveAppId, getActiveWindowId, getWindows, isMenubarHidden, setWindowFullScreen } from "./state";
+import { TITLE_BAR_H, titleBarOuterHeight } from "./windowGeometry";
 
 const WIDTH = 512;
 const HEIGHT = 342;
 const MENUBAR_HEIGHT = 20;
 
-/** `<box width="100%" height="100%" background={1} />` without JSX (this file is `.ts`). */
-function blackBox(): JSX.Element {
+/** `<box width="100%" height="100%" background={ink} />` without JSX (this file is `.ts`). */
+function fillBox(ink: 0 | 1): JSX.Element {
   const node = createElement("box");
   setProp(node, "width", "100%");
   setProp(node, "height", "100%");
-  setProp(node, "background", 1);
+  setProp(node, "background", ink);
   return node as unknown as JSX.Element;
+}
+
+function blackBox(): JSX.Element {
+  return fillBox(1);
+}
+
+function whiteBox(): JSX.Element {
+  return fillBox(0);
 }
 
 /** Fraction of black pixels in a rectangle of the last presented frame. */
@@ -195,6 +203,36 @@ describe("bootOS on the headless platform", () => {
     }
     expect(inkMin).toBe(3);
     expect(inkMax).toBeGreaterThanOrEqual(13);
+  });
+
+  it("switches the front application from the menu at the right of the menubar", () => {
+    registerApp({
+      id: "switch-a",
+      title: "Aaa",
+      icon: "icon/computer",
+      defaultSize: { width: 80, height: 40 },
+      Component: () => whiteBox(),
+    });
+    registerApp({
+      id: "switch-b",
+      title: "Bee",
+      icon: "icon/computer",
+      defaultSize: { width: 80, height: 40 },
+      Component: () => blackBox(),
+    });
+    os.services.openApp("switch-a");
+    platform.tick();
+    os.services.openApp("switch-b");
+    platform.tick();
+    expect(getActiveAppId()).toBe("switch-b");
+
+    platform.click(WIDTH - 8, 10);
+    platform.tick();
+    // Finder, then Aaa, then Bee. Aaa is the second row of the dropdown.
+    platform.click(WIDTH - 30, 47);
+    platform.tick();
+    expect(getActiveAppId()).toBe("switch-a");
+    expect(getWindows().filter((w) => w.appId === "switch-a").at(-1)?.id).toBe(getActiveWindowId());
   });
 
   it("runs ⌘-shortcuts from the active menubar (⌘N creates a folder on the desktop)", () => {
@@ -382,7 +420,6 @@ describe("bootOS on the headless platform", () => {
     expect(inkCoverage(platform.lastFrame()!, 0, 0, WIDTH, MENUBAR_HEIGHT - 1)).toBeLessThan(0.2);
   });
 
-
   it("slides the menubar down from a touch on the top edge, then back up", () => {
     let presses = 0;
     registerApp({
@@ -436,6 +473,72 @@ describe("bootOS on the headless platform", () => {
     platform.pointer({ type: "move", x: 40, y: -4 });
     for (let i = 0; i < MENUBAR_HEIGHT; i++) platform.tick();
     expect(inkCoverage(platform.lastFrame()!, 200, 0, 80, MENUBAR_HEIGHT - 1)).toBe(0);
+  });
+
+  it("keeps an untitled utility palette lit beside the key document, and above full screen", () => {
+    registerApp({
+      id: "test-palette",
+      title: "Palette",
+      icon: "icon/computer",
+      defaultSize: { width: 80, height: 40 },
+      Component: () => blackBox(),
+      onOpen(app) {
+        app.openWindow({
+          title: "P",
+          size: { width: 120, height: 40 },
+          position: { x: 200, y: 80 },
+          Component: () => blackBox(),
+        });
+        app.openWindow({
+          kind: "utility",
+          title: "",
+          size: { width: 70, height: 36 },
+          position: { x: 16, y: 40 },
+          Component: () => whiteBox(),
+        });
+      },
+    });
+
+    os.services.openApp("test-palette");
+    platform.tick();
+    const picture = getWindows().find((w) => w.appId === "test-palette" && w.kind === "document")!;
+    const tools = getWindows().find((w) => w.appId === "test-palette" && w.kind === "utility")!;
+    expect(tools.title).toBe("");
+    expect(titleBarOuterHeight(tools)).toBe(12);
+    expect(getActiveWindowId()).toBe(picture.id);
+    // Document keeps racing stripes. The palette's drag bar is 25% gray, not stripes.
+    expect(titleBarStripeLines(platform.lastFrame()!, picture.x, picture.y)).toBe(6);
+    const gray = inkCoverage(platform.lastFrame()!, tools.x + 28, tools.y + 2, 24, 6);
+    expect(gray).toBeGreaterThan(0.15);
+    expect(gray).toBeLessThan(0.4);
+
+    // A click in the palette does not take the key window.
+    platform.click(tools.x + 20, tools.y + titleBarOuterHeight(tools) + 8);
+    platform.tick();
+    expect(getActiveWindowId()).toBe(picture.id);
+    expect(titleBarStripeLines(platform.lastFrame()!, picture.x, picture.y)).toBe(6);
+
+    const x0 = tools.x;
+    const y0 = tools.y;
+    platform.pointer({ type: "down", x: x0 + 30, y: y0 + 5, button: 0 });
+    platform.pointer({ type: "move", x: x0 + 70, y: y0 + 20, button: 0 });
+    platform.pointer({ type: "up", x: x0 + 70, y: y0 + 20, button: 0 });
+    platform.tick();
+    const moved = getWindows().find((w) => w.id === tools.id)!;
+    expect(moved.x).toBeGreaterThan(x0);
+    expect(titleBarStripeLines(platform.lastFrame()!, picture.x, picture.y)).toBe(6);
+
+    setWindowFullScreen(picture.id, true, { width: WIDTH, height: HEIGHT });
+    platform.tick();
+    expect(isMenubarHidden()).toBe(true);
+    expect(inkCoverage(platform.lastFrame()!, moved.x + 8, moved.y + titleBarOuterHeight(moved) + 6, 16, 8)).toBe(0);
+
+    setWindowFullScreen(picture.id, false, { width: WIDTH, height: HEIGHT });
+    platform.tick();
+    const restored = getWindows().find((w) => w.id === picture.id)!;
+    expect(restored.kind).toBe("document");
+    expect(isMenubarHidden()).toBe(false);
+    expect(titleBarStripeLines(platform.lastFrame()!, picture.x, picture.y)).toBe(6);
   });
 
   it("writes a dropped host image onto the desktop", async () => {

@@ -12,6 +12,14 @@
  */
 
 import { For, Show, createSignal, createMemo, createEffect, onCleanup, type Accessor } from "solid-js";
+
+function setToArray<T>(set: Set<T>): T[] {
+  const out: T[] = [];
+  set.forEach((value) => {
+    out.push(value);
+  });
+  return out;
+}
 import type { JSX } from "@mockintosh/ui";
 import { measureText, TextInput, type MouseEventHandlers } from "@mockintosh/ui";
 import { useOS, type OSServices } from "../src/os/context";
@@ -679,7 +687,7 @@ export function FinderDesktop(): JSX.Element {
   // window without its own menus, is active). Folder windows override per window.
   // Signals used here must already be declared: compute runs synchronously.
   createEffect(
-    () => buildFinderMenus(os.fs, undefined, {os, selected: [...selectedSet()]}),
+    () => buildFinderMenus(os.fs, undefined, {os, selected: setToArray(selectedSet())}),
     (menus) => setAppMenus(FINDER_APP_ID, menus),
   );
   const { marquee, handlers: marqueeHandlers } = createMarquee({
@@ -961,7 +969,7 @@ export function FinderFolderContent(props: { directoryId: string }): JSX.Element
 
   // This window's menus reflect its folder (Clean Up) and the trash state.
   createEffect(
-    () => buildFinderMenus(os.fs, dirId(), {os, selected: [...selectedSet()]}),
+    () => buildFinderMenus(os.fs, dirId(), {os, selected: setToArray(selectedSet())}),
     (menus) => windowApi.setMenus(menus),
   );
 
