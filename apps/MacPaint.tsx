@@ -318,6 +318,10 @@ function MacPaint(props: Record<string, unknown>): JSX.Element {
     return choice === "Don't Save";
   }
 
+  async function quitApp(): Promise<void> {
+    if (await confirmDiscard()) app.quit();
+  }
+
   async function loadFile(id: string, name: string): Promise<void> {
     const sprite = await readSpriteFile(app.fs, id);
     if (!sprite) {
@@ -441,7 +445,6 @@ function MacPaint(props: Record<string, unknown>): JSX.Element {
     try {
       await print.printPicture(
         { width: cur.width, height: cur.height, data: cur.pixels },
-        { caption: fileName() },
       );
     } catch (err) {
       await app.os.showDialog({
@@ -489,6 +492,7 @@ function MacPaint(props: Record<string, unknown>): JSX.Element {
     if (print) {
       fileItems.push({ type: "separator" }, { label: "Print…", shortcut: "P", onClick: () => void printPainting() });
     }
+    fileItems.push({ type: "separator" }, { label: "Quit", shortcut: "Q", onClick: () => void quitApp() });
     app.setMenus([
       {
         label: "File",

@@ -10,29 +10,84 @@
  * moves to packed 1bpp storage this becomes a straight copy.
  */
 import type { BitMap } from "@mockintosh/quickdraw";
+import type { CutOptions, EscPosCutCommand, EscPosPrintTuning, PrinterEncoder } from "./encoder";
 
+export type { CutOptions } from "./encoder";
+
+const DC2 = 0x12;
 const ESC = 0x1b;
 const GS = 0x1d;
 
 /**
- * Maximum rows per `GS v 0` raster command. Printers accept up to 65535 in
- * principle, but many have small receive buffers; banding keeps each command
- * modest and lets the printer start on the first band while later ones arrive.
+ * Default maximum rows per `GS v 0` raster command. The printer stops the
+ * paper between commands, which leaves a faint line at each band boundary,
+ * so fewer, taller bands print cleaner. Small bands only matter on links
+ * without flow control, where a printer's receive buffer can overflow.
  */
 export const RASTER_BAND_ROWS = 128;
 
-export interface CutOptions {
-  /** `"partial"` leaves a small bridge of paper; `"full"` severs it. */
-  mode?: "full" | "partial";
+export interface EscPosEncoderOptions {
+  /** Which cut command `cut()` sends. Default `gs-v`. */
+  cutCommand?: EscPosCutCommand;
+  /** Rows per `GS v 0` command (1–65535). Default {@link RASTER_BAND_ROWS}. */
+  rasterBandRows?: number;
+  /** Speed / heat setting `begin()` sends after `ESC @`, which may reset it. */
+  tuning?: EscPosPrintTuning;
+  /**
+   * Blank rows prepended inside each raster command, so the paper motor is
+   * up to speed before the image starts (its first millimetres band otherwise).
+   */
+  rasterLeadInRows?: number;
 }
 
-/** Builds an ESC/POS byte stream. Chain calls, then `encode()`. */
-export class EscPosEncoder {
+/** Builds an ESC/POS byte stream. Chain calls, then `encode()` / `end()`. */
+export class EscPosEncoder implements PrinterEncoder {
   private readonly chunks: Uint8Array[] = [];
+  private readonly cutCommand: EscPosCutCommand;
+  private readonly bandRows: number;
+  private readonly tuning: EscPosPrintTuning | undefined;
+  private readonly leadInRows: number;
+
+  constructor(options: EscPosEncoderOptions = {}) {
+    this.cutCommand = options.cutCommand ?? "gs-v";
+    this.bandRows = Math.min(0xffff, Math.max(1, Math.floor(options.rasterBandRows ?? RASTER_BAND_ROWS)));
+    this.tuning = options.tuning;
+    this.leadInRows = Math.max(0, Math.floor(options.rasterLeadInRows ?? 0));
+  }
 
   /** `ESC @` — reset the printer to its power-on state. */
   initialize(): this {
     return this.raw([ESC, 0x40]);
+  }
+
+  begin(): this {
+    this.initialize();
+    return this.tuning ? this.tune(this.tuning) : this;
+  }
+
+  /** Send a speed / heat setting (see {@link EscPosPrintTuning}). */
+  tune(tuning: EscPosPrintTuning): this {
+    const byte = (n: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(n)));
+    switch (tuning.command) {
+      case "gs-k":
+        if (tuning.density !== undefined) {
+          // −6…−1 are sent as 0xFA…0xFF.
+          const d = byte(tuning.density, -6, 8);
+          this.raw([GS, 0x28, 0x4b, 0x02, 0x00, 0x31, d < 0 ? 0x100 + d : d]);
+        }
+        if (tuning.speed !== undefined) this.raw([GS, 0x28, 0x4b, 0x02, 0x00, 0x32, byte(tuning.speed, 1, 13)]);
+        return this;
+      case "dc2-density":
+        return this.raw([DC2, 0x23, (byte(tuning.breakTime, 0, 7) << 5) | byte(tuning.density, 0, 31)]);
+      case "esc-7":
+        return this.raw([
+          ESC,
+          0x37,
+          byte(tuning.heatingDots, 0, 255),
+          byte(tuning.heatingTime, 0, 255),
+          byte(tuning.heatingInterval, 0, 255),
+        ]);
+    }
   }
 
   /**
@@ -47,14 +102,23 @@ export class EscPosEncoder {
     if (width <= 0 || height <= 0) return this;
 
     const bytesPerRow = Math.ceil(width / 8);
-    for (let bandTop = 0; bandTop < height; bandTop += RASTER_BAND_ROWS) {
-      const bandRows = Math.min(RASTER_BAND_ROWS, height - bandTop);
+    const lead = this.leadInRows;
+    const total = lead + height;
+    for (let bandTop = 0; bandTop < total; bandTop += this.bandRows) {
+      const bandRows = Math.min(this.bandRows, total - bandTop);
       this.raw([
         GS, 0x76, 0x30, 0x00,
         bytesPerRow & 0xff, (bytesPerRow >> 8) & 0xff,
         bandRows & 0xff, (bandRows >> 8) & 0xff,
       ]);
-      this.chunks.push(packRows(bits, bandTop, bandRows, bytesPerRow));
+      const blankRows = Math.min(bandRows, Math.max(0, lead - bandTop));
+      if (blankRows === 0) {
+        this.chunks.push(packRows(bits, bandTop - lead, bandRows, bytesPerRow));
+        continue;
+      }
+      const band = new Uint8Array(bytesPerRow * bandRows);
+      if (bandRows > blankRows) band.set(packRows(bits, 0, bandRows - blankRows, bytesPerRow), blankRows * bytesPerRow);
+      this.chunks.push(band);
     }
     return this;
   }
@@ -70,15 +134,37 @@ export class EscPosEncoder {
     return this;
   }
 
-  /** `GS V m` — cut the paper. */
+  /** Print a line in the printer's built-in font, then `LF`. Non-ASCII characters become `?`. */
+  text(line: string): this {
+    const bytes = Array.from(line, (ch) => {
+      const code = ch.charCodeAt(0);
+      return code >= 0x20 && code < 0x7f ? code : 0x3f;
+    });
+    return this.raw([...bytes, 0x0a]);
+  }
+
+  /** Cut the paper with the configured {@link EscPosCutCommand}. */
   cut(options: CutOptions = {}): this {
-    return this.raw([GS, 0x56, options.mode === "partial" ? 0x01 : 0x00]);
+    const partial = options.mode === "partial";
+    switch (this.cutCommand) {
+      case "gs-v":
+        return this.raw([GS, 0x56, partial ? 0x01 : 0x00]);
+      case "gs-v-feed":
+        return this.raw([GS, 0x56, partial ? 0x42 : 0x41, 0x00]);
+      case "esc-i":
+        return this.raw([ESC, partial ? 0x6d : 0x69]);
+    }
   }
 
   /** Append literal bytes (for printer-specific commands). */
   raw(bytes: ArrayLike<number>): this {
     this.chunks.push(bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes));
     return this;
+  }
+
+  /** Concatenate everything appended so far. */
+  end(): Uint8Array {
+    return this.encode();
   }
 
   /** Concatenate everything appended so far. */

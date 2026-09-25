@@ -16,10 +16,20 @@ import {
   type AsciiDitherOptions,
   type CameraSource,
   type ImageFrame,
+  type MenubarItemDef,
 } from "@mockintosh/sdk";
 import { AdjustSlider } from "./photobooth/AdjustSlider";
 import { AsciiControls } from "./photobooth/AsciiControls";
 import { AsciiCompare, COMPARE_WINDOW } from "./photobooth/AsciiCompare";
+import { pictureOverflows, placedOrigin, type Point } from "./photobooth/pan";
+import { photoSize, photoSizeLabel, type PhotoSizeId } from "./photobooth/photoSize";
+import {
+  PrintSettings,
+  printPictureOptions,
+  type PrintOrientationChoice,
+  type PrintScaleChoice,
+  type PrintSettingsProps,
+} from "./photobooth/PrintSettings";
 import {
   applyAdjustInPlace,
   BRIGHTNESS_DEFAULT,
@@ -30,6 +40,12 @@ import {
   CONTRAST_MIN,
 } from "./photobooth/adjust";
 import { createPhotoDitherer, type PhotoDither } from "./photobooth/ditherMode";
+import {
+  ensurePhotoLibrary,
+  findPhotoLibrary,
+  listStoredPhotos,
+  storePhoto,
+} from "./photobooth/library";
 
 /** Viewfinder size in the app's own (windowed) window. */
 const PREVIEW = 288;
@@ -43,6 +59,8 @@ interface Photo {
   width: number;
   height: number;
   timestamp: number;
+  /** Set once the picture has a sprite file in the library. */
+  fileId?: string;
 }
 
 interface Size {
@@ -50,18 +68,23 @@ interface Size {
   height: number;
 }
 
-/** Paint a picture centred in the surface (clipped when larger), on a flat `fill`. */
-function paintPicture(surface: RasterSurface, picture: Photo | null, view: Size, fill: Ink): void {
+/** Paint a picture in the surface on a flat `fill`. `pan` drags it off centre when it is larger than the view. */
+function paintPicture(surface: RasterSurface, picture: Photo | null, view: Size, fill: Ink, pan: Point): void {
   surface.fill(fill);
   if (!picture) return;
-  const x = Math.floor((view.width - picture.width) / 2);
-  const y = Math.floor((view.height - picture.height) / 2);
-  surface.blitPixels(picture.pixels, picture.width, picture.height, x, y);
+  const origin = placedOrigin(picture, view, pan);
+  surface.blitPixels(picture.pixels, picture.width, picture.height, origin.x, origin.y);
+}
+
+function photoDateLabel(photo: Photo): string {
+  const date = new Date(photo.timestamp);
+  return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
 }
 
 function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const win = app.window;
+  const { print } = app;
 
   const [loading, setLoading] = createSignal(true);
   const [errorText, setErrorText] = createSignal("");
@@ -69,6 +92,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   const [viewingPhoto, setViewingPhoto] = createSignal<number | null>(null);
   const [photos, setPhotos] = createSignal<Photo[]>([]);
   const [flash, setFlash] = createSignal(false);
+  const [printing, setPrinting] = createSignal(false);
   const [ditherMode, setDitherMode] = createSignal<PhotoDither>("atkinson");
   const [showGlyphs, setShowGlyphs] = createSignal(false);
   const [contrast, setContrast] = createSignal(CONTRAST_DEFAULT);
@@ -78,6 +102,12 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   const [normalize, setNormalize] = createSignal(ASCII_NORMALIZE_DEFAULT);
   const [diffuse, setDiffuse] = createSignal(ASCII_DIFFUSE_DEFAULT);
   const [frame, setFrame] = createSignal(0);
+  const [photoSizeId, setPhotoSizeId] = createSignal<PhotoSizeId>("square");
+  const [cameraAspect, setCameraAspect] = createSignal(4 / 3);
+  const [pan, setPan] = createSignal<Point>({ x: 0, y: 0 });
+  const [dragging, setDragging] = createSignal(false);
+  const [printScale, setPrintScale] = createSignal<PrintScaleChoice>("auto");
+  const [printOrientation, setPrintOrientation] = createSignal<PrintOrientationChoice>("auto");
 
   const isFullScreen = () => win.kind() === "fullscreen";
   /** The viewfinder fills the window above the button bar — the whole screen in full screen. */
@@ -93,8 +123,22 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   let flashTimer: ReturnType<typeof setTimeout> | null = null;
   let lastCapture = 0;
   let atlas: Uint8Array | null = null;
+  let libraryQueue: Promise<void> = Promise.resolve();
+
+  function enqueue(task: () => Promise<void>): void {
+    libraryQueue = libraryQueue.then(task, task).catch((err) => {
+      console.error("Photo Booth library:", err);
+    });
+  }
   let atlasW = 0;
   let atlasH = 0;
+  let drag: { x: number; y: number; panX: number; panY: number } | null = null;
+
+  /** Capture size from the Photo Size menu, not the window. */
+  function chosenSize(): Size {
+    const paper = print?.paperWidth ?? 576;
+    return photoSize(photoSizeId(), paper, cameraAspect());
+  }
 
   function stopLoop(): void {
     cancelFrame?.();
@@ -107,7 +151,11 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
       return;
     }
     const src = camera?.frame() ?? null;
-    const { width, height } = view();
+    if (src && src.height > 0) {
+      const next = src.width / src.height;
+      if (Math.abs(next - cameraAspect()) > 0.002) setCameraAspect(next);
+    }
+    const { width, height } = chosenSize();
     if (src && width > 0 && height > 0 && now - lastCapture >= CAPTURE_INTERVAL_MS) {
       const mode = ditherMode();
       const ascii = asciiOpts();
@@ -147,13 +195,25 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   function takePhoto(): void {
     const live = liveFrame();
     if (!live) return;
-    setPhotos((prev) => [
-      ...prev,
-      { ...live, pixels: new Uint8Array(live.pixels), timestamp: Date.now() },
-    ]);
+    const shot: Photo = {
+      pixels: new Uint8Array(live.pixels),
+      width: live.width,
+      height: live.height,
+      timestamp: Date.now(),
+    };
     setFlash(true);
     if (flashTimer) clearTimeout(flashTimer);
     flashTimer = setTimeout(() => setFlash(false), 120);
+    enqueue(async () => {
+      try {
+        const folder = await ensurePhotoLibrary(app.fs, app.storage);
+        const stored = await storePhoto(app.fs, folder.id, shot);
+        setPhotos((prev) => [...prev, { ...shot, fileId: stored.fileId, timestamp: stored.timestamp }]);
+      } catch (err) {
+        console.error("Failed to keep photo:", err);
+        setPhotos((prev) => [...prev, shot]);
+      }
+    });
   }
 
   function startCountdown(): void {
@@ -174,8 +234,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
   }
 
   async function savePhoto(photo: Photo): Promise<void> {
-    const date = new Date(photo.timestamp);
-    const name = `Photo ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+    const name = `Photo ${photoDateLabel(photo)}`;
     const desktop = app.fs.locate("desktop");
     if (!desktop) return;
     try {
@@ -188,6 +247,23 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
       );
     } catch (e) {
       console.error("Failed to save photo:", e);
+    }
+  }
+
+  async function printPhoto(photo: Photo): Promise<void> {
+    if (!print || printing()) return;
+    setPrinting(true);
+    try {
+      await print.printPicture(
+        { width: photo.width, height: photo.height, data: photo.pixels },
+        printPictureOptions(printScale(), printOrientation()),
+      );
+    } catch (err) {
+      await app.os.showDialog({
+        message: `Couldn't print: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setPrinting(false);
     }
   }
 
@@ -221,6 +297,33 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
     });
   }
 
+  function openPrintSettings(): void {
+    const settings: PrintSettingsProps = {
+      image: () => {
+        const photo = viewing();
+        return photo ? { width: photo.width, height: photo.height, data: photo.pixels } : null;
+      },
+      scale: printScale,
+      orientation: printOrientation,
+      onScale: setPrintScale,
+      onOrientation: setPrintOrientation,
+      printing,
+      onPrint: () => {
+        const photo = viewing();
+        if (photo) void printPhoto(photo);
+      },
+    };
+    app.openWindow({
+      kind: "utility",
+      title: "Print Settings",
+      size: { width: 284, height: 340 },
+      scrollable: false,
+      resizable: false,
+      Component: PrintSettings,
+      props: settings,
+    });
+  }
+
   createEffect(
     () => ({
       viewing: viewingPhoto(),
@@ -228,6 +331,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
       loading: loading(),
       errorText: errorText(),
       isFullScreen: isFullScreen(),
+      printing: printing(),
       ditherMode: ditherMode(),
       showGlyphs: showGlyphs(),
       contrast: contrast(),
@@ -236,27 +340,50 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
       directional: directional(),
       normalize: normalize(),
       diffuse: diffuse(),
+      photoSizeId: photoSizeId(),
+      cameraAspect: cameraAspect(),
+      paper: print?.paperWidth,
     }),
-    ({ viewing, counting, loading: isLoading, errorText: err, isFullScreen: full, ditherMode: mode, showGlyphs: glyphs, contrast: contrastAmt, brightness: brightAmt }) => {
+    ({ viewing, counting, loading: isLoading, errorText: err, isFullScreen: full, printing: busy, ditherMode: mode, showGlyphs: glyphs, contrast: contrastAmt, brightness: brightAmt }) => {
     const ascii = asciiOpts();
     const toneDefault = contrastAmt === CONTRAST_DEFAULT && brightAmt === BRIGHTNESS_DEFAULT;
-    app.setMenus([
+    const fileItems: MenubarItemDef[] = [
       {
-        label: "File",
-        items: [
-          {
-            label: "Take Photo",
-            shortcut: "T",
-            disabled: counting || viewing !== null || isLoading || !!err || glyphs,
-            onClick: () => startCountdown(),
-          },
-          {
-            label: "Compare Reference",
-            shortcut: "R",
-            onClick: openCompare,
-          },
-        ],
+        label: "Take Photo",
+        shortcut: "T",
+        disabled: counting || viewing !== null || isLoading || !!err || glyphs,
+        onClick: () => startCountdown(),
       },
+      {
+        label: "Compare Reference",
+        shortcut: "R",
+        onClick: openCompare,
+      },
+    ];
+    if (print) {
+      fileItems.push(
+        { type: "separator" },
+        {
+          label: "Print…",
+          shortcut: "P",
+          disabled: viewing === null || busy,
+          onClick: () => {
+            const photo = viewing !== null ? photos()[viewing] : undefined;
+            if (photo) void printPhoto(photo);
+          },
+        },
+        {
+          label: "Print Settings…",
+          disabled: viewing === null,
+          onClick: openPrintSettings,
+        },
+      );
+    }
+    fileItems.push({ type: "separator" }, { label: "Quit", shortcut: "Q", onClick: () => app.quit() });
+    const sizeIds: PhotoSizeId[] = print ? ["square", "wide", "printer", "lying"] : ["square", "wide"];
+    const paper = print?.paperWidth ?? 576;
+    app.setMenus([
+      { label: "File", items: fileItems },
       {
         label: "View",
         items: [
@@ -271,6 +398,20 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
               setShowGlyphs((on) => !on);
               setFrame((n) => n + 1);
             },
+          },
+        ],
+      },
+      {
+        label: "Photo Size",
+        items: [
+          {
+            type: "radiogroup",
+            value: photoSizeId(),
+            onValueChange: (value) => setPhotoSizeId(value as PhotoSizeId),
+            items: sizeIds.map((id) => ({
+              label: photoSizeLabel(id, photoSize(id, paper, cameraAspect())),
+              value: id,
+            })),
           },
         ],
       },
@@ -302,6 +443,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
             items: [
               { label: "Atkinson", value: "atkinson" },
               { label: "Bayer", value: "bayer" },
+              { label: "Thermal", value: "thermal" },
               { label: "Ascii", value: "ascii" },
             ],
           },
@@ -313,6 +455,13 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
 
   onSettled(() => {
     void startCamera();
+    enqueue(async () => {
+      const folder = await findPhotoLibrary(app.fs, app.storage);
+      if (!folder) return;
+      const loaded = await listStoredPhotos(app.fs, folder.id);
+      const ids = new Set(loaded.map((photo) => photo.fileId));
+      setPhotos((prev) => [...loaded, ...prev.filter((photo) => !photo.fileId || !ids.has(photo.fileId))]);
+    });
   });
 
   onCleanup(() => {
@@ -322,6 +471,13 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
     camera?.close();
     camera = null;
   });
+
+  createEffect(
+    () => ({ size: photoSizeId(), viewing: viewingPhoto(), width: win.width(), height: win.height() }),
+    () => {
+      setPan({ x: 0, y: 0 });
+    },
+  );
 
   const viewing = () => {
     const i = viewingPhoto();
@@ -335,6 +491,21 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
           width={view().width}
           height={view().height}
           revision={frame()}
+          cursor={pictureOverflows(viewing() ?? liveFrame() ?? chosenSize(), view()) ? (dragging() ? "grabbing" : "grab") : "arrow"}
+          onDragStart={(_lx, _ly, gx, gy) => {
+            const offset = pan();
+            drag = { x: gx, y: gy, panX: offset.x, panY: offset.y };
+            setDragging(true);
+          }}
+          onDrag={(_lx, _ly, gx, gy) => {
+            if (!drag) return;
+            setPan({ x: drag.panX + gx - drag.x, y: drag.panY + gy - drag.y });
+            setFrame((n) => n + 1);
+          }}
+          onDragEnd={() => {
+            drag = null;
+            setDragging(false);
+          }}
           onPaint={(surface) => {
             const size = { width: surface.rect.width, height: surface.rect.height };
             if (showGlyphs()) {
@@ -348,10 +519,10 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
               return;
             }
             if (flash()) {
-              paintPicture(surface, null, size, 0);
+              paintPicture(surface, null, size, 0, pan());
               return;
             }
-            paintPicture(surface, viewing() ?? liveFrame(), size, 0);
+            paintPicture(surface, viewing() ?? liveFrame(), size, 0, pan());
           }}
         />
         <Show when={viewingPhoto() === null && !showGlyphs() && !loading() && !errorText()}>
@@ -435,11 +606,7 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
         </Show>
       </box>
       <box height={1} background={1} />
-      <box height={BAR_H - 1} padding={8} flexDirection="row" alignItems="center" gap={6} background={0}>
-        {/* In full screen the menubar is gone; this is the visible way back (Macintosh HIG). */}
-        <Show when={isFullScreen()}>
-          <Button label="Menu Bar" onClick={toggleFullScreen} />
-        </Show>
+      <box height={BAR_H - 1} padding={8} flexDirection="row" alignItems="center" gap={4} background={0}>
         <Show
           when={viewingPhoto() === null}
           fallback={
@@ -449,9 +616,13 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
                 onClick={() => {
                   const i = viewingPhoto();
                   if (i === null) return;
-                  const next = photos().filter((_, idx) => idx !== i);
-                  setPhotos(next);
-                  setViewingPhoto(next.length > 0 ? Math.min(i, next.length - 1) : null);
+                  const photo = photos()[i];
+                  enqueue(async () => {
+                    if (photo.fileId) await app.fs.remove(photo.fileId);
+                    const next = photos().filter((item) => (photo.fileId ? item.fileId !== photo.fileId : item !== photo));
+                    setPhotos(next);
+                    setViewingPhoto(next.length > 0 ? Math.min(i, next.length - 1) : null);
+                  });
                 }}
               />
               <Button
@@ -461,6 +632,16 @@ function PhotoBooth(_props: Record<string, unknown>): JSX.Element {
                   if (photo) void savePhoto(photo);
                 }}
               />
+              <Show when={print}>
+                <Button
+                  label="Print"
+                  disabled={printing()}
+                  onClick={() => {
+                    const photo = viewing();
+                    if (photo) void printPhoto(photo);
+                  }}
+                />
+              </Show>
               <Show when={(viewingPhoto() ?? 0) > 0}>
                 <Button label="<" onClick={() => setViewingPhoto((i) => (i ?? 1) - 1)} />
               </Show>

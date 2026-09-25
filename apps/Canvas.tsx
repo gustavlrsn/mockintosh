@@ -37,7 +37,9 @@ import {
   type TextElement,
 } from "./canvas/document";
 import { boxFill, lineHitMask, ovalHitMask, paintLine, paintOval } from "./canvas/draw";
+import { rasterizeCanvas } from "./canvas/raster";
 import { APP_ICON, TOOL_ICONS } from "./canvas/icons";
+import { matchingPageSize, pageSize, pageSizeLabel, type PageSizeId } from "./canvas/page";
 import {
   FILL_LABEL,
   FONT_LABEL,
@@ -89,6 +91,7 @@ function ToolButton(props: { id: ToolId; selected: boolean; onSelect: () => void
 function CanvasApp(props: Record<string, unknown>): JSX.Element {
   const app = useApp();
   const win = app.window;
+  const { print } = app;
 
   const [doc, setDoc] = createSignal<CanvasDocument>(emptyDocument(), { ownedWrite: true });
   const [rev, setRev] = createSignal(0);
@@ -119,8 +122,15 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
   const bump = () => setRev((n) => n + 1);
   const elements = () => doc().elements;
   const selected = () => elements().find((el) => el.id === selectedId()) ?? null;
-  const artW = () => Math.max(8, win.width() - TOOLS_W);
-  const artH = () => Math.max(8, win.height() - FOOT_H);
+  const artW = () => doc().width;
+  const artH = () => doc().height;
+  const viewW = () => Math.max(8, win.width() - TOOLS_W);
+  const viewH = () => Math.max(8, win.height() - FOOT_H);
+
+  function kept(elements: CanvasElement[]): CanvasDocument {
+    const cur = doc();
+    return { version: 1, width: cur.width, height: cur.height, elements };
+  }
 
   createEffect(
     () => ({ dirty: dirty(), name: fileName() ?? DEFAULT_NAME }),
@@ -180,12 +190,12 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
     const el = selected();
     if (!el) return;
     update(el);
-    replaceDoc({ version: 1, elements: elements().slice() });
+    replaceDoc(kept(elements().slice()));
     markDirty();
   }
 
   function commitElements(next: CanvasElement[], selectId: string | null): void {
-    replaceDoc({ version: 1, elements: next });
+    replaceDoc(kept(next));
     setSelectedId(selectId);
     markDirty();
   }
@@ -282,7 +292,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
     if (!el) return;
     el.x = move.origX + Math.round(gx - move.gx);
     el.y = move.origY + Math.round(gy - move.gy);
-    replaceDoc({ version: 1, elements: elements().slice() });
+    replaceDoc(kept(elements().slice()));
     markDirty();
   }
 
@@ -313,7 +323,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
       el.width = next.width;
       el.height = next.height;
     }
-    replaceDoc({ version: 1, elements: elements().slice() });
+    replaceDoc(kept(elements().slice()));
     markDirty();
   }
 
@@ -344,7 +354,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
     pushUndo();
     el.fill = next;
     if (next === "none") el.stroke = true;
-    replaceDoc({ version: 1, elements: elements().slice() });
+    replaceDoc(kept(elements().slice()));
     markDirty();
   }
 
@@ -354,7 +364,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
     if (!el || el.type === "text" || el.type === "line") return;
     pushUndo();
     el.stroke = on || el.fill === "none";
-    replaceDoc({ version: 1, elements: elements().slice() });
+    replaceDoc(kept(elements().slice()));
     markDirty();
   }
 
@@ -365,7 +375,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
     pushUndo();
     el.font = next;
     el.height = Math.max(el.height, fontLineHeight(next) + 4);
-    replaceDoc({ version: 1, elements: elements().slice() });
+    replaceDoc(kept(elements().slice()));
     markDirty();
   }
 
@@ -374,7 +384,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
     if (!el || el.type !== "text") return;
     pushUndo();
     el.align = next;
-    replaceDoc({ version: 1, elements: elements().slice() });
+    replaceDoc(kept(elements().slice()));
     markDirty();
   }
 
@@ -392,7 +402,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
     el.text = value;
     const w = measureText(value || " ", el.font) + 8;
     el.width = Math.max(el.width, Math.min(w, artW()));
-    replaceDoc({ version: 1, elements: elements().slice() });
+    replaceDoc(kept(elements().slice()));
     markDirty();
   }
 
@@ -415,7 +425,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
       if (key === "ArrowRight") el.x += step;
       if (key === "ArrowUp") el.y -= step;
       if (key === "ArrowDown") el.y += step;
-      replaceDoc({ version: 1, elements: elements().slice() });
+      replaceDoc(kept(elements().slice()));
       markDirty();
     }
   }
@@ -438,6 +448,10 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
       return !dirty();
     }
     return choice === "Don't Save";
+  }
+
+  async function quitApp(): Promise<void> {
+    if (await confirmDiscard()) app.quit();
   }
 
   async function loadFile(id: string, name: string): Promise<void> {
@@ -557,6 +571,27 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
     await loadFile(file.id, file.name);
   }
 
+  function setPageSize(id: PageSizeId): void {
+    const size = pageSize(id, print?.paperWidth ?? 576);
+    const cur = doc();
+    if (cur.width === size.width && cur.height === size.height) return;
+    pushUndo();
+    replaceDoc({ version: 1, width: size.width, height: size.height, elements: cur.elements.slice() });
+    markDirty();
+  }
+
+  async function printDocument(): Promise<void> {
+    if (!print) return;
+    const page = rasterizeCanvas(doc(), artW(), artH());
+    try {
+      await print.printPicture(page);
+    } catch (err) {
+      await app.os.showDialog({
+        message: `Couldn't print: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
   onSettled(() => {
     if (typeof props.fileId !== "string") return;
     void loadFile(props.fileId, typeof props.title === "string" ? props.title : DEFAULT_NAME);
@@ -578,6 +613,9 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
         align: el?.type === "text" ? el.align : "left",
         fill: el && el.type !== "text" ? el.fill : fill(),
         stroke: el && el.type !== "text" ? el.stroke : stroke(),
+        pageW: doc().width,
+        pageH: doc().height,
+        paper: print?.paperWidth,
       };
     },
     (s) => {
@@ -588,6 +626,10 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
         { label: "Save", shortcut: "S", onClick: () => void save(), disabled: !s.dirty && !!s.fileId },
         { label: "Save As…", onClick: () => void saveAs() },
       ];
+      if (print) {
+        fileItems.push({ type: "separator" }, { label: "Print…", shortcut: "P", onClick: () => void printDocument() });
+      }
+      fileItems.push({ type: "separator" }, { label: "Quit", shortcut: "Q", onClick: () => void quitApp() });
       app.setMenus([
         { label: "File", items: fileItems },
         {
@@ -615,6 +657,20 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
               pushUndo();
               commitElements(sendToBack(elements(), id), id);
             } },
+          ],
+        },
+        {
+          label: "Page Size",
+          items: [
+            {
+              type: "radiogroup",
+              value: matchingPageSize({ width: doc().width, height: doc().height }, print?.paperWidth ?? 576, print ? ["square", "wide", "printer", "lying"] : ["square", "wide"]) ?? "wide",
+              onValueChange: (value) => setPageSize(value as PageSizeId),
+              items: (print ? ["square", "wide", "printer", "lying"] : ["square", "wide"]).map((id) => ({
+                label: pageSizeLabel(id as PageSizeId, pageSize(id as PageSizeId, print?.paperWidth ?? 576)),
+                value: id,
+              })),
+            },
           ],
         },
         {
@@ -880,6 +936,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
       </box>
       <box width={1} height={win.height()} background={1} />
       <box flexGrow={1} height={win.height()} flexDirection="column">
+        <box width={viewW()} height={viewH()} overflow="scroll" background={0}>
         <box
           width={artW()}
           height={artH()}
@@ -913,6 +970,7 @@ function CanvasApp(props: Record<string, unknown>): JSX.Element {
             )}
           </Show>
           <SelectionChrome />
+        </box>
         </box>
         <box height={1} background={1} />
         <box

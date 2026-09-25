@@ -29,6 +29,13 @@ describe("EscPosEncoder", () => {
     expect([...new EscPosEncoder().cut({ mode: "partial" }).encode()]).toEqual([0x1d, 0x56, 0x01]);
   });
 
+  it("cut sends the configured command", () => {
+    const feedCut = new EscPosEncoder({ cutCommand: "gs-v-feed" });
+    expect([...feedCut.cut().encode()]).toEqual([0x1d, 0x56, 0x41, 0x00]);
+    expect([...new EscPosEncoder({ cutCommand: "esc-i" }).cut().encode()]).toEqual([0x1b, 0x69]);
+    expect([...new EscPosEncoder({ cutCommand: "esc-i" }).cut({ mode: "partial" }).encode()]).toEqual([0x1b, 0x6d]);
+  });
+
   it("raster packs pixels MSB-first, 1 = black, rows padded to bytes", () => {
     const bits = bitmapFromRows([
       "#........#",   // 10 px → 2 bytes/row; x=9 is bit 6 of the second byte
@@ -53,6 +60,42 @@ describe("EscPosEncoder", () => {
     const lastHeader = 2 * (8 + RASTER_BAND_ROWS);
     expect(out[lastHeader + 6]).toBe(5);
     expect(out[lastHeader + 7]).toBe(0);
+  });
+
+  it("sends a whole page as one raster command when the band is tall enough", () => {
+    const out = new EscPosEncoder({ rasterBandRows: 2048 }).raster(newBitMap(8, 792)).encode();
+    expect(out.length).toBe(8 + 792);
+    // yL yH = 792 = 0x0318
+    expect([out[6], out[7]]).toEqual([0x18, 0x03]);
+  });
+
+  it("prepends blank lead-in rows inside the raster command", () => {
+    const image = newBitMap(8, 2);
+    image.baseAddr.fill(0xff);
+    const out = new EscPosEncoder({ rasterLeadInRows: 3 }).raster(image).encode();
+    expect(out[6]).toBe(5);
+    expect([...out.subarray(8)]).toEqual([0, 0, 0, 0xff, 0xff]);
+  });
+
+  it("lead-in spanning a band boundary still yields every image row once", () => {
+    const image = newBitMap(8, 3);
+    image.baseAddr.set([1, 0, 2, 0, 3, 0]);
+    const out = new EscPosEncoder({ rasterLeadInRows: 3, rasterBandRows: 2 }).raster(image).encode();
+    // Bands of 2, 2, 2 rows: [0,0] [0,1] [2,3]
+    expect([...out.subarray(8, 10), ...out.subarray(18, 20), ...out.subarray(28, 30)]).toEqual([0, 0, 0, 1, 2, 3]);
+  });
+
+  it("begin() sends the tuning after ESC @", () => {
+    const bytes = (tuning: ConstructorParameters<typeof EscPosEncoder>[0]) => [...new EscPosEncoder(tuning).begin().encode()];
+    expect(bytes({ tuning: { command: "gs-k", speed: 1, density: -2 } })).toEqual([
+      0x1b, 0x40,
+      0x1d, 0x28, 0x4b, 0x02, 0x00, 0x31, 0xfe,
+      0x1d, 0x28, 0x4b, 0x02, 0x00, 0x32, 0x01,
+    ]);
+    expect(bytes({ tuning: { command: "dc2-density", density: 15, breakTime: 2 } })).toEqual([0x1b, 0x40, 0x12, 0x23, 0x4f]);
+    expect(bytes({ tuning: { command: "esc-7", heatingDots: 3, heatingTime: 160, heatingInterval: 20 } })).toEqual([
+      0x1b, 0x40, 0x1b, 0x37, 3, 160, 20,
+    ]);
   });
 
   it("packRows drops the bitmap's row padding", () => {

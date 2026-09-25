@@ -37,6 +37,7 @@ export {
   isTextType,
   isImageType,
   IMAGE_TYPES,
+  uniqueChildName,
   type NodeId,
   type NodeRole,
   type FSNode,
@@ -180,11 +181,29 @@ export interface PrintableImage {
   data: Uint8Array;
 }
 
+/** Which way the picture sits on the paper. */
+export type PrintOrientation = "portrait" | "landscape";
+
 export interface PrintPictureOptions {
-  /** Text printed beneath the picture, centred, in the menu font. */
-  caption?: string;
-  /** Integer enlargement of the picture (default 2). */
-  scale?: number;
+  /**
+   * How the picture meets the paper. `"auto"` (the default) picks the largest
+   * whole-number scale and the orientation that fills the width. `"fit"`
+   * fills the width exactly. A number is that whole-number enlargement,
+   * shrunk to the paper when it doesn't fit.
+   */
+  scale?: "auto" | "fit" | number;
+  /** `"auto"` (the default) lets `scale` choose. */
+  orientation?: "auto" | PrintOrientation;
+}
+
+/** What {@link PrintService.layoutPicture} decided, without sending it to the printer. */
+export interface PrintPictureLayout {
+  /** The page as it will print, paper-width wide. */
+  page: PrintableImage;
+  /** Scale actually used. Smaller than requested when that wouldn't fit. */
+  scale: number;
+  orientation: PrintOrientation;
+  paperWidth: number;
 }
 
 /**
@@ -216,13 +235,23 @@ export interface PrintService {
   /**
    * Connect to a printer. On the web this opens the browser's USB device
    * picker, so it must run from a user gesture such as a button click.
+   * Resolves with `connected()` still false if the user cancels the picker.
    */
   connect(): Promise<void>;
-  /** Print a picture as a polaroid-style card with an optional caption. Connects first if needed. */
+  /**
+   * Print a picture, scaled to the paper.
+   * Connects first if needed; resolves without printing if the user cancels.
+   */
   printPicture(image: PrintableImage, options?: PrintPictureOptions): Promise<void>;
   /**
+   * Lay a picture out for the default printer's paper without printing.
+   * The `page` is exactly what `printPicture` would send.
+   */
+  layoutPicture(image: PrintableImage, options?: PrintPictureOptions): PrintPictureLayout;
+  /**
    * Draw a page `height` dots tall with QuickDraw and print it. `port` is the
-   * current port while `draw` runs and is `paperWidth` wide.
+   * current port while `draw` runs and is `paperWidth` wide. Like
+   * `printPicture`, resolves without printing if the user cancels.
    */
   printPage(height: number, draw: (port: GrafPort, size: { width: number; height: number }) => void): Promise<void>;
 }
@@ -236,16 +265,19 @@ export interface PrintService {
  *                  (`documentProc` / `zoomDocProc`)
  * - `dialog`     — title bar with a close box, no zoom, fixed size
  *                  (`movableDBoxProc`)
- * - `utility`    — like `dialog` but floats above document windows
- *                  (`rDocProc`; tool palettes)
+ * - `utility`    — tool palette. Floats above document and full-screen
+ *                  windows. An empty `title` is the untitled form: an 11px
+ *                  drag bar, no title text, filled with 25% gray rather than
+ *                  racing stripes. It stays lit while its app is frontmost,
+ *                  together with the key document, and a click in it does not
+ *                  take the key window. Hidden when another app is frontmost.
  * - `plain`      — a bare 1px frame, no title bar, cannot be moved
  *                  (`plainDBox`)
  * - `alert`      — square double frame (1px / 2px white / 2px), system-modal:
  *                  every other window ignores input until it closes (`dBoxProc`)
  * - `fullscreen` — no chrome at all; covers the whole screen, menubar
- *                  included. The menubar's ⌘ shortcuts still work, so an app
- *                  in full screen must offer a way back — a shortcut, a
- *                  visible "Menu Bar" button, or both (Macintosh HIG).
+ *                  included. Touching the top edge slides the menubar down
+ *                  over the picture; ⌘ shortcuts work without revealing it.
  */
 export type WindowKind = "document" | "dialog" | "utility" | "plain" | "alert" | "fullscreen";
 
@@ -281,6 +313,12 @@ export interface AppContext {
   onCleanup?(cleanup: () => void): void;
   /** Explicitly retain an instance for background work; release when it finishes. */
   keepAlive?(): () => void;
+  /**
+   * End this launch: close every window it owns and run its cleanup, which
+   * returns the user to the Finder. File → Quit should call this. The OS does
+   * not add that menu item.
+   */
+  quit(): void;
   getSprite(name: string): Sprite | undefined;
   storage: AppStorage;
   fs: AppFileSystem;
@@ -289,6 +327,11 @@ export interface AppContext {
     openApp(appId: string, props?: Record<string, unknown>): void;
     /** @deprecated Renamed `openApp`; this opens an *app*, which decides about its windows. */
     openWindow(appId: string, props?: Record<string, unknown>): void;
+    /**
+     * Every app that can open files of `type`, the Finder's default first.
+     * Open one with `openApp(opener.appId, fileDocumentProps)`.
+     */
+    openersFor(type: string): FileOpener[];
     closeWindow(windowId: string): void;
     showDialog(options: DialogOptions): Promise<string | null>;
   };
@@ -394,6 +437,12 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
   id: string;
   title: string;
   icon: string;
+  /**
+   * 16×16 menu-bar icon (`ics#`). Omit it and the OS reduces `icon` to 16×16
+   * for the application menu. Supply it when you have a small icon drawn for
+   * that size.
+   */
+  smallIcon?: string;
   /** The app's About box, opened from the Apple menu. See `AppAbout`. */
   about?: AppAbout;
   /**
@@ -424,9 +473,10 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
   /**
    * MIME types this app opens. When the user opens such a file from the
    * Finder, the OS launches the app with `FileDocumentProps` merged into its
-   * props. The first registered app for a type wins.
+   * props. A plain string claims the type as the app's `"default"`; see
+   * `FileTypeClaim` for apps that can open a type but shouldn't own it.
    */
-  fileTypes?: string[];
+  fileTypes?: (string | FileTypeClaim)[];
   /**
    * Sprites the app draws by name (`<image src>`, `getSprite`) — including
    * its own `icon`. Registered with the OS alongside the app; keys should be
@@ -448,6 +498,31 @@ export interface SolidApp<P extends Record<string, unknown> = Record<string, unk
    * is a place for opening windows, not for creating effects.
    */
   onOpen?(app: AppContext, props: P): void;
+}
+
+/**
+ * How strongly an app wants a file type (after macOS's handler rank). A
+ * double-click opens the first registered `"default"` app for the type, and
+ * only falls back to an `"alternate"` when no app claims it as default.
+ * Alternates are still offered by "Open With".
+ */
+export type FileTypeRank = "default" | "alternate";
+
+export interface FileTypeClaim {
+  type: string;
+  rank: FileTypeRank;
+}
+
+/** Claim `types` as an alternate opener: offered by "Open With", never the double-click default. */
+export function alternateFileTypes(types: readonly string[]): FileTypeClaim[] {
+  return types.map((type) => ({ type, rank: "alternate" }));
+}
+
+/** An app that can open a given file type, as listed by `os.openersFor`. */
+export interface FileOpener {
+  appId: string;
+  title: string;
+  rank: FileTypeRank;
 }
 
 /** Props the OS passes when an app is launched to open a file. */

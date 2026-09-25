@@ -16,12 +16,12 @@ import type {
   DownloadService,
   FetchFunction,
   ImageService,
-  PrintService,
   VideoService,
   WindowSpec,
 } from "@mockintosh/sdk";
 import type { PlatformEnv, PlatformScheduler } from "../platform/types";
 import type { CapabilitySet } from "./capabilities";
+import type { SystemPrinters } from "./printers/manager";
 
 export interface IconScreenRect {
   x: number;
@@ -51,8 +51,8 @@ export interface OSServices {
   capabilities: CapabilitySet;
   /** Network access, when the platform has it. */
   fetch?: FetchFunction;
-  /** The system printer, when the platform provides a transport for one. */
-  printer?: PrintService;
+  /** The configured printers (apps print to the default), when the platform can reach any. */
+  printers?: SystemPrinters;
   /** Offer a file to the host user, when the platform can. */
   download?: DownloadService;
   images?: ImageService;

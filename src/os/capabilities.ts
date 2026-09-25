@@ -14,7 +14,7 @@ export function platformCapabilities(platform: Platform): CapabilitySet {
   const caps = new Set<Capability>(platform.hostCapabilities);
   if (platform.fetch) caps.add("network");
   if (platform.clipboard) caps.add("clipboard");
-  if (platform.printer) caps.add("printer");
+  if (platform.printer || platform.printerLinks) caps.add("printer");
   if (platform.download) caps.add("download");
   if (platform.images) caps.add("images");
   if (platform.video) caps.add("video");

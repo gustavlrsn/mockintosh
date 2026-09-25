@@ -13,7 +13,7 @@
  */
 import type { BitMap } from "@mockintosh/quickdraw";
 import type { FSBackend } from "@mockintosh/fs";
-import type { PrinterTransport } from "@mockintosh/print";
+import type { PrinterLinks, PrinterProfile, PrinterTransport } from "@mockintosh/print";
 import type { UIClipboard, Modifiers } from "@mockintosh/ui";
 import type {
   AppCrypto,
@@ -112,7 +112,15 @@ export interface Platform {
   /** Host features present beyond the services below (`browser`). */
   hostCapabilities: readonly HostCapability[];
   clipboard?: UIClipboard;
+  /**
+   * Printers the user adds in the Chooser (USB, Bluetooth). The OS keeps a
+   * list of configured printers and opens one transport per printer.
+   */
+  printerLinks?: PrinterLinks;
+  /** A printer wired to the board itself, always present; `printerProfile` says what it is. */
   printer?: PrinterTransport;
+  /** Paper width and dialect of the fixed `printer`. Absent = ESC/POS 80 mm. */
+  printerProfile?: PrinterProfile;
   download?: DownloadService;
   fetch?: FetchFunction;
   images?: ImageService;

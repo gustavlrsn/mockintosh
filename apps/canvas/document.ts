@@ -5,6 +5,9 @@
 
 export const DOCUMENT_VERSION = 1 as const;
 
+/** New documents, and saved files that don't record a size yet. */
+export const DEFAULT_PAGE = { width: 288, height: 288 } as const;
+
 export type CanvasFont = "body" | "menu" | "mono" | "pixel";
 export type CanvasAlign = "left" | "center" | "right";
 export type FillStyle = "none" | "white" | "black" | "gray25" | "gray50" | "gray75";
@@ -39,6 +42,8 @@ export type CanvasElement = ShapeElement | TextElement;
 
 export interface CanvasDocument {
   version: typeof DOCUMENT_VERSION;
+  width: number;
+  height: number;
   elements: CanvasElement[];
 }
 
@@ -58,11 +63,11 @@ const SHAPES = new Set<ShapeKind>(["rect", "roundrect", "oval", "line"]);
 const RESIZE_HANDLES: readonly ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
 export function emptyDocument(): CanvasDocument {
-  return { version: DOCUMENT_VERSION, elements: [] };
+  return { version: DOCUMENT_VERSION, width: DEFAULT_PAGE.width, height: DEFAULT_PAGE.height, elements: [] };
 }
 
 export function cloneDocument(doc: CanvasDocument): CanvasDocument {
-  return { version: DOCUMENT_VERSION, elements: doc.elements.map((el) => ({ ...el })) };
+  return { version: DOCUMENT_VERSION, width: doc.width, height: doc.height, elements: doc.elements.map((el) => ({ ...el })) };
 }
 
 export function allocateId(elements: readonly CanvasElement[]): string {
@@ -125,7 +130,12 @@ export function parseDocument(raw: unknown): CanvasDocument {
       elements.push(parseShape(item, type as ShapeKind, id));
     }
   }
-  return { version: DOCUMENT_VERSION, elements };
+  return {
+    version: DOCUMENT_VERSION,
+    width: Math.max(1, num(raw.width, DEFAULT_PAGE.width)),
+    height: Math.max(1, num(raw.height, DEFAULT_PAGE.height)),
+    elements,
+  };
 }
 
 export function normalizeFrame(x0: number, y0: number, x1: number, y1: number): Frame {

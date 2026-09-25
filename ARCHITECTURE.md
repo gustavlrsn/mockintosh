@@ -74,7 +74,7 @@ interface Platform {
   storage:   FSBackend                                    // the disk
   env:       { origin, config }                           // host origin + VITE_* / device config
   hostCapabilities: HostCapability[]                      // leftover flags; `browser` is derived from the service
-  clipboard?, printer?, download?, fetch?                 // peripherals; absent = feature hidden
+  clipboard?, printerLinks?, printer?, download?, fetch?  // peripherals; absent = feature hidden
   images?, video?, camera?                                // media; capabilities follow presence
   crypto                                                  // randomBytes + sha256
   browser?                                                // openExternal, authorize, loadScript
@@ -92,7 +92,7 @@ Which apps ship is the entry point's decision, not the OS's: `src/systemApps.ts`
 
 ### Capabilities
 
-Apps declare what they cannot work without — `requires: ["camera"]` on `defineApp`/`registerApp`, and on App Store manifests. `platformCapabilities(platform)` (`src/os/capabilities.ts`) derives the set this machine has: `network`/`clipboard`/`printer`/`download` from the services present, the rest from `hostCapabilities`. The OS refuses to launch an app with unmet requirements and tells the user why (“*"Photo Booth" needs a camera, which this Macintosh does not have.*”), and skips loading installed bundles it cannot run (their shortcuts explain the same when opened). Apps that work with *or* without a feature check `useApp().capabilities` at the point of use instead — Picture opens sprite files everywhere and gates PNG decoding on `images`; Dither hides Export when `download` is absent.
+Apps declare what they cannot work without — `requires: ["camera"]` on `defineApp`/`registerApp`, and on App Store manifests. `platformCapabilities(platform)` (`src/os/capabilities.ts`) derives the set this machine has: `network`/`clipboard`/`printer`/`download` from the services present, the rest from `hostCapabilities`. The OS refuses to launch an app with unmet requirements and tells the user why (“*"Photo Booth" needs a camera, which this Macintosh does not have.*”), and skips loading installed bundles it cannot run (their shortcuts explain the same when opened). Apps that work with *or* without a feature check `useApp().capabilities` at the point of use instead — Preview opens sprite files everywhere and gates PNG decoding on `images`; Dither hides Export when `download` is absent.
 
 ## App model
 
@@ -161,6 +161,7 @@ src/platform/
     index.ts                createWebPlatform: canvas via @mockintosh/ui/web, DOM input, RAF, OPFS, WebUSB
     OPFSBackend.ts          FSBackend on the Origin Private File System
     WebUSBPrinterTransport.ts
+    webBluetoothPrinterTransport.ts
   headless/                 In-memory platform for tests and as a template for new hosts
 
 packages/ui/                1-bit Solid canvas kit — npm `@mockintosh/ui`, site `ui.mockintosh.com`
@@ -174,7 +175,7 @@ packages/sdk/               defineApp, useApp, menubar types, UI + fs + protocol
 packages/protocol/          Wire schemas: kernel resources, jobs, chat, build contract
 packages/agent/             ChatGippity loop (`runAgent`) over KernelClient + fetch
 packages/markdown/          mdast → LayoutNode
-packages/print/             Print pages (QuickDraw ports) → ESC/POS → PrinterTransport
+packages/print/             Print pages → PrinterEncoder (ESC/POS, cat printer) → PrinterTransport
 packages/quickdraw/         GrafPort, CopyBits, BitBlt, packed 1-bit BitMap
 
 sites/ui/                   ui.mockintosh.com — kit catalog; @mockintosh/ui only, not the OS
@@ -208,7 +209,7 @@ src/
     zoomAnimation.ts        XOR zoom-rect animation (presents via a callback)
     appStorage.ts           Per-app storage folder
     installedApps.ts        AppInstaller: .app manifests in Applications, bundles via Platform.loadModule
-    printing.ts             System printer: PrintService over a PrinterTransport
+    printers/               Printers: the list + default (manager), one device per printer, driver catalog, saved list
     components/             Desktop, Window, Menubar, Dialog, Splash
 
 templates/app/              vite-plugin-solid universal starter
@@ -282,20 +283,21 @@ A window's `kind` selects a **window definition** (`src/os/windowKinds.ts`) — 
 | `"document"`      | `zoomDocProc`     | title, close, zoom; grow box / scroll bars if asked | 1 documents                  |
 | `"finder-folder"` | —                 | a document the Finder can tell apart                | 1                            |
 | `"dialog"`        | `movableDBoxProc` | title, close; no zoom, no grow                      | 1                            |
-| `"utility"`       | `rDocProc`        | as `dialog`                                         | 2 above documents            |
+| `"utility"`       | `rDocProc`        | untitled: 11px 25% gray drag bar and close box; a title uses the document-height bar, same fill, no stripes | 4 above fullscreen |
 | `"plain"`         | `plainDBox`       | 1px frame and shadow; no title bar, not movable     | 1                            |
-| `"alert"`         | `dBoxProc`        | 1px / 2px white / 2px square frame and shadow; system-modal | 4 front              |
-| `"fullscreen"`    | —                 | none; bounds are the screen, menubar hidden         | 3 above utilities            |
+| `"alert"`         | `dBoxProc`        | 1px / 2px white / 2px square frame and shadow; system-modal | 5 front              |
+| `"fullscreen"`    | —                 | none; bounds are the screen, menubar hidden         | 3 above documents            |
 
 `buildAppWindow` clamps size/position to the desktop (gray region minus 3 px). Zoom box toggles `standardBounds` vs `userBounds`. Opening from a Finder icon plays the zoom-rect animation.
 
-**Full screen** is the Macintosh "special presentation mode": the application takes the whole screen, menubar included, and is responsible for offering a way back (HIG). `setWindowFullScreen(id, on)` (`useApp().window.setFullScreen`) switches a window into and out of `fullscreen` *in place* — the content stays mounted, as with the zoom box — remembering its windowed kind and bounds in `OSWindow.windowed`. A window may also be *opened* as `fullscreen`; it has no windowed form to return to. While the frontmost non-modal window covers the screen, `isMenubarHidden()` is true and `OSRoot` does not paint the menubar, but `getMenubarMenus()` is unchanged, so the app's ⌘ shortcuts keep working: that, plus an on-screen "Menu Bar" button, is how Photo Booth gets out.
+**Full screen** is the Macintosh "special presentation mode": the application takes the whole screen, menubar included. `setWindowFullScreen(id, on)` (`useApp().window.setFullScreen`) switches a window into and out of `fullscreen` *in place* — the content stays mounted, as with the zoom box — remembering its windowed kind and bounds in `OSWindow.windowed`. A window may also be *opened* as `fullscreen`; it has no windowed form to return to. While the frontmost non-modal window covers the screen, `isMenubarHidden()` is true and the menubar is tucked above the picture (`menubarTop()`), but `getMenubarMenus()` is unchanged, so the app's ⌘ shortcuts keep working. A press on the top edge, or the pointer passing that edge (including the page above the canvas), slides the bar down four pixels per frame; it slides back up when the pointer drops below the bar unless a menu is open (`menubarReveal.ts`). A utility window paints above that picture and keeps its gray drag bar while the document stays the key window, so the menubar stays tucked. Palettes are hidden when another app is frontmost ([Macintosh Human Interface Guidelines, Utility Windows](https://dev.os9.ca/techpubs/mac/HIGuidelines/HIGuidelines-112.html#HEADING112-0)).
 
 ## Event flow
 
 ```
 platform.input (raw down/up/move/scroll, key down/up)
-   → bootOS: double-click detection, ⌘V paste via platform.clipboard,
+   → bootOS: double-click detection, full-screen menubar edge,
+             ⌘V paste via platform.clipboard,
              ⌘ shortcut scan of the active menubar
    → ui.dispatchPointer / dispatchKeyboard
 ```
@@ -315,7 +317,7 @@ src/os/installedApps.ts        App Store manifests as MIME.app files in Applicat
 apps/finder/attributes.ts      Finder's typed view of node attributes
 ```
 
-**Layout.** Root → volumes → folders. Well-known folders carry a `role` (`volume`, `desktop`, `trash`, `applications`, `system`, `preferences`) and are found with `fs.locate(role)`, never by name — the user may rename them. At most one folder per role per volume.
+**Layout.** Root → volumes → folders. Well-known folders carry a `role` (`volume`, `desktop`, `trash`, `applications`, `pictures`, `system`, `preferences`, `extensions`, `printer-drivers`) and are found with `fs.locate(role)`, never by name — the user may rename them. At most one folder per role per volume. Pictures is the volume's folder for user pictures.
 
 **Types.** A file has one MIME `type` (`MIME` constants: `text/plain`, `image/x-mockintosh-sprite`, `application/x-mockintosh-app-shortcut`, `application/x-mockintosh-app`, `application/x-decker`, …) and a byte `size`. Bodies are bytes; `readText`/`readJSON`/`writeJSON` are conveniences.
 
@@ -323,7 +325,7 @@ apps/finder/attributes.ts      Finder's typed view of node attributes
 
 **Durability.** A body is written to the backend *before* its catalog entry appears; an entry is removed *before* its body is deleted. The catalog is debounced (500 ms) and versioned: `parseCatalog` migrates older documents (the v1 `FileManager` catalog → v2: MIME types, roles, attributes → v3: persisted revisions) and drops unreachable nodes rather than failing.
 
-**Opening.** A double-click asks `resolveOpenAction`: directories open a Finder window; `MIME.appShortcut` / `MIME.app` launch the referenced app; other files launch the first registered app whose `fileTypes` includes the MIME type, with `FileDocumentProps` (`fileId`, `title`) as props. FileViewer opens `text/*`, Dither opens PNG/JPEG/GIF/WebP and 1-bit sprite files, Picture the same types if Dither is absent. Unknown types show a dialog, as does a shortcut or manifest whose app is no longer registered (`reason: "unknown-app"`).
+**Opening.** A double-click asks `resolveOpenAction`: directories open a Finder window; `MIME.appShortcut` / `MIME.app` launch the referenced app; other files launch the first registered app that claims the MIME type as its `"default"` in `fileTypes` (falling back to an `"alternate"` claim), with `FileDocumentProps` (`fileId`, `title`) as props. `os.openersFor(type)` lists every claimant for "Open With". FileViewer opens `text/*`; Preview is the default for 1-bit sprite files and PNG/JPEG/GIF/WebP, and offers Dither and Trace, which claim those types as alternates. Unknown types show a dialog, as does a shortcut or manifest whose app is no longer registered (`reason: "unknown-app"`).
 
 **Host import.** The web platform reports files the user drags from the real computer onto the screen (`PlatformInput.onDrop`). `bootOS` writes them into the folder under the pointer (desktop, or an open Finder folder) via `src/os/hostImport.ts`. Dropping onto a Dither window also opens the new file there.
 
@@ -338,7 +340,11 @@ PrintPage (off-screen GrafPort, paper width)  →  EscPosEncoder  →  PrinterTr
 
 Printing follows the Macintosh Printing Manager model: the page is an ordinary QuickDraw port (`createPrintPage`), so anything that draws to the screen can draw to paper — `CopyBits` for pictures, `drawString` from `@mockintosh/ui` for text in the UI fonts. `EscPosEncoder` packs the finished 1-bit page into banded `GS v 0` raster commands plus feed and cut; it is pure and unit-tested. The `PrinterTransport` is the platform edge: `WebUSBPrinterTransport` (browser, Chromium) finds the device's bulk OUT endpoint and streams the bytes; a microcontroller would send the same bytes over UART.
 
-The shell owns one system printer (`src/os/printing.ts`, like the Chooser) and hands it to apps as `useApp().print`, an *optional* capability: it is `undefined` when the platform has no transport, so apps hide their Print UI with `<Show when={print}>`. `printPicture` is the polaroid layout (picture enlarged and centred, caption beneath); `printPage` gives an app the raw port.
+The shell keeps a list of printers with one default (`src/os/printers/manager.ts`, like the Chooser) and hands apps the default as `useApp().print`, an *optional* capability: it is `undefined` when the platform can't reach any printer, so apps hide their Print UI with `<Show when={print}>`. `printPicture` lays the picture out for the paper (`src/os/printers/pictureLayout.ts`): by default the largest whole-number scale and the orientation that fills the paper, which `layoutPicture` returns without printing so a preview matches the page. `printPage` gives an app the raw port. Which device is the printer is the shell's business, not the app's: the Finder's Chooser window (`apps/finder/Chooser.tsx`, Apple menu) adds, removes and configures printers through the shell-only `SystemPrinters`, and transports report a dismissed device picker as `PrinterCancelledError`, which the service treats as "don't print" rather than an error.
+
+**Drivers.** What a printer can't say about itself — paper width, dots per line, cutter, command-set quirks, which Bluetooth service to write to — lives in a `PrinterDriver` (`@mockintosh/print` `driver.ts`), which is plain data. Built-ins ship in `BUILTIN_PRINTER_DRIVERS`; user drivers are JSON files (`driverFile.ts`, format `mockintosh-printer-driver` v1, strictly validated) in System Folder › Extensions › Printer Drivers (role `printer-drivers`), read live by `src/os/printers/drivers.ts`. A file with a built-in's id replaces it. When a printer is added, `identifyPrinter` gathers its `PrinterIdentity` (USB descriptors, IEEE 1284 device ID, ESC/POS `GS I`, Bluetooth name and services) and `matchPrinterDrivers` ranks the drivers against it; the Chooser shows the ranking and the settings already proven for the driver (width, speed, density). Experiments live in a second Finder window, Printer Diagnostics (`apps/finder/PrinterDiagnostics.tsx`, from the Chooser): identify and probe, width, cut, status and heat tests, and "Save as Driver…" to turn a tuned setup into a file. How to bring up a new printer is the `thermal-printer-drivers` skill in `.cursor/skills/`.
+
+**Configured printers** are saved in Preferences › Printers (`printerList.ts`): name, driver id, optional dots override, and a `PrinterDeviceRef` to find the same device again (USB vendor/product/serial, Bluetooth id). The platform supplies `PrinterLinks` (`kinds` + `open(request)`): on the web, one `WebUSBPrinterTransport` bound to its device, or one `WebBluetoothPrinterTransport` that offers every driver's GATT service in the picker and writes through the first the device has. A board with a printer wired in sets `Platform.printer` instead, which appears as a fixed entry.
 
 ## App Store
 

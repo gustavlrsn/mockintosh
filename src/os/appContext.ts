@@ -8,6 +8,7 @@ import type { AppContext, KernelClient, WindowSpec } from "@mockintosh/sdk";
 import type { OSServices, IconScreenRect } from "./context";
 import { createAppStorage } from "./appStorage";
 import { getApp } from "./apps";
+import { openersForFileType } from "./openers";
 import { Cancellation } from "./kernel/cancellation";
 
 export interface AppContextOptions {
@@ -66,6 +67,7 @@ export function createAppContext(
   let pendingFromRect = options.fromRect;
   return {
     keepAlive: () => options.instanceId && os.instances ? os.instances.retain(options.instanceId) : () => {},
+    quit: () => { if (options.instanceId) os.instances?.stop(options.instanceId); },
     onCleanup: cleanup => { if (options.instanceId) os.instances?.own(options.instanceId, cleanup); },
     getSprite: (name) => os.sprites.get(name),
     storage: createAppStorage(os.fs, appId),
@@ -73,6 +75,7 @@ export function createAppContext(
     os: {
       openApp: (id, props) => os.openApp(id, props),
       openWindow: (id, props) => os.openApp(id, props),
+      openersFor: (type) => openersForFileType(type),
       closeWindow: (id) => os.closeWindow(id),
       showDialog: (opts) => os.showDialog(opts),
     },
@@ -86,7 +89,7 @@ export function createAppContext(
     browser: os.browser,
     capabilities: os.capabilities,
     fetch: os.fetch,
-    print: os.printer,
+    print: os.printers,
     download: os.download,
     images: os.images,
     video: os.video,

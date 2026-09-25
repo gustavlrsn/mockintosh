@@ -18,18 +18,20 @@ These ship with the OS. SDK-clean apps compile under the in-OS project compiler 
 |---|---|---|
 | MacPaint | `MacPaint.tsx` | SDK-clean |
 | Canvas | `Canvas.tsx` | SDK-clean |
-| Foundry | `Foundry.tsx` | SDK-clean |
 | Safari | `Safari.tsx` | SDK-clean |
 | Testing | `Testing.tsx` | SDK-clean |
 | File | `FileViewer.tsx` | SDK-clean |
-| Picture | `Picture.tsx` | SDK-clean |
+| Preview | `Preview.tsx` | SDK-clean |
 | Dither | `Dither.tsx` | SDK-clean |
+| Trace | `Trace.tsx` | SDK-clean |
+| Surface | `Surface.tsx` | SDK-clean |
 | Video Player | `VideoPlayer.tsx` | SDK-clean |
 | Photo Booth | `PhotoBooth.tsx` | SDK-clean |
 | Source Editor | `SourceEditor.tsx` | SDK-clean |
 | Terminal | `Terminal.tsx` | SDK-clean |
 | ChatGippity | `ChatGippity.tsx` | SDK-clean |
 | Spotify | `SpotifyPlayer.tsx` | SDK-clean |
+| GitHub | `GitHub.tsx` | SDK-clean |
 | Finder | `Finder.solid.tsx` | Shell |
 | App Store | `AppStore.tsx` | Shell |
 | Icon Gallery | `IconGallery.tsx` | Shell |
@@ -204,6 +206,7 @@ export default defineApp({
 - `openWindow(spec?)` — open another window of your app (see [Windows](#windows))
 - `os.openApp / closeWindow / showDialog`
 - `setMenus(menus)` — this window's menubar (see [Menus](#menus))
+- `quit()` — end this launch: close every one of its windows and return to the Finder (see [Menus](#menus))
 - `fetch` — network access, when this Macintosh has it (see [Capabilities](#capabilities))
 - `print` — the system printer, when the platform has one (see [Printing](#printing))
 - `download` — offer a file to the host user (`save({ name, type, bytes })`), when the platform can
@@ -305,6 +308,15 @@ export default defineApp<FileDocumentProps>({
 });
 ```
 
+A plain string claims the type as your app's **default**: a double-click opens the first registered default for a type. An app that can work on a type but shouldn't own it — an editor or converter next to a viewer — claims it as an **alternate**, so the Finder only picks it when nothing claims the type as default:
+
+```tsx
+fileTypes: alternateFileTypes([MIME.sprite, ...IMAGE_TYPES]),
+// same as [{ type: MIME.sprite, rank: "alternate" }, …]
+```
+
+`useApp().os.openersFor(type)` lists every app that opens a type, defaults first, for an "Open With" menu; hand the document over with `os.openApp(opener.appId, { fileId, title })`. Preview does this for pictures.
+
 ## Sprites
 
 Export a `sprites` record beside your default app:
@@ -323,7 +335,7 @@ export const sprites: Record<string, Sprite> = {
 
 Prefix names with your app id (`"myapp/icon"`). OS sprites use `"icon/"` and `"chrome/"`.
 
-Sprites are also a file type — `image/x-mockintosh-sprite`, `MIME.sprite` — which is how an app keeps a picture in the user's file system (PhotoBooth and Dither save this way; Dither reopens them, Picture if Dither is absent). `readSpriteFile(fs, fileId)` decodes one; `readImageFile(fs, images, fileId)` expands a sprite or decodes a still — never pass sprite bytes to `images.decode`. `writeSpriteFile(fs, parentId, name, sprite, { attributes })` writes one, optionally with a Finder `icon` attribute:
+Sprites are also a file type — `image/x-mockintosh-sprite`, `MIME.sprite` — which is how an app keeps a picture in the user's file system (PhotoBooth, Dither, MacPaint and Surface save this way; Preview opens them by default). `readSpriteFile(fs, fileId)` decodes one; `readImageFile(fs, images, fileId)` expands a sprite or decodes a still — never pass sprite bytes to `images.decode`. `writeSpriteFile(fs, parentId, name, sprite, { attributes })` writes one, optionally with a Finder `icon` attribute:
 
 ```tsx
 const { fs } = useApp();
@@ -339,11 +351,12 @@ if (desktop) await writeSpriteFile(fs, desktop.id, "Photo", sprite, { attributes
 const { print } = useApp();
 
 <Show when={print}>
-  <Button label="Print" onClick={() => print!.printPicture(image, { caption: "Hello" })} />
+  <Button label="Print" onClick={() => print!.printPicture(image)} />
 </Show>
 ```
 
-- `printPicture(image, { caption?, scale? })` — a 1-bit image (`{ width, height, data }`, 1 byte per pixel, `1` = black; a `Sprite` works) printed as a polaroid-style card, enlarged and centred with the caption beneath.
+- `printPicture(image, options?)` — a 1-bit image (`{ width, height, data }`, 1 byte per pixel, `1` = black; a `Sprite` works). `scale` defaults to `"auto"`: the largest whole-number enlargement, portrait or landscape, that fills the paper. `"fit"` fills the width exactly. A number is that enlargement, shrunk to the paper when it doesn't fit. `orientation` is `"auto"`, `"portrait"`, or `"landscape"`.
+- `layoutPicture(image, options?)` — the same layout, without printing. `page` is the bitmap that would be sent, and `scale` / `orientation` are what auto chose, so a preview can match the print.
 - `printPage(height, (port, size) => …)` — draw a page yourself with QuickDraw; `port` is `paperWidth` dots wide.
 - `connected()` — reactive; `connect()` — connect without printing.
 - `paperWidth` — dots per line (576 on 80 mm paper).
@@ -356,6 +369,21 @@ There are two levels:
 
 - **App-level** — `menus` on `defineApp`. Declared once, shown for every window of your app. Use it for menus that don't depend on component state.
 - **Window-level** — `useApp().setMenus(menus)` from inside your component. Replaces the app-level menus while *that* window is active, so items can close over the window's own signals. Call it from `createEffect` so `disabled` flags and radio values track state.
+
+**Every application should have a File menu whose last item is Quit (⌘Q).** That item calls `useApp().quit()`, which closes every window of this launch and returns to the Finder. Put a separator before Quit when the menu has other commands. The OS does not insert this item, and it will not quit an app that omits it. The Finder, App Store, and Icon Gallery are shell programs, not applications you leave, so they have no Quit. If your app must ask about unsaved work, do that in the Quit handler and call `quit()` only after the user confirms. Install the item from the component — `onClick` has to see `useApp()`, and a window-level `setMenus` replaces the app-level menus, so Quit has to be in the menus you actually install:
+
+```tsx
+app.setMenus([
+  {
+    label: "File",
+    items: [
+      // …your commands…
+      { type: "separator" },
+      { label: "Quit", shortcut: "Q", onClick: () => app.quit() },
+    ],
+  },
+]);
+```
 
 ```tsx
 import { defineApp, useApp, createSignal, createEffect } from "@mockintosh/sdk";
@@ -375,6 +403,10 @@ export default defineApp({
       () => ({ count: count(), step: step() }),
       ({ count: n, step: s }) => {
       app.setMenus([
+        {
+          label: "File",
+          items: [{ label: "Quit", shortcut: "Q", onClick: () => app.quit() }],
+        },
         {
           label: "Counter",
           items: [
@@ -420,7 +452,7 @@ Like the Macintosh's `NewWindow`, you choose what kind of window you get:
 |--------------|----------------------------------------------------------------------------|
 | `document`   | title bar with close and zoom boxes; grow box / scroll bars when `resizable` / `scrollable` |
 | `dialog`     | title bar with a close box, fixed size                                     |
-| `utility`    | like `dialog`, but floats above document windows (tool palettes)           |
+| `utility`    | tool palette above document and full-screen windows. `title: ""` is an 11px drag bar with no title; a title uses a 25% gray bar instead of racing stripes. It stays lit beside the key document, and the first click in it changes a control. Hidden while another app is front. |
 | `plain`      | a bare 1px frame, no title bar, cannot be moved                            |
 | `alert`      | `plain` and system-modal: nothing else takes input until it closes         |
 | `fullscreen` | no chrome at all — the whole screen, menubar included (see below)          |
@@ -452,9 +484,9 @@ export default defineApp({
 
 ### Full screen
 
-A `fullscreen` window is the Macintosh "special presentation mode": your content covers the whole 512×342 screen and the menubar is not drawn. Two ways in — open a window as `kind: "fullscreen"`, or switch an existing window with `window.setFullScreen(true)`, which keeps your component mounted (camera streams, state, all of it) and remembers the windowed kind and bounds for `setFullScreen(false)`. A window that was *opened* full screen has nothing to go back to; close it instead.
+A `fullscreen` window is the Macintosh "special presentation mode": your content covers the whole 512×342 screen and the menubar tucks above it. Two ways in — open a window as `kind: "fullscreen"`, or switch an existing window with `window.setFullScreen(true)`, which keeps your component mounted (camera streams, state, all of it) and remembers the windowed kind and bounds for `setFullScreen(false)`. A window that was *opened* full screen has nothing to go back to; close it instead. A `utility` window opened by the same app stays on top of that picture, and the menubar stays tucked while you use the palette.
 
-The user must be able to leave (Human Interface Guidelines). Your menus stay live while the menubar is hidden, so a ⌘ shortcut still works; a visible "Menu Bar" button on screen is the other half. Photo Booth does both:
+The shell brings the menubar back: passing the pointer over the top edge of the screen slides it down over your picture. On the web, that includes the page margin above the canvas. A press on the edge does the same, and the pass is not delivered to your app. It slides away again when the pointer leaves, unless a menu is open. Your menus stay live while the bar is hidden, so a ⌘ shortcut still runs without revealing it. Offer "Exit Full Screen" on a menu if the window has a windowed form to return to — you do not need a button on the picture itself.
 
 ```tsx
 const { window: win } = useApp();
@@ -468,8 +500,6 @@ createEffect(
     ]}]);
   },
 );
-// …and in the JSX:
-<Show when={isFullScreen()}><Button label="Menu Bar" onClick={() => win.setFullScreen(false)} /></Show>
 ```
 
 ## The Manifest: mockintosh.json

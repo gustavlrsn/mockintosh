@@ -21,6 +21,10 @@ interface USBEndpoint {
 
 interface USBAlternateInterface {
   readonly alternateSetting: number;
+  readonly interfaceClass: number;
+  readonly interfaceSubclass: number;
+  readonly interfaceProtocol: number;
+  readonly interfaceName?: string;
   readonly endpoints: readonly USBEndpoint[];
 }
 
@@ -41,6 +45,19 @@ interface USBOutTransferResult {
   readonly status: "ok" | "stall" | "babble";
 }
 
+interface USBInTransferResult {
+  readonly data?: DataView;
+  readonly status: "ok" | "stall" | "babble";
+}
+
+interface USBControlTransferParameters {
+  requestType: "standard" | "class" | "vendor";
+  recipient: "device" | "interface" | "endpoint" | "other";
+  request: number;
+  value: number;
+  index: number;
+}
+
 interface USBDevice {
   readonly opened: boolean;
   readonly configuration: USBConfiguration | null;
@@ -48,14 +65,28 @@ interface USBDevice {
   readonly vendorId: number;
   readonly productId: number;
   readonly productName?: string;
+  readonly manufacturerName?: string;
+  readonly serialNumber?: string;
   open(): Promise<void>;
+  /** Revoke this site's permission for the device (Chrome 101+). */
+  forget?(): Promise<void>;
   close(): Promise<void>;
   selectConfiguration(configurationValue: number): Promise<void>;
   claimInterface(interfaceNumber: number): Promise<void>;
+  selectAlternateInterface(interfaceNumber: number, alternateSetting: number): Promise<void>;
   transferOut(endpointNumber: number, data: ArrayBufferView | ArrayBuffer): Promise<USBOutTransferResult>;
+  transferIn(endpointNumber: number, length: number): Promise<USBInTransferResult>;
+  controlTransferIn(setup: USBControlTransferParameters, length: number): Promise<USBInTransferResult>;
+  clearHalt(direction: "in" | "out", endpointNumber: number): Promise<void>;
 }
 
-interface USB {
+interface USBConnectionEvent extends Event {
+  readonly device: USBDevice;
+}
+
+interface USB extends EventTarget {
+  addEventListener(type: "connect" | "disconnect", listener: (event: USBConnectionEvent) => void): void;
+  removeEventListener(type: "connect" | "disconnect", listener: (event: USBConnectionEvent) => void): void;
   getDevices(): Promise<USBDevice[]>;
   requestDevice(options: { filters: USBDeviceFilter[] }): Promise<USBDevice>;
 }

@@ -38,6 +38,14 @@ describe("parseDocument", () => {
     expect(doc.elements[1]).toMatchObject({ id: "e2", type: "text", text: "Hello", font: "menu", align: "center" });
     expect(doc.elements[2]?.type).toBe("oval");
     expect(doc.elements[2]?.id).not.toBe("e2");
+    expect(doc.width).toBe(288);
+    expect(doc.height).toBe(288);
+  });
+
+  it("keeps a saved page size", () => {
+    const doc = parseDocument({ version: 1, width: 512, height: 384, elements: [] });
+    expect(doc.width).toBe(512);
+    expect(doc.height).toBe(384);
   });
 
   it("keeps Geist Pixel and falls unknown faces back to body", () => {
@@ -57,7 +65,7 @@ describe("parseDocument", () => {
   });
 
   it("clones without sharing element objects", () => {
-    const doc: CanvasDocument = { version: 1, elements: [rect("a", 0, 0, 8, 8)] };
+    const doc: CanvasDocument = { version: 1, width: 80, height: 60, elements: [rect("a", 0, 0, 8, 8)] };
     const copy = cloneDocument(doc);
     (copy.elements[0] as ShapeElement).x = 99;
     expect(doc.elements[0]?.x).toBe(0);

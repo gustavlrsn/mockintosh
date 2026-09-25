@@ -1,12 +1,12 @@
 /**
  * The browser platform: a `<canvas>` for the screen, DOM events for input,
- * `requestAnimationFrame` for the clock, OPFS for the disk, and WebUSB for
- * the printer. This is the only OS-level module that may use DOM APIs.
+ * `requestAnimationFrame` for the clock, OPFS for the disk, and WebUSB /
+ * Web Bluetooth for printers. This is the only OS-level module that may use DOM APIs.
  */
 import type { BitMap } from "@mockintosh/quickdraw";
 import { InMemoryBackend } from "@mockintosh/fs";
 import { OPFSBackend, isOPFSAvailable } from "./OPFSBackend";
-import { WebUSBPrinterTransport, isWebUSBAvailable } from "./WebUSBPrinterTransport";
+import { createWebPrinterLinks } from "./printerLinks";
 import type { UIClipboard } from "@mockintosh/ui";
 import type {
   HostCapability,
@@ -106,7 +106,7 @@ export function createWebPlatform(options: WebPlatformOptions): Platform {
     crypto: createWebCrypto(),
     browser: createWebBrowserService(),
     clipboard,
-    printer: isWebUSBAvailable() ? new WebUSBPrinterTransport() : undefined,
+    printerLinks: createWebPrinterLinks(),
     download: createWebDownloadService(),
     fetch: globalThis.fetch.bind(globalThis),
     images: createWebImageService(),
@@ -159,6 +159,29 @@ function createDOMInput(
       pendingMove = null;
       emitPointer({ type: "move", ...toScreen(ev) });
     });
+  });
+
+  // The page around the canvas is not the screen. While the pointer is in
+  // that margin above the OS, report it (y < 0) so a pass over the top edge
+  // can bring the menubar down. A jump from that margin into the canvas
+  // still counts as crossing the edge.
+  let aboveScreen = false;
+  window.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const overX = e.clientX >= rect.left && e.clientX < rect.right;
+    const above = overX && e.clientY < rect.top;
+    if (above) {
+      aboveScreen = true;
+      emitPointer({ type: "move", ...toScreen(e) });
+      return;
+    }
+    if (aboveScreen && overX) {
+      aboveScreen = false;
+      const pos = toScreen(e);
+      emitPointer({ type: "move", x: pos.x, y: -1 });
+    } else {
+      aboveScreen = false;
+    }
   });
 
   canvas.addEventListener(

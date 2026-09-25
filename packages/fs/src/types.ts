@@ -24,6 +24,7 @@ export const ROOT_ID: NodeId = "__root__";
  *   applications   installed apps (`MIME.app` manifests)
  *   system         the System Folder
  *   preferences    per-app storage folders (`System Folder/Preferences/<appId>`)
+ *   pictures       the volume's Pictures folder (user pictures, not settings)
  */
 export type NodeRole =
   | "root"
@@ -32,7 +33,10 @@ export type NodeRole =
   | "trash"
   | "applications"
   | "system"
-  | "preferences";
+  | "preferences"
+  | "pictures"
+  | "extensions"
+  | "printer-drivers";
 
 export interface FSNodeBase {
   id: NodeId;
