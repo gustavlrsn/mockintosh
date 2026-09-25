@@ -79,8 +79,21 @@ export interface ProjectedSegment {
 export interface SurfaceScene {
   /** Farthest first. */
   quads: ProjectedQuad[];
-  /** Base frame, z axis and tick marks, drawn under the surface. */
+  /** The two front ground axes, the vertical axis and their ticks, drawn under the surface. */
   axes: ProjectedSegment[];
+  /**
+   * The grid lines that run more across the screen than into it: along `x`
+   * (quad edges a–b and d–c) or along `y` (b–c and a–d). Ridgeline mode draws
+   * only these.
+   */
+  ridges: RidgeAxis;
+}
+
+export type RidgeAxis = "x" | "y";
+
+/** Screen x moves by cos(yaw) per unit of world x and by sin(yaw) per unit of world y. */
+export function ridgeAxis(camera: OrbitCamera): RidgeAxis {
+  return Math.abs(Math.cos(camera.yaw)) >= Math.abs(Math.sin(camera.yaw)) ? "x" : "y";
 }
 
 export const PITCH_MIN = (5 * Math.PI) / 180;
@@ -192,6 +205,20 @@ function lightOf(a: Vec3, b: Vec3, c: Vec3, d: Vec3, camera: OrbitCamera): numbe
   return Math.max(0, (nx * lx + ny * ly + nz * lz) / ll);
 }
 
+/** Corners of the base square, in order around it. */
+const BASE_CORNERS: readonly (readonly [number, number])[] = [
+  [-1, -1],
+  [1, -1],
+  [1, 1],
+  [-1, 1],
+];
+
+/**
+ * IDL-style axes: the two ground axes run along the base edges that meet at
+ * the corner nearest the viewer, ticked outward, and the vertical axis stands
+ * on the left-most base corner with ticks pointing left. The back of the box
+ * is left open, so nothing is drawn behind the surface.
+ */
 function axisSegments(camera: OrbitCamera, viewport: Viewport): ProjectedSegment[] {
   const project = (x: number, y: number, z: number): Point2 => {
     const p = projectPoint({ x, y, z }, camera, viewport);
@@ -199,45 +226,34 @@ function axisSegments(camera: OrbitCamera, viewport: Viewport): ProjectedSegment
   };
   const base = -Z_HALF;
   const segments: ProjectedSegment[] = [];
-  const corners: [number, number][] = [
-    [-1, -1],
-    [1, -1],
-    [1, 1],
-    [-1, 1],
-  ];
-  for (let k = 0; k < 4; k++) {
-    const [x0, y0] = corners[k];
-    const [x1, y1] = corners[(k + 1) % 4];
-    segments.push({ a: project(x0, y0, base), b: project(x1, y1, base) });
-  }
+  const projected = BASE_CORNERS.map(([x, y]) => projectPoint({ x, y, z: base }, camera, viewport));
+  const nearest = (score: (p: ProjectedPoint) => number) =>
+    projected.reduce((best, p, k) => (score(p) < score(projected[best]!) ? k : best), 0);
+
+  const [fx, fy] = BASE_CORNERS[nearest((p) => p.depth)]!;
+  // Along x on the front y edge, ticks step further out in y; and vice versa.
+  segments.push({ a: project(-1, fy, base), b: project(1, fy, base) });
+  segments.push({ a: project(fx, -1, base), b: project(fx, 1, base) });
   for (let k = 0; k <= TICKS; k++) {
     const s = -1 + (2 * k) / TICKS;
-    segments.push({ a: project(s, -1, base), b: project(s, -1 - TICK_LEN, base) });
-    segments.push({ a: project(-1, s, base), b: project(-1 - TICK_LEN, s, base) });
+    segments.push({ a: project(s, fy, base), b: project(s, fy * (1 + TICK_LEN), base) });
+    segments.push({ a: project(fx, s, base), b: project(fx * (1 + TICK_LEN), s, base) });
   }
-  // The z axis rises from whichever base corner sits farthest back, like a
-  // wall-mounted ruler, so the surface never hides it completely.
-  let back = corners[0];
-  let backDepth = -Infinity;
-  for (const corner of corners) {
-    const depth = projectPoint({ x: corner[0], y: corner[1], z: base }, camera, viewport).depth;
-    if (depth > backDepth) {
-      backDepth = depth;
-      back = corner;
-    }
-  }
-  const [bx, by] = back;
-  segments.push({ a: project(bx, by, base), b: project(bx, by, Z_HALF) });
+
+  const [lx, ly] = BASE_CORNERS[nearest((p) => p.x)]!;
+  const tickPx = Math.max(2, Math.round(TICK_LEN * projectionScale(camera, viewport)));
+  segments.push({ a: project(lx, ly, base), b: project(lx, ly, Z_HALF) });
   for (let k = 0; k <= TICKS; k++) {
-    const z = -Z_HALF + (2 * Z_HALF * k) / TICKS;
-    segments.push({ a: project(bx, by, z), b: project(bx * (1 + TICK_LEN), by, z) });
+    const at = project(lx, ly, -Z_HALF + (2 * Z_HALF * k) / TICKS);
+    segments.push({ a: at, b: { x: at.x - tickPx, y: at.y } });
   }
   return segments;
 }
 
 export function buildScene(grid: HeightGrid, range: ZRange | null, camera: OrbitCamera, viewport: Viewport): SurfaceScene {
   const axes = axisSegments(camera, viewport);
-  if (!range) return { quads: [], axes };
+  const ridges = ridgeAxis(camera);
+  if (!range) return { quads: [], axes, ridges };
   const n = grid.cells + 1;
   const world: (Vec3 | null)[] = new Array(n * n);
   const screen: (ProjectedPoint | null)[] = new Array(n * n);
@@ -275,5 +291,5 @@ export function buildScene(grid: HeightGrid, range: ZRange | null, camera: Orbit
     }
   }
   quads.sort((p, q) => q.depth - p.depth);
-  return { quads, axes };
+  return { quads, axes, ridges };
 }

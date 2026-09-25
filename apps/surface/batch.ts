@@ -11,12 +11,14 @@ const EPSILON = 1e-9;
 
 /**
  * Read a constant such as `0.5`, `pi/4` or `2pi`. `null` when the text isn't
- * one — including expressions in `x`, `y` or `t`, which have no single value.
+ * one — including expressions in `x`, `y`, `t`, parameters or noise, which
+ * have no single value.
  */
 export function parseConstant(text: string): number | null {
   if (!text.trim()) return null;
   try {
-    const { fn } = compileSurface(text);
+    const { fn, params, usesNoise } = compileSurface(text);
+    if (params.length > 0 || usesNoise) return null;
     const value = fn(0, 0, 0);
     if (!Number.isFinite(value) || fn(1.7, -2.3, 3.1) !== value) return null;
     return value;

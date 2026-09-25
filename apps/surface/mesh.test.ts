@@ -94,4 +94,25 @@ describe("buildScene", () => {
     expect(scene.quads.length).toBe(0);
     expect(scene.axes.length).toBeGreaterThan(4);
   });
+
+  it("draws the ground axes on the front edges and the vertical axis on the left-most corner", () => {
+    for (const yaw of [-2.5, -0.6, 0.4, 1.9]) {
+      const camera: OrbitCamera = { ...DEFAULT_CAMERA, yaw };
+      const grid = sampleSurface(() => NaN, DOMAIN, 2, 0);
+      const { axes } = buildScene(grid, null, camera, VIEW);
+      const corners = [
+        [-1, -1],
+        [1, -1],
+        [1, 1],
+        [-1, 1],
+      ].map(([x, y]) => projectPoint({ x: x!, y: y!, z: -0.6 }, camera, VIEW));
+      const touches = (p: { x: number; y: number }) =>
+        axes.some((s) => [s.a, s.b].some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 1e-6));
+      const back = corners.reduce((a, b) => (b.depth > a.depth ? b : a));
+      const left = corners.reduce((a, b) => (b.x < a.x ? b : a));
+      expect(touches(back), `yaw ${yaw}: back corner stays open`).toBe(false);
+      const vertical = axes.find((s) => Math.abs(s.a.x - left.x) < 1e-6 && Math.abs(s.b.x - left.x) < 1e-6 && s.b.y < s.a.y - 10);
+      expect(vertical, `yaw ${yaw}: vertical axis on the left corner`).toBeDefined();
+    }
+  });
 });

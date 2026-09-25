@@ -5,12 +5,18 @@
  */
 import type { Point2, SurfaceScene } from "./mesh";
 
-export type RenderMode = "wireframe" | "hidden" | "shaded";
+/**
+ * `ridgeline` is hidden-line with only the lines running across the screen,
+ * the stacked-profiles look of *Unknown Pleasures*.
+ */
+export type RenderMode = "wireframe" | "hidden" | "shaded" | "ridgeline";
 
 export interface RenderOptions {
   mode: RenderMode;
   /** White ink on black paper, like a plotter terminal. */
   inverted: boolean;
+  /** Draw `scene.axes` (default true). */
+  axes?: boolean;
 }
 
 export interface PixelFrame {
@@ -104,22 +110,38 @@ export function renderScene(scene: SurfaceScene, frame: PixelFrame, options: Ren
   const paper: Ink = options.inverted ? 1 : 0;
   const ink: Ink = options.inverted ? 0 : 1;
   frame.pixels.fill(paper);
-  for (const segment of scene.axes) drawLine(frame, segment.a, segment.b, ink);
+  if (options.axes ?? true) {
+    for (const segment of scene.axes) drawLine(frame, segment.a, segment.b, ink);
+  }
   const paperAt = () => paper;
   for (const quad of scene.quads) {
-    if (options.mode === "hidden") {
-      fillPolygon(frame, quad.corners, paperAt);
-    } else if (options.mode === "shaded") {
-      // Keep some tone in the brightest faces so the mesh still reads as a surface.
-      const light = 0.12 + quad.light * 0.8;
-      fillPolygon(frame, quad.corners, (x, y) => ditherInk(light, x, y, paper));
-    }
-    if (options.mode !== "shaded") {
-      const [a, b, c, d] = quad.corners;
-      drawLine(frame, a, b, ink);
-      drawLine(frame, b, c, ink);
-      drawLine(frame, c, d, ink);
-      drawLine(frame, d, a, ink);
+    const [a, b, c, d] = quad.corners;
+    switch (options.mode) {
+      case "shaded": {
+        // Keep some tone in the brightest faces so the mesh still reads as a surface.
+        const light = 0.12 + quad.light * 0.8;
+        fillPolygon(frame, quad.corners, (x, y) => ditherInk(light, x, y, paper));
+        break;
+      }
+      case "ridgeline":
+        fillPolygon(frame, quad.corners, paperAt);
+        if (scene.ridges === "x") {
+          drawLine(frame, a, b, ink);
+          drawLine(frame, d, c, ink);
+        } else {
+          drawLine(frame, b, c, ink);
+          drawLine(frame, a, d, ink);
+        }
+        break;
+      case "hidden":
+        fillPolygon(frame, quad.corners, paperAt);
+      // falls through
+      case "wireframe":
+        drawLine(frame, a, b, ink);
+        drawLine(frame, b, c, ink);
+        drawLine(frame, c, d, ink);
+        drawLine(frame, d, a, ink);
+        break;
     }
   }
 }

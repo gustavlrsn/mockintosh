@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CAMERA, buildScene, sampleSurface } from "./mesh";
+import { DEFAULT_CAMERA, buildScene, ridgeAxis, sampleSurface } from "./mesh";
 import { createFrame, ditherInk, drawLine, fillPolygon, renderScene } from "./render";
 
 function ink(frame: { pixels: Uint8Array }): number {
@@ -78,5 +78,32 @@ describe("renderScene", () => {
     renderScene(scene, normal, { mode: "hidden", inverted: false });
     renderScene(scene, inverted, { mode: "hidden", inverted: true });
     expect(ink(normal) + ink(inverted)).toBe(view.width * view.height);
+  });
+
+  it("leaves the axes out when asked", () => {
+    const empty = buildScene(sampleSurface(() => NaN, grid.domain, 1, 0), null, DEFAULT_CAMERA, view);
+    const shown = createFrame(view.width, view.height);
+    const hidden = createFrame(view.width, view.height);
+    renderScene(empty, shown, { mode: "hidden", inverted: false });
+    renderScene(empty, hidden, { mode: "hidden", inverted: false, axes: false });
+    expect(ink(shown)).toBeGreaterThan(0);
+    expect(ink(hidden)).toBe(0);
+  });
+
+  it("draws ridgelines as a subset of the hidden-line strokes", () => {
+    const hidden = createFrame(view.width, view.height);
+    const ridges = createFrame(view.width, view.height);
+    renderScene(scene, hidden, { mode: "hidden", inverted: false, axes: false });
+    renderScene(scene, ridges, { mode: "ridgeline", inverted: false, axes: false });
+    expect(ink(ridges)).toBeGreaterThan(0);
+    expect(ink(ridges)).toBeLessThan(ink(hidden));
+  });
+});
+
+describe("ridgeAxis", () => {
+  it("picks the grid direction that runs across the screen", () => {
+    expect(ridgeAxis({ ...DEFAULT_CAMERA, yaw: 0 })).toBe("x");
+    expect(ridgeAxis({ ...DEFAULT_CAMERA, yaw: Math.PI / 2 })).toBe("y");
+    expect(ridgeAxis({ ...DEFAULT_CAMERA, yaw: Math.PI })).toBe("x");
   });
 });

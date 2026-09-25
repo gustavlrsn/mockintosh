@@ -1,7 +1,8 @@
-import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "@mockintosh/ui";
 import {
   Button,
+  Slider,
   TextInput,
   defineApp,
   drawPixels,
@@ -11,10 +12,18 @@ import {
   uniqueChildName,
   useApp,
   writeSpriteFile,
+  type MenubarItemDef,
   type PrintService,
 } from "@mockintosh/sdk";
 import { PRINT_SERIES_SIZE, PrintSeries, type PrintSeriesProps } from "./surface/PrintSeries";
-import { ExprError, compileSurface, type CompiledSurface } from "./surface/expr";
+import {
+  DEFAULT_SEED,
+  ExprError,
+  PARAMETER_DEFAULT,
+  compileSurface,
+  type CompiledSurface,
+  type SurfaceFn,
+} from "./surface/expr";
 import {
   DEFAULT_CAMERA,
   DEFAULT_DOMAIN,
@@ -32,41 +41,72 @@ import { sprites } from "./surface/icons";
 const BAR_H = 22;
 const DRAG_RADIANS_PER_PX = 0.012;
 const ZOOM_STEP = 1.25;
+/** A 100-unit mouse-wheel notch zooms about as far as one ⌘= step. */
+const WHEEL_ZOOM_PER_UNIT = Math.log(ZOOM_STEP) / 100;
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 4;
 const RESOLUTIONS = [12, 24, 32, 48] as const;
 
-/** How an example wants to be looked at; omitted fields keep the current view. */
-interface SurfaceLook {
-  mode?: RenderMode;
-  inverted?: boolean;
-  cells?: (typeof RESOLUTIONS)[number];
+const PARAM_ROW_H = 18;
+const PARAM_PADDING = 2;
+const PARAM_MIN = -5;
+const PARAM_MAX = 5;
+const PARAM_STEP = 0.05;
+/** Room for the value text, e.g. `-5.00`. */
+const PARAM_VALUE_W = 34;
+
+/** An equation to try. Examples change what is plotted, never how it is viewed. */
+interface SurfaceExample {
+  label: string;
+  source: string;
   /** Pin the z axis instead of fitting it to the surface. */
   zRange?: ZRange;
 }
 
-interface SurfaceExample {
+/** A submenu of the Examples menu. */
+interface ExampleGroup {
   label: string;
-  source: string;
-  look?: SurfaceLook;
+  examples: SurfaceExample[];
 }
 
-const EXAMPLES: SurfaceExample[] = [
-  {
-    label: "Drumhead",
-    source: "cos(2t) cos(pi x / 4) cos(pi y / 4)",
-    look: { mode: "hidden", inverted: true, cells: 32, zRange: { min: -1.6, max: 1.6 } },
-  },
-  { label: "Hill", source: "exp(-(x^2 + y^2))" },
-  { label: "Rippling Hill", source: "exp(-(x^2 + y^2)) + 0.08 sin(5x + 2t)" },
-  { label: "Pond", source: "sin(4r - 3t) / (1 + 2r)" },
-  { label: "Saddle", source: "x^2 - y^2" },
-  { label: "Egg Crate", source: "sin(2x + t) cos(2y)" },
-  { label: "Sombrero", source: "sin(3r) / (3r)" },
-  { label: "Twin Peaks", source: "exp(-((x-0.8)^2 + y^2)*2) + exp(-((x+0.8)^2 + y^2)*2) cos(t)" },
+const EXAMPLE_GROUPS: ExampleGroup[] = [
+  { label: "Classic", examples: [
+    { label: "Drumhead", source: "cos(2t) cos(pi x / 4) cos(pi y / 4)", zRange: { min: -1.6, max: 1.6 } },
+    { label: "Hill", source: "exp(-(x^2 + y^2))" },
+    { label: "Rippling Hill", source: "exp(-(x^2 + y^2)) + 0.08 sin(5x + 2t)" },
+    { label: "Pond", source: "sin(4r - 3t) / (1 + 2r)" },
+    { label: "Saddle", source: "x^2 - y^2" },
+    { label: "Egg Crate", source: "sin(2x + t) cos(2y)" },
+    { label: "Sombrero", source: "sin(3r) / (3r)" },
+    { label: "Twin Peaks", source: "exp(-((x-0.8)^2 + y^2)*2) + exp(-((x+0.8)^2 + y^2)*2) cos(t)" },
+  ] },
+  { label: "Terrain", examples: [
+    { label: "Mountains", source: "fbm(0.5x, 0.5y)" },
+    { label: "Ridges", source: "ridged(0.5x, 0.5y)" },
+    { label: "Pulsar", source: "exp(-3x^2) (0.4 + fbm(2x, 5y))" },
+    { label: "Island", source: "max(fbm(x, y) / 2 + exp(-r^2 / 2) - 0.5, 0)" },
+    { label: "Dunes", source: "sin(3x + 2 noise(x, y)) / 4 + fbm(x / 2, y / 2) / 2" },
+    { label: "Alien Terrain", source: "fbm(x + fbm(x, y), y + fbm(y + 5, x))" },
+    { label: "Rolling Fog", source: "fbm(x, y, 0.3t)" },
+    { label: "Clouds", source: "turb(x, y, 0.2t)" },
+  ] },
+  { label: "With Sliders", examples: [
+    { label: "Tunable Ripples", source: "sin(4k r - 2t) / (1 + a r)" },
+    { label: "Noisy Hill", source: "exp(-r^2) + a fbm(2k x, 2k y) / 4" },
+    { label: "Lissajous", source: "sin(a x + t) cos(b y)" },
+  ] },
 ];
 
-const DEFAULT_EXAMPLE = EXAMPLES.find((example) => example.label === "Rippling Hill")!;
+const DEFAULT_EXAMPLE = EXAMPLE_GROUPS.flatMap((group) => group.examples)
+  .find((example) => example.label === "Lissajous")!;
+
+function randomSeed(): number {
+  return 1 + Math.floor(Math.random() * 0x7fffffff);
+}
+
+function formatParam(value: number): string {
+  return value.toFixed(2);
+}
 
 const PRINT_MARGIN = 8;
 const PRINT_FONT = "mono";
@@ -124,34 +164,58 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
   const [error, setError] = createSignal<string | null>(null);
   const [camera, setCamera] = createSignal<OrbitCamera>(DEFAULT_CAMERA);
   const [mode, setMode] = createSignal<RenderMode>("hidden");
-  const [inverted, setInverted] = createSignal(false);
+  const [inverted, setInverted] = createSignal(true);
+  const [showAxes, setShowAxes] = createSignal(true);
   const [cells, setCells] = createSignal<number>(24);
   const [time, setTime] = createSignal(0);
   const [playing, setPlaying] = createSignal(false);
   /** Progress text while a print job runs; `null` when idle. */
   const [printing, setPrinting] = createSignal<string | null>(null);
+  // Kept by name across edits, so retyping the equation doesn't reset the sliders.
+  const [paramValues, setParamValues] = createSignal<Readonly<Record<string, number>>>({});
+  const [seed, setSeed] = createSignal(DEFAULT_SEED);
 
-  // Two bars plus their 1px dividers.
-  const view = () => ({ width: win.width(), height: Math.max(1, win.height() - BAR_H * 2 - 2) });
+  const params = () => compiled()?.params ?? [];
+  const paramLabelWidth = () => Math.max(8, ...params().map((name) => measureText(name, "body")));
+  const paramValue = (name: string) => paramValues()[name] ?? PARAMETER_DEFAULT;
+  const surfaceFn = createMemo<SurfaceFn | null>(() => {
+    const surface = compiled();
+    return surface ? surface.bind({ params: paramValues(), seed: seed() }) : null;
+  });
+
+  const isFullScreen = () => win.kind() === "fullscreen";
+  const paramsHeight = () => (params().length === 0 ? 0 : params().length * PARAM_ROW_H + PARAM_PADDING * 2 + 1);
+  // Full screen is just the plot; a window adds two bars plus their 1px
+  // dividers, and a slider row per parameter.
+  const view = () => ({
+    width: win.width(),
+    height: isFullScreen() ? win.height() : Math.max(1, win.height() - BAR_H * 2 - 2 - paramsHeight()),
+  });
 
   // Sampling is independent of the camera, so orbiting only re-projects.
   let grid: HeightGrid | null = null;
-  let gridKey: { surface: CompiledSurface; cells: number; t: number } | null = null;
+  let gridKey: { fn: SurfaceFn; cells: number; t: number } | null = null;
   // Held across frames so an animated surface doesn't rescale as it moves;
-  // reset whenever the equation or resolution changes.
+  // reset when the equation or resolution changes, but not for a slider or a
+  // new seed, so dragging an amplitude visibly changes the height.
   let range: ZRange | null = null;
+  let rangeKey: { surface: CompiledSurface; cells: number } | null = null;
   let frame: PixelFrame | null = null;
   let drag: DragStart | null = null;
 
   function currentGrid(): HeightGrid | null {
     const surface = compiled();
-    if (!surface) return null;
+    const fn = surfaceFn();
+    if (!surface || !fn) return null;
     const t = time();
     const n = cells();
-    if (!gridKey || gridKey.surface !== surface || gridKey.cells !== n) range = null;
-    if (!grid || !gridKey || gridKey.surface !== surface || gridKey.cells !== n || gridKey.t !== t) {
-      grid = sampleSurface(surface.fn, DEFAULT_DOMAIN, n, t);
-      gridKey = { surface, cells: n, t };
+    if (!rangeKey || rangeKey.surface !== surface || rangeKey.cells !== n) {
+      range = null;
+      rangeKey = { surface, cells: n };
+    }
+    if (!grid || !gridKey || gridKey.fn !== fn || gridKey.cells !== n || gridKey.t !== t) {
+      grid = sampleSurface(fn, DEFAULT_DOMAIN, n, t);
+      gridKey = { fn, cells: n, t };
       range = widenRange(range, grid.range);
     }
     return grid;
@@ -163,7 +227,7 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
     const scene = heights
       ? buildScene(heights, zRange, camera(), size)
       : buildScene(sampleSurface(() => NaN, DEFAULT_DOMAIN, 1, 0), null, camera(), size);
-    renderScene(scene, target, { mode: mode(), inverted: inverted() });
+    renderScene(scene, target, { mode: mode(), inverted: inverted(), axes: showAxes() });
     return target;
   }
 
@@ -183,11 +247,12 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
 
   let paints = 0;
   const revision = createMemo(() => {
-    compiled();
+    surfaceFn();
     fixedRange();
     camera();
     mode();
     inverted();
+    showAxes();
     cells();
     time();
     win.width();
@@ -208,11 +273,8 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
   function loadExample(example: SurfaceExample): void {
     setDraft(example.source);
     setTime(0);
-    const look = example.look;
-    if (look?.mode) setMode(look.mode);
-    if (look?.inverted !== undefined) setInverted(look.inverted);
-    if (look?.cells) setCells(look.cells);
-    setFixedRange(look?.zRange ?? null);
+    setParamValues({});
+    setFixedRange(example.zRange ?? null);
     submit(example.source);
   }
 
@@ -286,8 +348,14 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
     const width = Math.floor(print.paperWidth / PRINT_SCALE);
     const lineHeight = fontLineHeight(PRINT_FONT);
     const equation = plotted().replace(/^\s*z\s*=\s*/i, "");
+    const settings = [
+      ...params().map((name) => `${name} = ${formatParam(paramValue(name))}`),
+      ...(compiled()?.usesNoise ? [`seed ${seed()}`] : []),
+    ];
+    const wrap = (text: string) => wrapText(text, width - PRINT_MARGIN * 2, (line) => measureText(line, PRINT_FONT));
     const rows = [
-      ...wrapText(`z = ${equation}`, width - PRINT_MARGIN * 2, (text) => measureText(text, PRINT_FONT)),
+      ...wrap(`z = ${equation}`),
+      ...(settings.length ? wrap(settings.join(", ")) : []),
       ...(t === null ? [] : [`t = ${t.toFixed(2)}`]),
     ];
     const plotTop = PRINT_MARGIN * 2 + rows.length * lineHeight;
@@ -325,14 +393,14 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
    */
   async function printSeries(times: number[]): Promise<void> {
     const print = app.print;
-    const surface = compiled();
-    if (!print || !surface || printing() || times.length === 0) return;
+    const fn = surfaceFn();
+    if (!print || !fn || printing() || times.length === 0) return;
     if (!print.connected()) {
       await print.connect();
       if (!print.connected()) return;
     }
     stop();
-    const grids = times.map((t) => sampleSurface(surface.fn, DEFAULT_DOMAIN, cells(), t));
+    const grids = times.map((t) => sampleSurface(fn, DEFAULT_DOMAIN, cells(), t));
     const zRange = fixedRange() ?? grids.reduce<ZRange | null>((r, grid) => widenRange(r, grid.range), range);
     try {
       for (const [k, t] of times.entries()) {
@@ -370,10 +438,13 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
     () => ({
       mode: mode(),
       inverted: inverted(),
+      axes: showAxes(),
+      full: isFullScreen(),
       cells: cells(),
       playing: playing(),
       printing: printing() !== null,
       animated: compiled()?.usesTime ?? false,
+      noisy: compiled()?.usesNoise ?? false,
     }),
     (state) => {
       app.setMenus([
@@ -406,6 +477,7 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
                 { label: "Wireframe", value: "wireframe" },
                 { label: "Hidden Line", value: "hidden" },
                 { label: "Shaded", value: "shaded" },
+                { label: "Ridgeline", value: "ridgeline" },
               ],
             },
             { type: "separator" },
@@ -414,9 +486,16 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
               value: state.inverted ? "inverted" : "normal",
               onValueChange: (value) => setInverted(value === "inverted"),
               items: [
-                { label: "Black on White", value: "normal" },
                 { label: "White on Black", value: "inverted" },
+                { label: "Black on White", value: "normal" },
               ],
+            },
+            { type: "separator" },
+            { label: state.axes ? "Hide Axes" : "Show Axes", onClick: () => setShowAxes((on) => !on) },
+            {
+              label: state.full ? "Exit Full Screen" : "Full Screen",
+              shortcut: "F",
+              onClick: () => win.setFullScreen(!isFullScreen()),
             },
             { type: "separator" },
             { label: "Zoom In", shortcut: "=", onClick: () => zoomBy(ZOOM_STEP) },
@@ -434,6 +513,7 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
               onClick: () => (state.playing ? stop() : play()),
             },
             { label: "Rewind", disabled: !state.animated, onClick: () => setTime(0) },
+            { label: "New Seed", disabled: !state.noisy, onClick: () => setSeed(randomSeed()) },
             { type: "separator" },
             {
               type: "radiogroup",
@@ -445,7 +525,11 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
         },
         {
           label: "Examples",
-          items: EXAMPLES.map((example) => ({ label: example.label, onClick: () => loadExample(example) })),
+          items: EXAMPLE_GROUPS.map((group): MenubarItemDef => ({
+            type: "submenu",
+            label: group.label,
+            items: group.examples.map((example) => ({ label: example.label, onClick: () => loadExample(example) })),
+          })),
         },
       ]);
     },
@@ -453,20 +537,22 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
 
   return (
     <box width={win.width()} height={win.height()} flexDirection="column" background={0}>
-      <box height={BAR_H} flexDirection="row" alignItems="center" paddingLeft={4} paddingRight={4} gap={4}>
-        <text font="menu">z =</text>
-        <TextInput
-          name="equation"
-          value={draft()}
-          onChange={setDraft}
-          onSubmit={(source) => {
-            setFixedRange(null);
-            submit(source);
-          }}
-          width={Math.max(60, win.width() - 32)}
-        />
-      </box>
-      <box height={1} background={1} />
+      <Show when={!isFullScreen()}>
+        <box height={BAR_H} flexDirection="row" alignItems="center" paddingLeft={4} paddingRight={4} gap={4}>
+          <text font="menu">z =</text>
+          <TextInput
+            name="equation"
+            value={draft()}
+            onChange={setDraft}
+            onSubmit={(source) => {
+              setFixedRange(null);
+              submit(source);
+            }}
+            width={Math.max(60, win.width() - 32)}
+          />
+        </box>
+        <box height={1} background={1} />
+      </Show>
       <raster
         width={view().width}
         height={view().height}
@@ -487,23 +573,49 @@ function Surface(_props: Record<string, unknown>): JSX.Element {
         onDragEnd={() => {
           drag = null;
         }}
+        onScroll={(deltaY) => zoomBy(Math.exp(-deltaY * WHEEL_ZOOM_PER_UNIT))}
         onPaint={(surface) => {
           const picture = paint();
           surface.blitPixels(picture.pixels, picture.width, picture.height);
         }}
       />
-      <box height={1} background={1} />
-      <box height={BAR_H} flexDirection="row" alignItems="center" paddingLeft={4} paddingRight={4} gap={6}>
-        <Button
-          name="play"
-          label={playing() ? "Pause" : "Play"}
-          disabled={!(compiled()?.usesTime ?? false)}
-          onClick={() => (playing() ? stop() : play())}
-        />
-        <text font="menu">
-          {printing() ?? error() ?? (compiled()?.usesTime ? `t = ${time().toFixed(1)}` : "Drag to orbit")}
-        </text>
-      </box>
+      <Show when={!isFullScreen() && params().length > 0}>
+        <box height={1} background={1} />
+        <box flexDirection="column" paddingTop={PARAM_PADDING} paddingBottom={PARAM_PADDING} paddingLeft={4}>
+          <For each={params()}>
+            {(name) => (
+              <box height={PARAM_ROW_H} flexDirection="row" alignItems="center">
+                <Slider
+                  name={`param-${name}`}
+                  label={name}
+                  labelWidth={paramLabelWidth()}
+                  value={paramValue(name)}
+                  min={PARAM_MIN}
+                  max={PARAM_MAX}
+                  step={PARAM_STEP}
+                  width={Math.max(40, win.width() - paramLabelWidth() - PARAM_VALUE_W - 20)}
+                  format={formatParam}
+                  onChange={(value) => setParamValues((values) => ({ ...values, [name]: value }))}
+                />
+              </box>
+            )}
+          </For>
+        </box>
+      </Show>
+      <Show when={!isFullScreen()}>
+        <box height={1} background={1} />
+        <box height={BAR_H} flexDirection="row" alignItems="center" paddingLeft={4} paddingRight={4} gap={6}>
+          <Button
+            name="play"
+            label={playing() ? "Pause" : "Play"}
+            disabled={!(compiled()?.usesTime ?? false)}
+            onClick={() => (playing() ? stop() : play())}
+          />
+          <text font="menu">
+            {printing() ?? error() ?? (compiled()?.usesTime ? `t = ${time().toFixed(1)}` : "Drag to orbit")}
+          </text>
+        </box>
+      </Show>
     </box>
   );
 }

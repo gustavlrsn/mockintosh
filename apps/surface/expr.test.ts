@@ -58,5 +58,40 @@ describe("compileSurface", () => {
     expect(at("(x + 1")).toBe(6);
     expect(() => compileSurface("z = ")).toThrow(ExprError);
     expect(() => compileSurface("atan2(x)")).toThrow(/2 arguments/);
+    expect(() => compileSurface("fbm(x)")).toThrow(/2 to 4 arguments/);
+    expect(() => compileSurface("noise(x, y, t, 3)")).toThrow(/2 to 3 arguments/);
+  });
+
+  it("turns unknown names into parameters, in order of first use", () => {
+    const surface = compileSurface("a sin(k r) + b + a");
+    expect(surface.params).toEqual(["a", "k", "b"]);
+    expect(surface.fn(0, 0, 0)).toBe(2);
+    const bound = surface.bind({ params: { a: 2, k: 1, b: 10 } });
+    expect(bound(Math.PI / 2, 0, 0)).toBeCloseTo(2 * 1 + 10 + 2);
+  });
+
+  it("caps the number of parameters", () => {
+    expect(compileSurface("a + b + c + d").params).toHaveLength(4);
+    expect(() => compileSurface("a + b + c + d + g")).toThrow(/At most 4 parameters/);
+  });
+
+  it("keeps bound functions independent", () => {
+    const surface = compileSurface("a x");
+    const two = surface.bind({ params: { a: 2 } });
+    const three = surface.bind({ params: { a: 3 } });
+    expect(two(1, 0, 0)).toBe(2);
+    expect(three(1, 0, 0)).toBe(3);
+  });
+
+  it("reads noise from the bound seed", () => {
+    const surface = compileSurface("fbm(x, y)");
+    expect(surface.usesNoise).toBe(true);
+    expect(surface.params).toEqual([]);
+    const a = surface.bind({ seed: 1 });
+    const again = surface.bind({ seed: 1 });
+    const b = surface.bind({ seed: 2 });
+    expect(a(0.3, -1.2, 0)).toBe(again(0.3, -1.2, 0));
+    expect(a(0.3, -1.2, 0)).not.toBe(b(0.3, -1.2, 0));
+    expect(compileSurface("sin(x)").usesNoise).toBe(false);
   });
 });
