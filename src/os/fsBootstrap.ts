@@ -19,6 +19,7 @@ const DESKTOP_SHORTCUTS: readonly DesktopShortcut[] = [
   { name: "Trace",          appId: "trace",       icon: "trace/icon" },
   { name: "1984.mp4",       appId: "video",       icon: "icon/MacFlim" },
   { name: "Safari",         appId: "safari",      icon: "icon/safari" },
+  { name: "GitHub",         appId: "github",      icon: "icon/safari" },
   { name: "App Store",      appId: "appstore",    icon: "icon/appstore-smr-32x32" },
   { name: "ChatGippity",    appId: "chatgippity", icon: "icon/computer" },
   { name: "Spotify Player", appId: "spotify",     icon: "icon/spotify" },
@@ -49,6 +50,7 @@ export async function bootstrapFileSystem(fs: FileSystem): Promise<void> {
   } else {
     await ensureDesktopShortcut(fs, desktop, "dither");
     await ensureDesktopShortcut(fs, desktop, "trace");
+    await ensureDesktopShortcut(fs, desktop, "github");
   }
   await fs.flush();
 }
